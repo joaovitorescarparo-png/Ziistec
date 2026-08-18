@@ -1,25 +1,38 @@
-name: Verify ZiisTec upload
+name: Verify ZiisTec
 
 on:
   push:
-    branches:
-      - agent/verify-ziistec-upload
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: npm
-      - name: Reassemble and verify integrity
+          node-version: '24.x'
+
+      - name: Reassemble and verify original integrity
         run: |
           node scripts/reassemble.mjs
           echo "6810efaac27ec494ca8436ade6d10a5f37e9a21ede25162b581c48f9d06faf31  src/legacy/ZiisTecApp.jsx" | sha256sum -c -
           echo "80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd  supabase/0001_ziistec_fundacao_FINAL.sql" | sha256sum -c -
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-      - name: Build
+
+      - name: Install tested dependencies
+        run: npm install --ignore-scripts --no-fund
+
+      - name: Audit high and critical vulnerabilities
+        run: npm audit --audit-level=high
+
+      - name: Production build
         run: npm run build
