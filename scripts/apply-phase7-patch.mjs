@@ -1,0 +1,17 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+const file='src/legacy/ZiisTecApp.jsx';
+let s=readFileSync(file,'utf8');
+const oldImport='  salvarOSDB, atualizarOSDB, finalizarOSDB, baixarLancamentoDB, atualizarStatusOrcamentoDB,';
+const newImport='  salvarOSDB, atualizarOSDB, finalizarOSDB, baixarLancamentoDB, salvarLancamentoDB, atualizarStatusOrcamentoDB,';
+if(!s.includes(oldImport)) throw new Error('Phase 7 data API import anchor missing');
+s=s.replace(oldImport,newImport);
+const oldSig='function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras }) {';
+const newSig='function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId }) {';
+if(!s.includes(oldSig)) throw new Error('Phase 7 Financeiro signature anchor missing');
+s=s.replace(oldSig,newSig);
+const oldSave=`            <Btn disabled={!form.descricao || !form.valor} onClick={() => {\n              setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? HOJE : null }, ...l]); setForm(null); aviso("Lançamento registrado");\n            }}>Salvar lançamento</Btn>`;
+const newSave=`            <Btn disabled={!form.descricao || !form.valor} onClick={async () => {\n              if (real) {\n                try { const salvo = await salvarLancamentoDB({ ...form, pagoEm: form.pago ? HOJE : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }\n                catch (e) { aviso(mensagemErro(e)); }\n                return;\n              }\n              setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? HOJE : null }, ...l]); setForm(null); aviso("Lançamento registrado");\n            }}>Salvar lançamento</Btn>`;
+if(!s.includes(oldSave)) throw new Error('Phase 7 manual financial save anchor missing');
+s=s.replace(oldSave,newSave);
+writeFileSync(file,s,'utf8');
+console.log('Applied ZiisTec phase 7 manual finance patch (3 changes)');
