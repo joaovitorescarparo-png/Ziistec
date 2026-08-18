@@ -6,6 +6,7 @@ import { supabase, mensagemErro } from "./supabase";
 export function useSessao() {
   const [carregando, setCarregando] = useState(true);
   const [sessaoAuth, setSessaoAuth] = useState(null);
+  const [recuperandoSenha, setRecuperandoSenha] = useState(false);
   const [perfil, setPerfil] = useState(null);
   const [membresias, setMembresias] = useState([]);
   const [empresaId, setEmpresaId] = useState(null);
@@ -32,15 +33,16 @@ export function useSessao() {
       setSessaoAuth(data.session || null);
       setCarregando(false);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_evento, sessao) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((evento, sessao) => {
+      if (evento === "PASSWORD_RECOVERY") setRecuperandoSenha(true);
       setSessaoAuth(sessao || null);
-      if (!sessao) limpar();
+      if (!sessao) { setRecuperandoSenha(false); limpar(); }
     });
     return () => sub.subscription.unsubscribe();
   }, [limpar]);
 
   const carregarContexto = useCallback(async () => {
-    if (!supabase || !sessaoAuth?.user) return;
+    if (!supabase || !sessaoAuth?.user || recuperandoSenha) return;
     setErro(null);
     try {
       /* convites pendentes viram membresia antes de qualquer leitura */
@@ -82,27 +84,36 @@ export function useSessao() {
     } catch (e) {
       setErro(mensagemErro(e));
     }
-  }, [sessaoAuth, empresaId]);
+  }, [sessaoAuth, empresaId, recuperandoSenha]);
 
   useEffect(() => {
-    if (sessaoAuth?.user) carregarContexto();
-  }, [sessaoAuth?.user?.id]);
+    if (sessaoAuth?.user && !recuperandoSenha) carregarContexto();
+  }, [sessaoAuth?.user?.id, recuperandoSenha]);
 
   const membresiaAtual = membresias.find((m) => m.company_id === empresaId) || null;
 
   const sair = useCallback(async () => {
     await supabase?.auth.signOut();
+    setRecuperandoSenha(false);
     limpar();
   }, [limpar]);
 
+  const finalizarRecuperacaoSenha = useCallback(async () => {
+    await supabase?.auth.signOut();
+    setRecuperandoSenha(false);
+    limpar();
+    window.history.replaceState({}, "", "/");
+  }, [limpar]);
+
   return {
-    carregando, sessaoAuth, perfil, membresias, membresiaAtual,
+    carregando, sessaoAuth, recuperandoSenha, perfil, membresias, membresiaAtual,
     empresa, empresaId, assinatura, erro,
     papel: membresiaAtual?.role || null,
     ehPlataforma: Boolean(perfil?.is_platform_admin),
     precisaEmpresa: Boolean(sessaoAuth?.user && perfil && membresias.length === 0),
     trocarEmpresa: setEmpresaId,
     recarregar: carregarContexto,
+    finalizarRecuperacaoSenha,
     sair,
   };
 }
