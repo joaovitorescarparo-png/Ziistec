@@ -1,12 +1,13 @@
-import React, { useMemo } from "react";
+import React, { Suspense, lazy, useMemo } from "react";
 import { useSessao } from "./lib/useSessao";
 import { supabase, mensagemErro, configurado } from "./lib/supabase";
 import Login from "./screens/Login";
 import NovaSenha from "./screens/NovaSenha";
-import PlatformAdmin from "./screens/PlatformAdmin";
 import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
-import ZiisTecApp from "./legacy/ZiisTecApp";
+
+const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
+const PlatformAdmin = lazy(() => import("./screens/PlatformAdmin"));
 
 const PAPEL = { owner: "proprietario", technician: "tecnico" };
 const STATUS_ASSINATURA = {
@@ -126,7 +127,13 @@ export default function App() {
     );
   }
 
-  if (s.ehPlataforma && s.perfil) return <PlatformAdmin perfil={s.perfil} sair={s.sair} />;
+  if (s.ehPlataforma && s.perfil) {
+    return (
+      <Suspense fallback={<Carregando texto="Abrindo administração" />}>
+        <PlatformAdmin perfil={s.perfil} sair={s.sair} />
+      </Suspense>
+    );
+  }
 
   if (s.precisaEmpresa) {
     return <Onboarding perfil={s.perfil} sair={s.sair} aoCriar={async () => { await s.recarregar(); }} />;
@@ -137,7 +144,9 @@ export default function App() {
   return (
     <>
       <SeletorEmpresa sessao={s} />
-      <ZiisTecApp key={contexto.chave} contexto={contexto} />
+      <Suspense fallback={<Carregando texto="Carregando seu ambiente" />}>
+        <ZiisTecApp key={contexto.chave} contexto={contexto} />
+      </Suspense>
     </>
   );
 }
