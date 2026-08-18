@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { useSessao } from "./lib/useSessao";
 import { supabase, mensagemErro, configurado } from "./lib/supabase";
 import Login from "./screens/Login";
+import NovaSenha from "./screens/NovaSenha";
 import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
 import ZiisTecApp from "./legacy/ZiisTecApp";
@@ -88,6 +89,7 @@ export default function App() {
 
   if (!configurado) return <Login />;
   if (s.carregando) return <Carregando texto="Abrindo o ZiisTec" />;
+  if (s.recuperandoSenha && s.sessaoAuth) return <NovaSenha aoConcluir={s.finalizarRecuperacaoSenha} />;
   if (!s.sessaoAuth) return <Login />;
 
   if (s.erro) {
