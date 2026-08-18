@@ -1,0 +1,312 @@
+references public.companies(id) on delete cascade,
+  kind          zt_entry_kind not null,
+  description   text not null,
+  amount        numeric(12,2) not null,
+  due_date      date not null,
+  paid          boolean not null default false,
+  paid_at       date,
+  payment_method text,
+  category      text,
+  client_id     uuid references public.clients(id) on delete set null,
+  work_order_id uuid references public.work_orders(id) on delete set null,
+  purchase_id   uuid references public.purchases(id) on delete set null,
+  created_at    timestamptz not null default now()
+);
+create index if not exists idx_entries_company on public.financial_entries(company_id, kind, paid);
+create index if not exists idx_entries_due     on public.financial_entries(company_id, due_date);
+-- uma OS gera no máximo uma cobrança; uma compra, no máximo uma conta a pagar
+create unique index if not exists uq_entry_per_wo       on public.financial_entries(work_order_id) where work_order_id is not null;
+create unique index if not exists uq_entry_per_purchase on public.financial_entries(purchase_id)   where purchase_id is not null;
+
+-- --------------------------------------------------------- warranties
+create table if not exists public.warranties (
+  id            uuid primary key default gen_random_uuid(),
+  company_id    uuid not null references public.companies(id) on delete cascade,
+  client_id     uuid not null references public.clients(id) on delete cascade,
+  work_order_id uuid references public.work_orders(id) on delete set null,
+  kind          zt_warranty_kind not null,
+  service_id    uuid references public.services(id) on delete set null,
+  product_id    uuid references public.products(id) on delete set null,
+  description   text not null,
+  service_place text,
+  starts_on     date not null default current_date,
+  ends_on       date not null,
+  serial_number text,
+  created_at    timestamptz not null default now()
+);
+create index if not exists idx_warranties_company on public.warranties(company_id, ends_on);
+create index if not exists idx_warranties_client  on public.warranties(client_id);
+
+-- -------------------------------------------------------- attachments
+create table if not exists public.attachments (
+  id            uuid primary key default gen_random_uuid(),
+  company_id    uuid not null references public.companies(id) on delete cascade,
+  bucket        text not null,
+  path          text not null,          -- company_id/... (ver políticas de storage)
+  file_name     text not null,
+  content_type  text,
+  size_bytes    bigint,
+  category      text,                   -- antes, depois, defeito, boleto, nota...
+  work_order_id uuid references public.work_orders(id) on delete cascade,
+  purchase_id   uuid references public.purchases(id) on delete cascade,
+  uploaded_by   uuid references public.profiles(id),
+  created_at    timestamptz not null default now()
+);
+create index if not exists idx_attachments_wo on public.attachments(work_order_id);
+create index if not exists idx_attachments_pu on public.attachments(purchase_id);
+
+-- =====================================================================
+-- Convites de equipe.
+-- company_members exige um profile existente, e o profile só nasce quando a
+-- pessoa cria a conta no Auth. Sem isto, o owner não conseguiria convidar
+-- alguém que ainda não entrou. O convite guarda a intenção; a membresia é
+-- criada quando a pessoa aceita, já autenticada.
+-- =====================================================================
+create table if not exists public.company_invites (
+  id          uuid primary key default gen_random_uuid(),
+  company_id  uuid not null references public.companies(id) on delete cascade,
+  email       text not null,
+  role        zt_role not null default 'technician',
+  job_title   text,
+  invited_by  uuid references public.profiles(id),
+  accepted_at timestamptz,
+  created_at  timestamptz not null default now(),
+  unique (company_id, email)
+);
+create index if not exists idx_invites_email on public.company_invites(lower(email)) where accepted_at is null;
+alter table public.company_invites enable row level security;
+
+drop policy if exists p_invites_owner on public.company_invites;
+create policy p_invites_owner on public.company_invites for all
+  using (public.zt_is_owner(company_id)) with check (public.zt_is_owner(company_id));
+-- a pessoa convidada enxerga o próprio convite pelo e-mail autenticado
+drop policy if exists p_invites_self on public.company_invites;
+create policy p_invites_self on public.company_invites for select using (
+  lower(email) = lower(coalesce((select p.email from public.profiles p where p.id = auth.uid()), ''))
+);
+
+-- aceite: transforma convite em membresia. Roda com privilégio porque precisa
+-- inserir em company_members, mas só age sobre convites do e-mail de quem chama.
+create or replace function public.zt_accept_invites()
+returns int language plpgsql security definer set search_path = public as $$
+declare v_email text; v_uid uuid := auth.uid(); n int := 0; r record;
+begin
+  if v_uid is null then raise exception 'Não autenticado' using errcode = '28000'; end if;
+  select email into v_email from public.profiles where id = v_uid;
+  if v_email is null then return 0; end if;
+
+  for r in select * from public.company_invites
+            where lower(email) = lower(v_email) and accepted_at is null loop
+    insert into public.company_members(company_id, user_id, role, status, job_title)
+    values (r.company_id, v_uid, r.role, 'active', r.job_title)
+    on conflict (company_id, user_id) do update set status = 'active';
+    update public.company_invites set accepted_at = now() where id = r.id;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+grant execute on function public.zt_accept_invites() to authenticated;
+revoke execute on function public.zt_accept_invites() from anon, public;
+
+-- =====================================================================
+-- numeração por empresa, à prova de concorrência
+-- =====================================================================
+create table if not exists public.document_counters (
+  company_id uuid not null references public.companies(id) on delete cascade,
+  doc_type   text not null,          -- 'quote' | 'work_order' | 'purchase'
+  last_value int  not null default 0,
+  primary key (company_id, doc_type)
+);
+
+create or replace function public.zt_next_number(comp uuid, doc text, prefix text)
+returns text language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if auth.uid() is null then raise exception 'Não autenticado' using errcode = '28000'; end if;
+  -- orçamentos, OS e compras são documentos administrativos: só o owner numera
+  if not public.zt_is_owner(comp) then
+    raise exception 'Sem permissão para gerar numeração nesta empresa' using errcode = '42501';
+  end if;
+  if doc not in ('quote','work_order','purchase') then
+    raise exception 'Tipo de documento inválido';
+  end if;
+
+  insert into public.document_counters(company_id, doc_type, last_value)
+  values (comp, doc, 1)
+  on conflict (company_id, doc_type)
+  do update set last_value = public.document_counters.last_value + 1
+  returning last_value into n;                      -- linha travada até o commit
+  return prefix || '-' || lpad(n::text, 4, '0');
+end $$;
+
+-- =====================================================================
+-- RPC transacional: finalizar atendimento
+-- status + histórico + garantias + cobrança numa única transação
+-- =====================================================================
+-- SECURITY DEFINER é necessário: concluir uma OS grava em warranties e
+-- financial_entries, que são administrativas e o técnico não pode escrever
+-- diretamente. Por isso a função valida a autorização ela mesma, faz só as
+-- operações da conclusão e não aceita nenhum company_id vindo de fora.
+create or replace function public.zt_complete_work_order(
+  p_wo uuid, p_report text default null, p_pending text default null,
+  p_extra_cost numeric default 0, p_due_days int default 7
+) returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  v_wo public.work_orders;
+  v_total numeric(12,2);
+  v_entry uuid;
+  v_uid uuid := auth.uid();
+  v_is_owner boolean;
+  v_assigned boolean;
+  v_pendente boolean;
+  r record;
+begin
+  -- 1. exige usuário autenticado
+  if v_uid is null then raise exception 'Não autenticado' using errcode = '28000'; end if;
+
+  -- 2. a OS é lida pela chave; o company_id vem dela, nunca do cliente
+  select * into v_wo from public.work_orders where id = p_wo for update;
+  if v_wo.id is null then raise exception 'Ordem de serviço não encontrada' using errcode = '42501'; end if;
+
+  -- 3. membresia ativa + papel: owner da empresa OU técnico atribuído a ESTA OS
+  select public.zt_is_owner(v_wo.company_id) into v_is_owner;
+  v_assigned := (v_wo.assigned_to = v_uid) and exists (
+    select 1 from public.company_members m
+    where m.company_id = v_wo.company_id and m.user_id = v_uid and m.status = 'active'
+  );
+  if not (v_is_owner or v_assigned) then
+    raise exception 'Sem permissão para finalizar esta ordem de serviço' using errcode = '42501';
+  end if;
+
+  -- 4. assinatura bloqueada impede operação
+  if exists (select 1 from public.subscriptions s
+             where s.company_id = v_wo.company_id and s.status in ('suspended','canceled')) then
+    raise exception 'Assinatura inativa' using errcode = '42501';
+  end if;
+
+  -- 5. idempotência
+  if v_wo.status = 'done' or v_wo.billing_entry_id is not null then
+    return v_wo.billing_entry_id;
+  end if;
+
+  -- 6. custo interno é dado administrativo: técnico não define
+  if not v_is_owner then p_extra_cost := v_wo.extra_cost; end if;
+
+  -- FONTE ÚNICA DA COBRANÇA: work_order_items, incluindo os is_extra.
+  -- extra_cost é custo interno e jamais entra no valor cobrado do cliente.
+  select coalesce(sum(quantity * unit_price), 0) into v_total
+    from public.work_order_items where work_order_id = p_wo;
+
+  -- adicional registrado pelo técnico e ainda sem preço trava o faturamento
+  select exists (select 1 from public.work_order_items
+                 where work_order_id = p_wo and price_pending) into v_pendente;
+
+  update public.work_orders
+     set status = 'done', completed_at = now(), pending_note = coalesce(p_pending, pending_note),
+         extra_cost = coalesce(p_extra_cost, extra_cost), updated_at = now()
+   where id = p_wo;
+
+  if p_report is not null and length(trim(p_report)) > 0 then
+    insert into public.work_order_reports(work_order_id, company_id, entry_type, body, author_id)
+    values (p_wo, v_wo.company_id, 'report', p_report, auth.uid());
+  end if;
+
+  insert into public.work_order_reports(work_order_id, company_id, entry_type, body, author_id)
+  values (p_wo, v_wo.company_id, 'history', 'Serviço concluído', auth.uid());
+
+  -- garantia do serviço e garantia de fábrica são registros distintos
+  for r in
+    select i.service_id, i.product_id, i.name, s.warranty_days, p.warranty_months
+      from public.work_order_items i
+      left join public.services s on s.id = i.service_id
+      left join public.products p on p.id = i.product_id
+     where i.work_order_id = p_wo
+  loop
+    if r.service_id is not null and coalesce(r.warranty_days,0) > 0 then
+      insert into public.warranties(company_id, client_id, work_order_id, kind, service_id,
+                                    description, service_place, starts_on, ends_on)
+      values (v_wo.company_id, v_wo.client_id, p_wo, 'service', r.service_id,
+              r.name, v_wo.service_place, current_date, current_date + r.warranty_days);
+    end if;
+    if r.product_id is not null and coalesce(r.warranty_months,0) > 0 then
+      insert into public.warranties(company_id, client_id, work_order_id, kind, product_id,
+                                    description, service_place, starts_on, ends_on)
+      values (v_wo.company_id, v_wo.client_id, p_wo, 'product', r.product_id,
+              r.name, v_wo.service_place, current_date, (current_date + (r.warranty_months || ' months')::interval)::date);
+    end if;
+  end loop;
+
+  -- o campo de controle acompanha a pendência de preço
+  update public.work_orders set pending_pricing = v_pendente where id = p_wo;
+
+  if v_pendente then
+    insert into public.work_order_reports(work_order_id, company_id, entry_type, body, author_id)
+    values (p_wo, v_wo.company_id, 'history',
+            'Execução concluída. Há adicional aguardando precificação do proprietário — cobrança não gerada.', auth.uid());
+    return null;   -- trabalho de campo encerrado; faturamento fica para zt_bill_work_order
+  end if;
+
+  -- atendimento em garantia não gera cobrança
+  if v_total > 0 and not v_wo.is_warranty_visit then
+    insert into public.financial_entries(company_id, kind, description, amount, due_date,
+                                         client_id, work_order_id, category)
+    values (v_wo.company_id, 'income', v_wo.number || ' · atendimento', v_total,
+            current_date + p_due_days, v_wo.client_id, p_wo, 'Serviços')
+    on conflict (work_order_id) where work_order_id is not null do nothing
+    returning id into v_entry;
+
+    if v_entry is null then
+      select id into v_entry from public.financial_entries where work_order_id = p_wo;
+    end if;
+
+    update public.work_orders set billing_entry_id = v_entry where id = p_wo;
+    insert into public.work_order_reports(work_order_id, company_id, entry_type, body, author_id)
+    values (p_wo, v_wo.company_id, 'history', 'Cobrança gerada em contas a receber', auth.uid());
+  end if;
+
+  return v_entry;
+end $$;
+
+-- técnico enxerga um cliente apenas se ele aparece numa OS atribuída a ele
+create or replace function public.zt_client_visible(c_id uuid, comp uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  -- zt_is_member exige status='active': colaborador desativado perde o acesso
+  -- na hora, mesmo com OS antigas ainda atribuídas a ele.
+  select public.zt_is_owner(comp) or (public.zt_is_member(comp) and exists (
+    select 1 from public.work_orders w
+    where w.client_id = c_id and w.company_id = comp and w.assigned_to = auth.uid()
+  ));
+$$;
+
+-- =====================================================================
+-- Consolidação da cobrança depois que o owner precifica os adicionais.
+-- Separa "execução concluída" de "pronta para faturar" sem travar o técnico.
+-- =====================================================================
+create or replace function public.zt_bill_work_order(p_wo uuid, p_due_days int default 7)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v_wo public.work_orders; v_total numeric(12,2); v_entry uuid;
+begin
+  if auth.uid() is null then raise exception 'Não autenticado' using errcode = '28000'; end if;
+  select * into v_wo from public.work_orders where id = p_wo for update;
+  if v_wo.id is null then raise exception 'Ordem de serviço não encontrada' using errcode = '42501'; end if;
+  if not public.zt_is_owner(v_wo.company_id) then
+    raise exception 'Somente o proprietário consolida a cobrança' using errcode = '42501';
+  end if;
+  if v_wo.billing_entry_id is not null then return v_wo.billing_entry_id; end if;   -- idempotente
+  if v_wo.status <> 'done' then raise exception 'Atendimento ainda não foi concluído' using errcode = '42501'; end if;
+  if exists (select 1 from public.work_order_items where work_order_id = p_wo and price_pending) then
+    raise exception 'Ainda há adicional sem preço definido' using errcode = '42501';
+  end if;
+  if v_wo.is_warranty_visit then
+    update public.work_orders set pending_pricing = false where id = p_wo;
+    return null;
+  end if;
+
+  select coalesce(sum(quantity * unit_price), 0) into v_total
+    from public.work_order_items where work_order_id = p_wo;
+  if v_total <= 0 then
+    update public.work_orders set pending_pricing = false where id = p_wo;
+    return null;
+  end if;
+
+  insert into public.financial_entries(company_id, kind, descrip

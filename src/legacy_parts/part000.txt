@@ -1,0 +1,144 @@
+import React, { useState, useRef, useEffect } from "react";
+import {
+  LayoutDashboard, CalendarDays, Users, Wrench, FileText, ClipboardList,
+  Wallet, Settings, Plus, Search, ArrowLeft, ArrowRight, Check, X, Menu,
+  Phone, MapPin, Trash2, Send, Share2, Pencil, ChevronRight, Clock,
+  CircleCheck, Building2, User, CheckCircle2, Circle, AlertTriangle,
+  Printer, MoreHorizontal, CalendarClock, Receipt, Banknote, Mic, MicOff,
+  Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles, Navigation,
+  TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building,
+} from "lucide-react";
+
+/* ================================================================ helpers */
+const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const brlCurto = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+
+const iso = (d) => {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+};
+const HOJE = iso(new Date());
+const addDays = (base, n) => { const d = new Date(base + "T12:00:00"); d.setDate(d.getDate() + n); return iso(d); };
+const addMeses = (base, n) => { const d = new Date(base + "T12:00:00"); d.setMonth(d.getMonth() + n); return iso(d); };
+const dataBR = (s) => (s ? s.split("-").reverse().join("/") : "—");
+const dataCurta = (s) => (s ? s.slice(8) + "/" + s.slice(5, 7) : "—");
+const DIAS = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
+const diaSemana = (s) => DIAS[new Date(s + "T12:00:00").getDay()];
+const diaCurto = (s) => ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"][new Date(s + "T12:00:00").getDay()];
+const mesRef = (s) => (s || "").slice(0, 7);
+const nomeMes = (m) => {
+  const [a, mm] = m.split("-");
+  return ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"][Number(mm) - 1] + " de " + a;
+};
+let seq = 100;
+const uid = () => `id${++seq}`;
+const somaItens = (itens = []) => itens.reduce((t, i) => t + i.qtd * i.preco, 0);
+const somaCustos = (itens = []) => itens.reduce((t, i) => t + i.qtd * (i.custo || 0), 0);
+const totalDoc = (d) => Math.max(0, somaItens(d.itens) - (d.desconto || 0) + (d.acrescimo || 0));
+const somaAdicionais = (os) => (os.adicionais || []).reduce((t, a) => t + (Number(a.qtd) || 0) * (Number(a.preco) || 0), 0);
+const totalOS = (os) => somaItens(os.itens) + somaAdicionais(os) + (os.valorAdicional || 0);
+const resumoOS = (os) => os.itens.map((i) => i.nome).join(" · ")
+  || (os.descricaoLivre || "").trim()
+  || (os.emGarantia ? "atendimento em garantia" : "sem descrição");
+const num = (v) => { const n = parseFloat(String(v).replace(",", ".")); return Number.isFinite(n) ? n : 0; };
+const soDigitos = (s) => (s || "").replace(/\D/g, "");
+const iniciais = (s = "") => s.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+const mapsUrl = (end) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(end || "")}`;
+const semAcento = (s = "") => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+const UNIDADES = [
+  { id: "unidade", label: "unidade", sufixo: "un" },
+  { id: "ponto", label: "ponto", sufixo: "ponto" },
+  { id: "hora", label: "hora", sufixo: "h" },
+  { id: "diaria", label: "diária", sufixo: "diária" },
+  { id: "visita", label: "visita", sufixo: "visita" },
+  { id: "metro", label: "metro linear", sufixo: "m" },
+  { id: "m2", label: "metro quadrado", sufixo: "m²" },
+  { id: "fechado", label: "serviço fechado", sufixo: "serviço" },
+];
+const unidadeLabel = (id) => UNIDADES.find((u) => u.id === id)?.sufixo || "un";
+const PRAZOS_GARANTIA = [
+  { dias: 30, label: "30 dias" }, { dias: 60, label: "60 dias" }, { dias: 90, label: "90 dias" },
+  { dias: 180, label: "6 meses" }, { dias: 365, label: "12 meses" },
+];
+const diasEntre = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 86400000);
+const statusGarantia = (g) => {
+  const d = diasEntre(HOJE, g.ate);
+  return d >= 0
+    ? { ativa: true, label: "Ativa", tone: "sucesso", detalhe: d === 0 ? "vence hoje" : `${d} dia${d > 1 ? "s" : ""} restante${d > 1 ? "s" : ""}` }
+    : { ativa: false, label: "Expirada", tone: "neutro", detalhe: `expirada há ${Math.abs(d)} dia${Math.abs(d) > 1 ? "s" : ""}` };
+};
+const PRAZOS_RETORNO = [0, 30, 90, 180, 365];
+const FORMAS = ["Pix", "Dinheiro", "Cartão", "Transferência", "Boleto", "Outro"];
+
+/* ============================================================= dados demo */
+const EMPRESA_SEED = {
+  nome: "JR Serviços Técnicos", documento: "42.118.309/0001-77",
+  atividade: "Controle de acesso, CFTV e automação",
+  telefone: "(11) 3255-0140", whatsapp: "(11) 98842-6710",
+  email: "contato@jrservicostecnicos.com.br",
+  endereco: "Rua das Palmeiras, 480 — Vila Mariana, São Paulo/SP",
+  responsavel: "Jonas Ribeiro", temEquipe: true, validadePadrao: 15,
+  condicaoPadrao: "50% na aprovação e 50% na entrega do serviço.",
+  observacaoPadrao: "Materiais inclusos salvo indicação em contrário.",
+};
+
+const CLIENTES_SEED = [
+  { id: "c1", tipo: "PJ", nome: "Condomínio Residencial Jardins", fantasia: "Cond. Jardins", documento: "18.442.771/0001-05", responsavel: "Sandra Menezes (síndica)", telefone: "(11) 3771-2280", whatsapp: "(11) 99614-3320", endereco: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", obs: "Portaria libera acesso técnico das 8h às 18h. Falar com a síndica." },
+  { id: "c2", tipo: "PF", nome: "Marina Alves", documento: "327.884.110-42", telefone: "(11) 5522-8140", whatsapp: "(11) 98123-7745", endereco: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", obs: "Prefere atendimento pela manhã." },
+  { id: "c3", tipo: "PJ", nome: "Prime Administradora de Imóveis Ltda", fantasia: "Prime Imóveis", documento: "31.209.556/0001-19", responsavel: "Carlos Tanaka", telefone: "(11) 3018-7700", whatsapp: "(11) 97455-1180", endereco: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", obs: "Administra 6 prédios. Pagamento sempre por boleto em 15 dias." },
+  { id: "c4", tipo: "PJ", nome: "Padaria Pão Nosso Ltda", fantasia: "Padaria Pão Nosso", documento: "27.660.412/0001-88", responsavel: "Eliane Costa", telefone: "(11) 2871-4409", whatsapp: "(11) 96622-0781", endereco: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", obs: "" },
+];
+
+const SERVICOS_SEED = [
+  { id: "s1", nome: "Instalação de fechadura digital", categoria: "Controle de acesso", unidade: "unidade", preco: 450, custo: 190, descricao: "Instalação, cadastro de usuários e teste completo.", ativo: true, garantiaDias: 90, retornoDias: 0 },
+  { id: "s2", nome: "Configuração de controle de acesso", categoria: "Controle de acesso", unidade: "ponto", preco: 320, custo: 110, descricao: "Configuração de leitor, cadastro de tags e integração com portaria.", ativo: true, garantiaDias: 90, retornoDias: 0 },
+  { id: "s3", nome: "Visita técnica", categoria: "Atendimento", unidade: "visita", preco: 120, custo: 35, descricao: "Diagnóstico no local com relatório do que precisa ser feito.", ativo: true, garantiaDias: 0, retornoDias: 0 },
+  { id: "s4", nome: "Instalação de câmera CFTV", categoria: "CFTV", unidade: "ponto", preco: 250, custo: 95, descricao: "Instalação de câmera, passagem de cabo e ajuste de imagem.", ativo: true, garantiaDias: 90, retornoDias: 365 },
+  { id: "s5", nome: "Manutenção de interfone", categoria: "Manutenção", unidade: "unidade", preco: 180, custo: 60, descricao: "Revisão, limpeza de contatos e substituição de peças simples.", ativo: true, garantiaDias: 30, retornoDias: 180 },
+  { id: "s6", nome: "Manutenção preventiva mensal", categoria: "Manutenção", unidade: "fechado", preco: 890, custo: 300, descricao: "Contrato mensal de vistoria de todos os equipamentos.", ativo: true, garantiaDias: 0, retornoDias: 30 },
+  { id: "s7", nome: "Instalação de porteiro eletrônico antigo", categoria: "Manutenção", unidade: "unidade", preco: 260, custo: 90, descricao: "Modelo descontinuado, mantido apenas para histórico.", ativo: false, garantiaDias: 0, retornoDias: 0 },
+];
+
+const PRODUTOS_SEED = [
+  { id: "p1", nome: "Fechadura digital biométrica", marca: "Intelbras", modelo: "FR 320", unidade: "unidade", custo: 620, preco: 890, fornecedor: "Distribuidora Eletro Sul", garantiaMeses: 12, ativo: true, descricao: "" },
+  { id: "p2", nome: "Câmera bullet Full HD", marca: "Intelbras", modelo: "VHD 1220 B", unidade: "unidade", custo: 210, preco: 340, fornecedor: "Distribuidora Eletro Sul", garantiaMeses: 12, ativo: true, descricao: "" },
+  { id: "p3", nome: "Fonte colmeia 12V 10A", marca: "Vetti", modelo: "VT-1210", unidade: "unidade", custo: 95, preco: 160, fornecedor: "Casa das Fontes", garantiaMeses: 6, ativo: true, descricao: "" },
+  { id: "p4", nome: "Cabo coaxial bipolar", marca: "Cabletech", modelo: "4mm", unidade: "metro", custo: 3.2, preco: 6.5, fornecedor: "Casa das Fontes", garantiaMeses: 0, ativo: true, descricao: "" },
+  { id: "p5", nome: "Tag de proximidade RFID", marca: "Intelbras", modelo: "TH 2000", unidade: "unidade", custo: 4.5, preco: 12, fornecedor: "Distribuidora Eletro Sul", garantiaMeses: 3, ativo: true, descricao: "" },
+];
+
+const itemServico = (s, qtd, preco) => ({ id: uid(), tipo: "servico", catalogoId: s.id, nome: s.nome, unidade: s.unidade, qtd, preco: preco ?? s.preco, custo: s.custo });
+const itemProduto = (p, qtd, preco) => ({ id: uid(), tipo: "produto", catalogoId: p.id, nome: `${p.nome}${p.marca ? " · " + p.marca : ""}${p.modelo ? " " + p.modelo : ""}`, unidade: p.unidade, qtd, preco: preco ?? p.preco, custo: p.custo });
+const itemLivre = ({ nome = "", qtd = 1, unidade = "unidade", preco = 0, obs = "" } = {}) =>
+  ({ id: uid(), tipo: "livre", catalogoId: null, nome, unidade, qtd, preco, custo: 0, obs });
+const S = (id) => SERVICOS_SEED.find((s) => s.id === id);
+const P = (id) => PRODUTOS_SEED.find((p) => p.id === id);
+
+const ORCAMENTOS_SEED = [
+  { id: "o1", numero: "ORC-0007", clienteId: "c1", status: "enviado", data: addDays(HOJE, -3), validade: addDays(HOJE, 12), itens: [itemServico(S("s1"), 4), itemProduto(P("p1"), 4), itemServico(S("s3"), 1)], desconto: 150, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Instalação nas portarias social e de serviço.", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portarias social e de serviço", osId: null },
+  { id: "o2", numero: "ORC-0006", clienteId: "c2", status: "aprovado", data: addDays(HOJE, -6), validade: addDays(HOJE, 9), itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], desconto: 0, acrescimo: 0, condicao: "Pagamento à vista via Pix na conclusão.", obs: "Porta de madeira maciça.", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", osId: "os3" },
+  { id: "o3", numero: "ORC-0005", clienteId: "c4", status: "rascunho", data: addDays(HOJE, -1), validade: addDays(HOJE, 14), itens: [itemServico(S("s4"), 4), itemProduto(P("p2"), 4)], desconto: 0, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Prioridade nas câmeras do estoque.", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Estoque e área de produção", osId: null },
+  { id: "o4", numero: "ORC-0004", clienteId: "c3", status: "aprovado", data: addDays(HOJE, -14), validade: addDays(HOJE, 1), itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], desconto: 0, acrescimo: 0, condicao: "Boleto em 15 dias.", obs: "", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", osId: "os2" },
+];
+
+const osBase = {
+  descricaoLivre: "", relato: "", fotos: [], adicionais: [], valorAdicional: 0, descricaoAdicional: "",
+  custosExtras: 0, pendencia: "", cobrancaId: null, garantiaId: null, osOrigemId: null,
+  relatoProblema: "", emGarantia: false,
+};
+
+const ORDENS_SEED = [
+  { ...osBase, id: "os1", numero: "OS-0001", clienteId: "c1", orcamentoId: null, status: "andamento", data: HOJE, hora: "14:00", responsavel: "Jonas Ribeiro", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Garagem — subsolo 1", itens: [itemServico(S("s4"), 3), itemProduto(P("p2"), 3)], obs: "Substituir 3 câmeras da garagem. Elevador de serviço até 17h.", checklist: [{ id: "k1", texto: "Conferir cabeamento existente", feito: true }, { id: "k2", texto: "Instalar câmeras", feito: false }, { id: "k3", texto: "Ajustar ângulo e gravação", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE, -1), texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os2", numero: "OS-0002", clienteId: "c3", orcamentoId: "o4", status: "concluida", data: addDays(HOJE, -4), hora: "09:00", responsavel: "Diego Farias", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], obs: "", relato: "Diagnóstico\nTrês interfones do bloco B sem áudio de retorno.\n\nServiço executado\nLimpeza de contatos, troca de dois cabos e recadastramento de tags.\n\nResultado\nTestado em todos os apartamentos e funcionando.", checklist: [{ id: "k4", texto: "Testar interfones", feito: true }, { id: "k5", texto: "Cadastrar tags novas", feito: true }], custosExtras: 40, cobrancaId: "l1", historico: [{ id: uid(), quando: addDays(HOJE, -8), texto: "Gerada a partir do ORC-0004" }, { id: uid(), quando: addDays(HOJE, -4), texto: "Serviço concluído" }] },
+  { ...osBase, id: "os3", numero: "OS-0003", clienteId: "c2", orcamentoId: "o2", status: "agendada", data: HOJE, hora: "09:00", responsavel: "Jonas Ribeiro", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], obs: "Porta de madeira maciça. Cliente prefere manhã.", checklist: [{ id: "k6", texto: "Levar furadeira e brocas", feito: false }, { id: "k7", texto: "Cadastrar digitais da família", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE, -5), texto: "Gerada a partir do ORC-0006" }] },
+  { ...osBase, id: "os4", numero: "OS-0004", clienteId: "c1", orcamentoId: null, status: "agendada", data: addDays(HOJE, 1), hora: "10:30", responsavel: "Diego Farias", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portaria social", itens: [itemServico(S("s6"), 1)], obs: "Vistoria mensal do contrato.", checklist: [], historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os5", numero: "OS-0005", clienteId: "c4", orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: "Jonas Ribeiro", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Entrada de serviço", itens: [itemServico(S("s5"), 1)], obs: "Interfone com ruído.", checklist: [], historico: [{ id: uid(), quando: addDays(HOJE, -2), texto: "Ordem de serviço criada" }] },
+];
+
+const LANCAMENTOS_SEED = [
+  { id: "l1", tipo: "receita", descricao: "OS-0002 · Prime Imóveis", clienteId: "c3", valor: 1180, vencimento: addDays(HOJE, 11), pago: false, origemTipo: "os", origemId: "os2", categoria: "Serviços" },
+  { id: "l2", tipo: "receita", descricao: "Manutenção interfone · Cond. Jardins", clienteId: "c1", valor: 540, vencimento: addDays(HOJE, -9), pago: true, pagoEm: addDays(HOJE, -9), forma: "Pix", origemTipo: "manual", categoria: "Serviços" },
+  { id: "l3", tipo: "receita", descricao: "Instalação CFTV · Padaria Pão Nosso", clienteId: "c4", valor: 750, vencimento: addDays(HOJE, -2), pago: true, pagoEm: addDays(HOJE, -2), forma: "Transferência", origemTipo: "manual", categoria: "Serviços" },
+  { id: "l7", tipo: "receita", descricao: "Configuração de tags · Cond. Jardins", clienteId: "c1", valor: 640, vencimento: addDays(HOJE, -6), pago: false, origemTipo: "manual", categoria: "Serviços" },
+  { id: "l4", tipo: "despesa", descricao: "Compra CMP-0002 · Casa das Fontes", valor: 760, vencimento: addDays(HOJE, -7), pago: true, pagoEm: addDays(HOJE, -7), forma: "Pix"

@@ -1,0 +1,266 @@
+               <div className="flex gap-3"><Phone className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" /><div><p className="text-slate-800">{c.telefone}</p><p className="text-slate-500">WhatsApp {c.whatsapp}</p></div></div>
+                <Endereco valor={c.endereco} className="text-[14px]" />
+                {c.responsavel && <div className="flex gap-3"><User className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" /><p className="text-slate-700">{c.responsavel}</p></div>}
+                {c.whatsapp && <Btn variant="soft" size="sm" icon={Share2} className="w-full" onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp)}`, "_blank")}>Falar no WhatsApp</Btn>}
+              </Panel>
+            </section>
+            {locais.length > 0 && (
+              <section>
+                <Rotulo>Locais atendidos</Rotulo>
+                <Panel className="p-5 flex flex-wrap gap-2">
+                  {locais.map((l) => <Pill key={l} tone="neutro">{l}</Pill>)}
+                </Panel>
+              </section>
+            )}
+            {c.obs && (
+              <section>
+                <Rotulo>Observações importantes</Rotulo>
+                <div className="rounded-2xl bg-amber-50 ring-1 ring-amber-200/70 p-5 text-[14px] text-amber-900 leading-relaxed">{c.obs}</div>
+              </section>
+            )}
+            {retornos.length > 0 && (
+              <section>
+                <Rotulo>Retorno recomendado</Rotulo>
+                <Panel className="p-5 space-y-2.5">
+                  {retornos.map((r, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 text-[13.5px]">
+                      <span className="text-slate-700 truncate">{r.servico}</span>
+                      <span className="text-slate-500 tabular-nums shrink-0">{dataBR(r.data)}</span>
+                    </div>
+                  ))}
+                </Panel>
+              </section>
+            )}
+          </div>
+
+          <div className="lg:col-span-2 space-y-6">
+            <section>
+              <Rotulo>Garantias</Rotulo>
+              <Panel className="divide-y divide-slate-100 overflow-hidden">
+                {gar.length === 0 ? <Empty icon={ShieldCheck} title="Nenhuma garantia registrada" sub="Garantias são criadas automaticamente ao finalizar uma OS, conforme o prazo configurado no serviço." />
+                  : gar.map((g) => {
+                    const st = statusGarantia(g);
+                    return (
+                      <Linha key={g.id} onClick={() => abrirGarantia(g.id)}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[14px] font-medium text-slate-800 truncate">{g.descricao}</p>
+                            <p className="text-[12px] text-slate-400">
+                              {g.tipo === "servico" ? "Garantia do serviço" : "Garantia do fabricante"}
+                              {g.local ? ` · ${g.local}` : ""} · executado em {dataBR(g.inicio)}
+                              {g.serie ? ` · série ${g.serie}` : ""}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <Pill tone={st.tone}>{st.label}</Pill>
+                            <p className="text-[12px] text-slate-400 mt-1">até {dataBR(g.ate)} · {st.detalhe}</p>
+                          </div>
+                        </div>
+                      </Linha>
+                    );
+                  })}
+              </Panel>
+            </section>
+
+            <section>
+              <Rotulo>Orçamentos</Rotulo>
+              <Panel className="divide-y divide-slate-100 overflow-hidden">
+                {orcs.length === 0 ? <Empty icon={FileText} title="Nenhum orçamento ainda" /> : orcs.map((o) => (
+                  <Linha key={o.id} onClick={() => abrirOrc(o.id)}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div><p className="text-[14px] font-medium text-slate-800">{o.numero}</p><p className="text-[12px] text-slate-400">{dataBR(o.data)}</p></div>
+                      <div className="flex items-center gap-3"><Pill tone={ST_ORC[o.status].tone}>{ST_ORC[o.status].label}</Pill><span className="text-[14px] font-semibold tabular-nums">{brl(totalDoc(o))}</span></div>
+                    </div>
+                  </Linha>
+                ))}
+              </Panel>
+            </section>
+
+            <section>
+              <Rotulo>Histórico de serviços</Rotulo>
+              <Panel className="divide-y divide-slate-100 overflow-hidden">
+                {oss.length === 0 ? <Empty icon={ClipboardList} title="Nenhuma OS ainda" /> : oss.map((o) => (
+                  <Linha key={o.id} onClick={() => abrirOS(o.id)}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[14px] font-medium text-slate-800">{o.numero} {o.localServico && <span className="text-slate-400 font-normal">· {o.localServico}</span>}</p>
+                        <p className="text-[12px] text-slate-400 truncate">
+                          {o.data ? dataBR(o.data) : "sem agendamento"} · {resumoOS(o)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {o.emGarantia && <Pill tone="marca"><ShieldCheck className="w-3 h-3" />Em garantia</Pill>}
+                        <Pill tone={ST_OS[o.status].tone}>{ST_OS[o.status].label}</Pill>
+                      </div>
+                    </div>
+                  </Linha>
+                ))}
+              </Panel>
+            </section>
+
+            <section>
+              <Rotulo>Pagamentos</Rotulo>
+              <Panel className="divide-y divide-slate-100 overflow-hidden">
+                {pgs.length === 0 ? <Empty icon={Wallet} title="Nada lançado" /> : pgs.map((l) => (
+                  <Linha key={l.id}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0"><p className="text-[14px] text-slate-800 truncate">{l.descricao}</p>
+                        <p className="text-[12px] text-slate-400">{l.pago ? `recebido em ${dataBR(l.pagoEm)}${l.forma ? ` · ${l.forma}` : ""}` : `vence ${dataBR(l.vencimento)}`}</p></div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <Pill tone={statusLanc(l).tone}>{statusLanc(l).label}</Pill>
+                        <span className="text-[14px] font-semibold tabular-nums">{brl(l.valor)}</span>
+                      </div>
+                    </div>
+                  </Linha>
+                ))}
+              </Panel>
+            </section>
+          </div>
+        </div>
+        <ClienteForm form={form} setForm={setForm} onSave={salvarCliente} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHead title="Clientes" sub={`${clientes.length} cadastrados`} action={<Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn>} />
+      <div className="mb-5 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder="Buscar por nome, documento ou telefone" /></div>
+      {lista.length === 0 ? (
+        <Panel><Empty icon={Users} title="Nenhum cliente encontrado" sub="Cadastre um cliente para começar a criar orçamentos." action={<Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn>} /></Panel>
+      ) : (
+        <Panel className="divide-y divide-slate-100 overflow-hidden">
+          {lista.map((c) => (
+            <Linha key={c.id} onClick={() => setClienteAberto(c.id)}>
+              <div className="flex items-center gap-4">
+                <Avatar nome={c.nome} tipo={c.tipo} />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-slate-900 truncate">{c.fantasia || c.nome}</p>
+                  <p className="text-[13px] text-slate-500 truncate">{c.telefone} · {c.tipo === "PJ" ? "Pessoa jurídica" : "Pessoa física"}</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" aria-hidden="true" />
+              </div>
+            </Linha>
+          ))}
+        </Panel>
+      )}
+      <ClienteForm form={form} setForm={setForm} onSave={salvarCliente} />
+    </>
+  );
+}
+
+/* Cadastro rápido usado de dentro do orçamento e da nova OS.
+   Mínimo para continuar: nome + telefone. O resto pode vir depois. */
+function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
+  const [f, setF] = useState(null);
+  useEffect(() => { if (aberto) setF({ tipo: "PF", nome: nomeInicial, telefone: "", whatsapp: "", endereco: "", documento: "", fantasia: "", responsavel: "", obs: "" }); }, [aberto]);
+  if (!aberto || !f) return null;
+  const set = (k, v) => setF({ ...f, [k]: v });
+  const pj = f.tipo === "PJ";
+  const pronto = f.nome.trim() && f.telefone.trim();
+  const faltaFiscal = pj && !f.documento.trim();
+
+  return (
+    <Modal open onClose={onClose} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
+      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn disabled={!pronto} onClick={() => { onSave({ ...f, whatsapp: f.whatsapp || f.telefone }); onClose(); }}>Salvar e usar</Btn></>}>
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
+        {["PF", "PJ"].map((t) => (
+          <button key={t} role="tab" aria-selected={f.tipo === t} onClick={() => set("tipo", t)}
+            className={cx("flex-1 py-2.5 rounded-lg text-[14px] font-medium transition-colors", f.tipo === t ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
+            {t === "PF" ? "Pessoa física" : "Pessoa jurídica"}
+          </button>
+        ))}
+      </div>
+      <Field label={pj ? "Razão social ou nome da empresa" : "Nome do cliente"}>
+        <Input value={f.nome} onChange={(e) => set("nome", e.target.value)} placeholder={pj ? "Empresa Ltda" : "Nome completo"} autoFocus />
+      </Field>
+      <div className="grid sm:grid-cols-2 gap-5">
+        <Field label="Telefone"><Input value={f.telefone} onChange={(e) => set("telefone", e.target.value)} placeholder="(00) 00000-0000" /></Field>
+        <Field label="WhatsApp" hint="Deixe vazio para usar o mesmo telefone."><Input value={f.whatsapp} onChange={(e) => set("whatsapp", e.target.value)} /></Field>
+      </div>
+      <Field label="Endereço" hint="Usado para abrir a rota até o cliente."><Input value={f.endereco} onChange={(e) => set("endereco", e.target.value)} placeholder="Rua, número, bairro, cidade" /></Field>
+      {pj && (
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Nome fantasia" hint="Opcional."><Input value={f.fantasia} onChange={(e) => set("fantasia", e.target.value)} /></Field>
+          <Field label="Responsável" hint="Opcional."><Input value={f.responsavel} onChange={(e) => set("responsavel", e.target.value)} /></Field>
+        </div>
+      )}
+      <Field label={pj ? "CNPJ" : "CPF"} hint="Opcional agora.">
+        <Input value={f.documento} onChange={(e) => set("documento", e.target.value)} />
+      </Field>
+      {faltaFiscal && (
+        <p className="text-[13px] text-amber-800 bg-amber-50 ring-1 ring-amber-200/70 rounded-xl px-3.5 py-3 leading-relaxed">
+          Sem o CNPJ o orçamento sai sem identificação fiscal da empresa. Dá para seguir assim e completar depois na ficha do cliente.
+        </p>
+      )}
+    </Modal>
+  );
+}
+
+function ClienteForm({ form, setForm, onSave, onSaved }) {
+  if (!form) return null;
+  const set = (k, v) => setForm({ ...form, [k]: v });
+  const pj = form.tipo === "PJ";
+  return (
+    <Modal open onClose={() => setForm(null)} title={form.id ? "Editar cliente" : "Novo cliente"} wide
+      footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
+        <Btn onClick={() => { const id = onSave(form); setForm(null); onSaved?.(id); }} disabled={!form.nome}>Salvar cliente</Btn></>}>
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
+        {["PF", "PJ"].map((t) => (
+          <button key={t} role="tab" aria-selected={form.tipo === t} onClick={() => set("tipo", t)}
+            className={cx("flex-1 py-2.5 rounded-lg text-[14px] font-medium transition-colors", form.tipo === t ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
+            {t === "PF" ? "Pessoa física" : "Pessoa jurídica"}
+          </button>
+        ))}
+      </div>
+      <Field label={pj ? "Razão social" : "Nome completo"}><Input value={form.nome || ""} onChange={(e) => set("nome", e.target.value)} placeholder={pj ? "Empresa Ltda" : "Nome do cliente"} /></Field>
+      {pj && (
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Nome fantasia"><Input value={form.fantasia || ""} onChange={(e) => set("fantasia", e.target.value)} /></Field>
+          <Field label="Responsável"><Input value={form.responsavel || ""} onChange={(e) => set("responsavel", e.target.value)} /></Field>
+        </div>
+      )}
+      <div className="grid sm:grid-cols-2 gap-5">
+        <Field label={pj ? "CNPJ" : "CPF"}><Input value={form.documento || ""} onChange={(e) => set("documento", e.target.value)} /></Field>
+        <Field label="Telefone"><Input value={form.telefone || ""} onChange={(e) => set("telefone", e.target.value)} placeholder="(00) 0000-0000" /></Field>
+      </div>
+      <Field label="WhatsApp"><Input value={form.whatsapp || ""} onChange={(e) => set("whatsapp", e.target.value)} placeholder="(00) 00000-0000" /></Field>
+      <Field label="Endereço"><Input value={form.endereco || ""} onChange={(e) => set("endereco", e.target.value)} placeholder="Rua, número, bairro, cidade" /></Field>
+      <Field label="Observações" hint="Aparecem na ficha do cliente e na ordem de serviço.">
+        <CampoVoz rows={3} valor={form.obs || ""} onChange={(v) => set("obs", v)} placeholder="Ex.: portaria libera acesso das 8h às 18h, falar com a síndica" />
+      </Field>
+    </Modal>
+  );
+}
+
+/* ==================================================== Catálogo (serviços + produtos) */
+function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
+  const [aba, setAba] = useState("servicos");
+  const [busca, setBusca] = useState("");
+  const [formS, setFormS] = useState(null);
+  const [formP, setFormP] = useState(null);
+  const [verInativos, setVerInativos] = useState(false);
+
+  const fs = servicos.filter((s) => semAcento(s.nome + s.categoria).includes(semAcento(busca)));
+  const fp = produtos.filter((p) => semAcento(`${p.nome} ${p.marca} ${p.modelo}`).includes(semAcento(busca)));
+  const ativosS = fs.filter((s) => s.ativo), inativosS = fs.filter((s) => !s.ativo);
+  const ativosP = fp.filter((p) => p.ativo), inativosP = fp.filter((p) => !p.ativo);
+  const categorias = [...new Set(ativosS.map((s) => s.categoria))];
+
+  const LinhaServico = ({ s, apagado }) => (
+    <Linha onClick={() => setFormS(s)} className={apagado ? "opacity-55" : ""}>
+      <div className="flex items-center gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-slate-900 truncate">{s.nome}</p>
+          <div className="flex items-center gap-2 flex-wrap mt-0.5">
+            <p className="text-[13px] text-slate-500 truncate">{s.descricao}</p>
+            {s.garantiaDias > 0 && <Pill tone="neutro"><ShieldCheck className="w-3 h-3" />{s.garantiaDias} dias</Pill>}
+            {s.retornoDias > 0 && <Pill tone="neutro"><RotateCcw className="w-3 h-3" />retorno {s.retornoDias}d</Pill>}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-[15px] font-semibold text-slate-900 tabular-nums">{brl(s.preco)}</p>
+          <p className="text-[12px] text-slate-400">por {unidadeLabel(s.unidade)}</p>
+        </div>
+        <span className

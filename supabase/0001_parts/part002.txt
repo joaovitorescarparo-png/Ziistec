@@ -1,0 +1,269 @@
+tion, amount, due_date,
+                                       client_id, work_order_id, category)
+  values (v_wo.company_id, 'income', v_wo.number || ' · atendimento', v_total,
+          current_date + p_due_days, v_wo.client_id, p_wo, 'Serviços')
+  on conflict (work_order_id) where work_order_id is not null do nothing
+  returning id into v_entry;
+  if v_entry is null then select id into v_entry from public.financial_entries where work_order_id = p_wo; end if;
+
+  update public.work_orders set billing_entry_id = v_entry, pending_pricing = false where id = p_wo;
+  insert into public.work_order_reports(work_order_id, company_id, entry_type, body, author_id)
+  values (p_wo, v_wo.company_id, 'history', 'Cobrança gerada em contas a receber', auth.uid());
+  return v_entry;
+end $$;
+
+-- =====================================================================
+-- Criação de empresa em uma única transação: company + owner + assinatura.
+-- Nada de user_id/company_id vindos do frontend; só auth.uid().
+-- =====================================================================
+create or replace function public.zt_create_company(
+  p_name text, p_activity text default null, p_has_team boolean default false,
+  p_owner_name text default null, p_phone text default null
+) returns uuid language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); v_company uuid;
+begin
+  if v_uid is null then raise exception 'Não autenticado' using errcode = '28000'; end if;
+  if p_name is null or length(trim(p_name)) = 0 then raise exception 'Informe o nome da empresa'; end if;
+
+  insert into public.profiles(id, email)
+  values (v_uid, (select email from auth.users where id = v_uid))
+  on conflict (id) do nothing;
+
+  insert into public.companies(name, activity, has_team, owner_name, phone)
+  values (trim(p_name), p_activity, coalesce(p_has_team,false),
+          coalesce(p_owner_name, (select full_name from public.profiles where id = v_uid)), p_phone)
+  returning id into v_company;
+
+  insert into public.company_members(company_id, user_id, role, status)
+  values (v_company, v_uid, 'owner', 'active');
+
+  insert into public.subscriptions(company_id, status, current_period_start, current_period_end)
+  values (v_company, 'trial', current_date, current_date + 14)
+  on conflict (company_id) do nothing;
+
+  return v_company;
+end $$;
+
+-- =====================================================================
+-- RLS — ligado em tudo que é empresarial
+-- =====================================================================
+alter table public.profiles            enable row level security;
+alter table public.companies           enable row level security;
+alter table public.company_members     enable row level security;
+alter table public.subscriptions       enable row level security;
+alter table public.clients             enable row level security;
+alter table public.services            enable row level security;
+alter table public.suppliers           enable row level security;
+alter table public.products            enable row level security;
+alter table public.quotes              enable row level security;
+alter table public.quote_items         enable row level security;
+alter table public.work_orders         enable row level security;
+alter table public.work_order_items    enable row level security;
+alter table public.work_order_materials enable row level security;
+alter table public.work_order_reports  enable row level security;
+alter table public.purchases           enable row level security;
+alter table public.purchase_items      enable row level security;
+alter table public.financial_entries   enable row level security;
+alter table public.warranties          enable row level security;
+alter table public.attachments         enable row level security;
+alter table public.document_counters   enable row level security;
+
+-- profiles: cada um vê e edita o seu; membros da mesma empresa se enxergam
+drop policy if exists p_profiles_self   on public.profiles;
+create or replace function public.zt_compartilha_empresa(outro uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.company_members me
+    join public.company_members outra on outra.company_id = me.company_id
+    where me.user_id = auth.uid() and me.status = 'active' and outra.user_id = outro
+  );
+$$;
+grant execute on function public.zt_compartilha_empresa(uuid) to authenticated;
+
+drop policy if exists p_profiles_self on public.profiles;
+create policy p_profiles_self on public.profiles for select using (
+  id = auth.uid() or public.zt_is_platform_admin() or public.zt_compartilha_empresa(id)
+);
+drop policy if exists p_profiles_update on public.profiles;
+create policy p_profiles_update on public.profiles for update using (id = auth.uid()) with check (id = auth.uid());
+drop policy if exists p_profiles_insert on public.profiles;
+create policy p_profiles_insert on public.profiles for insert with check (id = auth.uid());
+
+-- companies
+drop policy if exists p_companies_select on public.companies;
+create policy p_companies_select on public.companies for select
+  using (public.zt_is_member(id) or public.zt_is_platform_admin());
+drop policy if exists p_companies_insert on public.companies;
+-- empresa nasce só pela RPC zt_create_company, que cria owner e assinatura
+-- na mesma transação. Sem isso existiria empresa sem dono ou sem assinatura.
+create policy p_companies_insert on public.companies for insert with check (false);
+drop policy if exists p_companies_update on public.companies;
+create policy p_companies_update on public.companies for update
+  using (public.zt_is_owner(id)) with check (public.zt_is_owner(id));
+
+-- company_members: só o owner mexe na equipe
+drop policy if exists p_members_select on public.company_members;
+create policy p_members_select on public.company_members for select
+  using (user_id = auth.uid() or public.zt_is_member(company_id) or public.zt_is_platform_admin());
+drop policy if exists p_members_write on public.company_members;
+-- owner administra a equipe; qualquer usuário pode criar a PRIMEIRA membresia
+-- (a dele, como owner) ao abrir a própria empresa
+drop policy if exists p_members_insert on public.company_members;
+create policy p_members_insert on public.company_members for insert with check (
+  public.zt_is_owner(company_id)      -- a primeira membresia vem da RPC de criação
+);
+drop policy if exists p_members_update on public.company_members;
+create policy p_members_update on public.company_members for update
+  using (public.zt_is_owner(company_id)) with check (public.zt_is_owner(company_id));
+drop policy if exists p_members_delete on public.company_members;
+create policy p_members_delete on public.company_members for delete
+  using (public.zt_is_owner(company_id));
+
+-- subscriptions: empresa lê a sua; escrita fica com plataforma/servidor
+drop policy if exists p_subs_select on public.subscriptions;
+create policy p_subs_select on public.subscriptions for select
+  using (public.zt_is_member(company_id) or public.zt_is_platform_admin());
+drop policy if exists p_subs_write on public.subscriptions;
+create policy p_subs_write on public.subscriptions for all
+  using (public.zt_is_platform_admin()) with check (public.zt_is_platform_admin());
+
+-- clients: owner vê a carteira; técnico só os clientes das OS dele
+drop policy if exists p_clients_select on public.clients;
+create policy p_clients_select on public.clients for select
+  using (public.zt_is_member(company_id) and public.zt_client_visible(id, company_id));
+drop policy if exists p_clients_write on public.clients;
+create policy p_clients_write on public.clients for all
+  using (public.zt_is_owner(company_id)) with check (public.zt_is_owner(company_id));
+
+-- serviços, produtos, fornecedores: leitura para a empresa, escrita só do owner
+-- serviços e fornecedores são informação comercial/administrativa: só o owner.
+-- produtos ficam legíveis para a empresa porque o técnico precisa escolher o
+-- material que usou no atendimento.
+drop policy if exists p_services_select on public.services;
+create policy p_services_select on public.services for select using (public.zt_is_owner(company_id));
+drop policy if exists p_services_write on public.services;
+create policy p_services_write on public.services for all
+  using (public.zt_is_owner(company_id)) with check (public.zt_is_owner(company_id));
+
+drop policy if exists p_suppliers_select on public.suppliers;
+drop policy if exists p_suppliers_write on public.suppliers;
+create policy p_suppliers_write on public.suppliers for all
+  using (public.zt_is_owner(company_id)) with check (public.zt_is_owner(company_id));
+
+drop policy if exists p_products_select on public.products;
+-- products carrega custo, margem e fornecedor: leitura só do owner.
+create policy p_products_select on public.products for select using (public.zt_is_owner(company_id));
+drop policy if exists p_products_write on public.products;
+create policy p_products_write on public.products for all
+  using (public.zt_is_owner(company_id)) with check (public.zt_is_owner(company_id));
+
+-- orçamentos e itens: administrativo, só owner
+do $$
+declare t text;
+begin
+  foreach t in array array['quotes','quote_items','purchases','purchase_items','financial_entries'] loop
+    execute format('drop policy if exists p_%1$s_owner on public.%1$s', t);
+    execute format('create policy p_%1$s_owner on public.%1$s for all using (public.zt_is_owner(company_id)) with check (public.zt_is_owner(company_id))', t);
+  end loop;
+end $$;
+
+-- work_orders: owner vê todas; técnico só as atribuídas a ele
+drop policy if exists p_wo_select on public.work_orders;
+create policy p_wo_select on public.work_orders for select
+  using (public.zt_is_owner(company_id) or (public.zt_is_member(company_id) and assigned_to = auth.uid()));
+drop policy if exists p_wo_insert on public.work_orders;
+create policy p_wo_insert on public.work_orders for insert with check (public.zt_is_owner(company_id));
+drop policy if exists p_wo_update on public.work_orders;
+create policy p_wo_update on public.work_orders for update
+  using (public.zt_is_owner(company_id) or (public.zt_is_member(company_id) and assigned_to = auth.uid()))
+  with check (public.zt_is_owner(company_id) or (public.zt_is_member(company_id) and assigned_to = auth.uid()));
+drop policy if exists p_wo_delete on public.work_orders;
+create policy p_wo_delete on public.work_orders for delete using (public.zt_is_owner(company_id));
+
+-- filhos da OS acompanham a visibilidade da OS mãe
+-- ---------------------------------------------------------------------
+-- Filhas da OS · menor privilégio.
+-- Owner: controle total. Técnico atribuído: lê a própria OS, acrescenta o
+-- que é operacional e não apaga nada — histórico é registro de auditoria.
+-- ---------------------------------------------------------------------
+create or replace function public.zt_wo_is_mine(w_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.work_orders w
+    join public.company_members m on m.company_id = w.company_id
+    where w.id = w_id and w.assigned_to = auth.uid()
+      and m.user_id = auth.uid() and m.status = 'active'
+  );
+$$;
+create or replace function public.zt_wo_is_owned(w_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.work_orders w
+                 where w.id = w_id and public.zt_is_owner(w.company_id));
+$$;
+create or replace function public.zt_wo_open(w_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.work_orders w
+                 where w.id = w_id and w.status not in ('done','canceled'));
+$$;
+grant execute on function public.zt_wo_is_mine(uuid), public.zt_wo_is_owned(uuid), public.zt_wo_open(uuid) to authenticated;
+
+-- ITENS COBRÁVEIS -----------------------------------------------------
+drop policy if exists p_work_order_items_all on public.work_order_items;
+drop policy if exists p_wo_items_select on public.work_order_items;
+create policy p_wo_items_select on public.work_order_items for select
+  using (public.zt_wo_is_owned(work_order_id) or public.zt_wo_is_mine(work_order_id));
+drop policy if exists p_wo_items_owner on public.work_order_items;
+create policy p_wo_items_owner on public.work_order_items for all
+  using (public.zt_wo_is_owned(work_order_id)) with check (public.zt_wo_is_owned(work_order_id));
+-- técnico só acrescenta trabalho extra, sem preço: quem precifica é o owner
+drop policy if exists p_wo_items_tech_insert on public.work_order_items;
+create policy p_wo_items_tech_insert on public.work_order_items for insert with check (
+  public.zt_wo_is_mine(work_order_id) and public.zt_wo_open(work_order_id)
+  and is_extra = true and price_pending = true and unit_price = 0 and unit_cost = 0
+);
+
+-- MATERIAIS -----------------------------------------------------------
+drop policy if exists p_work_order_materials_all on public.work_order_materials;
+drop policy if exists p_wo_mat_select on public.work_order_materials;
+create policy p_wo_mat_select on public.work_order_materials for select
+  using (public.zt_wo_is_owned(work_order_id) or public.zt_wo_is_mine(work_order_id));
+drop policy if exists p_wo_mat_owner on public.work_order_materials;
+create policy p_wo_mat_owner on public.work_order_materials for all
+  using (public.zt_wo_is_owned(work_order_id)) with check (public.zt_wo_is_owned(work_order_id));
+drop policy if exists p_wo_mat_tech_insert on public.work_order_materials;
+create policy p_wo_mat_tech_insert on public.work_order_materials for insert with check (
+  public.zt_wo_is_mine(work_order_id) and public.zt_wo_open(work_order_id)
+  and created_by = auth.uid() and unit_cost = 0
+);
+-- pode corrigir o que ele mesmo lançou, enquanto a OS não fechou
+drop policy if exists p_wo_mat_tech_fix on public.work_order_materials;
+create policy p_wo_mat_tech_fix on public.work_order_materials for update
+  using (public.zt_wo_is_mine(work_order_id) and public.zt_wo_open(work_order_id) and created_by = auth.uid())
+  with check (public.zt_wo_is_mine(work_order_id) and created_by = auth.uid());
+drop policy if exists p_wo_mat_tech_del on public.work_order_materials;
+create policy p_wo_mat_tech_del on public.work_order_materials for delete
+  using (public.zt_wo_is_mine(work_order_id) and public.zt_wo_open(work_order_id) and created_by = auth.uid());
+
+-- RELATO E HISTÓRICO --------------------------------------------------
+drop policy if exists p_work_order_reports_all on public.work_order_reports;
+drop policy if exists p_wo_rep_select on public.work_order_reports;
+create policy p_wo_rep_select on public.work_order_reports for select
+  using (public.zt_wo_is_owned(work_order_id) or public.zt_wo_is_mine(work_order_id));
+-- histórico é auditoria: ninguém edita nem apaga pela API, nem o owner.
+-- só é escrito pela função de conclusão (SECURITY DEFINER).
+drop policy if exists p_wo_rep_owner on public.work_order_reports;
+drop policy if exists p_wo_rep_owner_write on public.work_order_reports;
+create policy p_wo_rep_owner_write on public.work_order_reports for insert with check (
+  entry_type = 'report' and (public.zt_wo_is_owned(work_order_id) or
+    (public.zt_wo_is_mine(work_order_id) and public.zt_wo_open(work_order_id)))
+  and author_id = auth.uid()
+);
+-- cada um revisa o próprio relato enquanto a OS está aberta
+drop policy if exists p_wo_rep_update on public.work_order_reports;
+create policy p_wo_rep_update on public.work_order_reports for update
+  using (entry_type = 'report' and author_id = auth.uid() and public.zt_wo_open(work_order_id)
+         and (public.zt_wo_is_owned(work_order_id) or public.zt_wo_is_mine(work_order_id)))
+  with check (entry_type = 'report' and author_id = auth.uid());
+-- nenhuma policy de DELETE: relato e histórico não são apagados pela aplicação
+
+-- garantias: empresa lê; técni

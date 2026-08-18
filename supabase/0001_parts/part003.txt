@@ -1,0 +1,171 @@
+co lê as ligadas às OS dele
+drop policy if exists p_warranties_select on public.warranties;
+create policy p_warranties_select on public.warranties for select using (
+  public.zt_is_owner(company_id)
+  or (public.zt_is_member(company_id) and public.zt_wo_is_mine(warranties.work_order_id))
+);
+drop policy if exists p_warranties_write on public.warranties;
+create policy p_warranties_write on public.warranties for all
+  using (public.zt_is_owner(company_id)) with check (public.zt_is_owner(company_id));
+
+-- anexos: owner tudo; técnico os das OS dele
+drop policy if exists p_attachments_all on public.attachments;
+create policy p_attachments_all on public.attachments for all using (
+  public.zt_is_owner(company_id)
+  or (work_order_id is not null and public.zt_is_member(company_id) and public.zt_wo_is_mine(work_order_id))
+) with check (
+  public.zt_is_owner(company_id)
+  or (work_order_id is not null and public.zt_is_member(company_id) and public.zt_wo_is_mine(work_order_id))
+);
+
+drop policy if exists p_counters_all on public.document_counters;
+create policy p_counters_all on public.document_counters for all
+  using (public.zt_is_member(company_id)) with check (public.zt_is_member(company_id));
+
+-- =====================================================================
+-- Catálogo de materiais para o técnico: mesmas linhas de products, sem
+-- custo, sem fornecedor, sem preço. É uma view SECURITY DEFINER (roda com
+-- os direitos do dono), por isso filtra a empresa ela mesma.
+-- =====================================================================
+create or replace view public.materials_catalog
+with (security_invoker = false) as
+  select p.id, p.company_id, p.name, p.brand, p.model, p.unit, p.active
+    from public.products p
+   where p.active and public.zt_is_member(p.company_id);
+
+revoke all on public.materials_catalog from anon, public;
+grant select on public.materials_catalog to authenticated;
+
+-- =====================================================================
+-- Guarda de colunas da OS. RLS decide QUAIS LINHAS; este trigger decide
+-- QUAIS CAMPOS o técnico pode mudar na linha dele. Sem isso, um técnico
+-- com acesso à própria OS poderia reatribuí-la, mexer em valores ou
+-- apontá-la para outra empresa.
+-- =====================================================================
+create or replace function public.zt_wo_guard()
+returns trigger language plpgsql security invoker set search_path = public as $$
+begin
+  -- Requisições do app chegam como 'authenticated'. A função de conclusão roda
+  -- como SECURITY DEFINER (outro current_user) e já valida a autorização dela
+  -- própria, então não é barrada aqui. Nenhum cliente PostgREST consegue trocar
+  -- de role, logo isto não é um contorno acessível de fora.
+  if current_user not in ('authenticated', 'anon') then return new; end if;
+
+  if public.zt_is_owner(old.company_id) then return new; end if;
+
+  if not (old.assigned_to = auth.uid() and exists (
+        select 1 from public.company_members m
+        where m.company_id = old.company_id and m.user_id = auth.uid() and m.status = 'active')) then
+    raise exception 'Sem permissão para alterar esta ordem de serviço' using errcode = '42501';
+  end if;
+
+  -- técnico só mexe no que é execução; o resto volta ao valor anterior
+  new.company_id       := old.company_id;
+  new.number           := old.number;
+  new.client_id        := old.client_id;
+  new.quote_id         := old.quote_id;
+  new.assigned_to      := old.assigned_to;
+  new.scheduled_date   := old.scheduled_date;
+  new.scheduled_time   := old.scheduled_time;
+  new.address          := old.address;
+  new.service_place    := old.service_place;
+  new.request          := old.request;
+  new.pre_notes        := old.pre_notes;
+  new.extra_cost       := old.extra_cost;
+  new.billing_entry_id := old.billing_entry_id;
+  new.warranty_id      := old.warranty_id;
+  new.origin_wo_id     := old.origin_wo_id;
+  new.is_warranty_visit := old.is_warranty_visit;
+  new.completed_at     := old.completed_at;
+  new.created_by       := old.created_by;
+  new.created_at       := old.created_at;
+
+  -- conclusão só pela função autorizada, que roda com privilégio próprio
+  if new.status is distinct from old.status and new.status not in ('in_progress','scheduled') then
+    raise exception 'Conclusão e cancelamento não são feitos por edição direta' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+create or replace function public.zt_material_guard()
+returns trigger language plpgsql security invoker set search_path = public as $$
+begin
+  if current_user not in ('authenticated', 'anon') then return new; end if;
+  if public.zt_is_owner(old.company_id) then return new; end if;
+  -- técnico corrige o operacional; custo e vínculos permanecem
+  new.company_id    := old.company_id;
+  new.work_order_id := old.work_order_id;
+  new.unit_cost     := old.unit_cost;
+  new.created_by    := old.created_by;
+  new.created_at    := old.created_at;
+  return new;
+end $$;
+
+drop trigger if exists zt_material_guard_trg on public.work_order_materials;
+create trigger zt_material_guard_trg before update on public.work_order_materials
+  for each row execute function public.zt_material_guard();
+
+drop trigger if exists zt_wo_guard_trg on public.work_orders;
+create trigger zt_wo_guard_trg before update on public.work_orders
+  for each row execute function public.zt_wo_guard();
+
+-- =====================================================================
+-- GRANTs — o papel precisa de permissão de tabela; quem filtra é a RLS.
+-- 'anon' (não autenticado) não recebe nada em dados empresariais.
+-- =====================================================================
+grant usage on schema public to anon, authenticated;
+
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'profiles','companies','company_members','subscriptions','clients','services','suppliers',
+    'products','quotes','quote_items','work_orders','work_order_items','work_order_materials',
+    'work_order_reports','purchases','purchase_items','financial_entries','warranties',
+    'attachments','document_counters','company_invites'
+  ] loop
+    execute format('grant select, insert, update, delete on public.%I to authenticated', t);
+  end loop;
+end $$;
+
+grant execute on function public.zt_is_member(uuid)          to authenticated;
+grant execute on function public.zt_is_owner(uuid)           to authenticated;
+grant execute on function public.zt_is_platform_admin()      to authenticated;
+grant execute on function public.zt_client_visible(uuid,uuid) to authenticated;
+grant execute on function public.zt_next_number(uuid,text,text) to authenticated;
+grant execute on function public.zt_complete_work_order(uuid,text,text,numeric,int) to authenticated;
+grant execute on function public.zt_bill_work_order(uuid,int) to authenticated;
+grant execute on function public.zt_create_company(text,text,boolean,text,text) to authenticated;
+revoke execute on function public.zt_bill_work_order(uuid,int) from anon, public;
+revoke execute on function public.zt_create_company(text,text,boolean,text,text) from anon, public;
+revoke execute on function public.zt_complete_work_order(uuid,text,text,numeric,int) from anon, public;
+
+-- =====================================================================
+-- ao criar um usuário no Auth, cria o profile automaticamente
+-- =====================================================================
+create or replace function public.zt_handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, full_name, email)
+  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', new.email), new.email)
+  on conflict (id) do nothing;
+  return new;
+end $$;
+
+drop trigger if exists zt_on_auth_user_created on auth.users;
+create trigger zt_on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.zt_handle_new_user();
+
+-- updated_at automático
+create or replace function public.zt_touch() returns trigger language plpgsql as $$
+begin new.updated_at = now(); return new; end $$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['clients','quotes','work_orders'] loop
+    execute format('drop trigger if exists zt_touch_%1$s on public.%1$s', t);
+    execute format('create trigger zt_touch_%1$s before update on public.%1$s for each row execute function public.zt_touch()', t);
+  end loop;
+end $$;

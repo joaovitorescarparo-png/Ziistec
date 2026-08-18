@@ -1,0 +1,276 @@
+ield>
+        <Field label="Preço unitário"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => set("preco", num(e.target.value))} /></Field>
+        <div className="text-right pb-3">
+          <p className="text-[12px] text-slate-400">Total</p>
+          <p className="text-[19px] font-semibold text-slate-900 tabular-nums">{brl(total)}</p>
+        </div>
+      </div>
+      <Field label="Observação" hint="Opcional. Aparece abaixo do item.">
+        <CampoVoz rows={2} valor={f.obs} onChange={(v) => set("obs", v)} placeholder="Detalhe que o cliente precisa saber sobre este item" />
+      </Field>
+      <Btn className="w-full" icon={Plus} disabled={!f.nome.trim() || total <= 0}
+        onClick={() => { onAdicionar(f); setF(vazio); }}>{rotulo}</Btn>
+    </div>
+  );
+}
+
+/* ====================================================== Ordens de serviço */
+function OrdensServico(p) {
+  const { ordens, nomeCliente, osAberta, setOsAberta, clientes, salvarOS, empresa, orcamentos, lancamentos, abrirOS, permitido } = p;
+  const soMinhas = !permitido("todasOS");
+  const [filtro, setFiltro] = useState("dia");
+  const [criando, setCriando] = useState(false);
+
+  if (osAberta) {
+    const os = ordens.find((o) => o.id === osAberta);
+    if (os) return <OSDetalhe {...p} os={os} />;
+  }
+
+  const viva = (o) => o.status !== "concluida" && o.status !== "cancelada";
+  const hoje = ordens.filter((o) => viva(o) && o.data === HOJE).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const proximos = ordens.filter((o) => viva(o) && o.data > HOJE).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
+  const atrasadas = ordens.filter((o) => viva(o) && o.data && o.data < HOJE);
+  const semData = ordens.filter((o) => viva(o) && !o.data);
+  const concluidas = ordens.filter((o) => o.status === "concluida").sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+
+  const Cartao = ({ os }) => {
+    const orc = orcamentos.find((o) => o.id === os.orcamentoId);
+    const cob = lancamentos.find((l) => l.origemTipo === "os" && l.origemId === os.id);
+    return (
+      <Linha>
+        <div className="flex items-start justify-between gap-4">
+          <button onClick={() => abrirOS(os.id)} className={cx("min-w-0 text-left flex-1", ring)}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
+              {os.localServico && <span className="text-[13px] text-slate-400">· {os.localServico}</span>}
+            </div>
+            <p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
+            <p className="text-[12px] text-slate-400 mt-1">{os.data ? `${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : "Sem agendamento"}{empresa.temEquipe ? ` · ${os.responsavel}` : ""}</p>
+            <div className="mt-2.5">
+              <Trilha etapas={[
+                { label: orc ? orc.numero : "OS direta", feito: true },
+                { label: "Agendada", feito: !!os.data },
+                { label: "Concluída", feito: os.status === "concluida" },
+                { label: cob?.pago ? "Recebido" : "Cobrança", feito: !!cob?.pago, alerta: !!cob && !cob.pago },
+              ]} />
+            </div>
+          </button>
+          <div className="text-right shrink-0">
+            {permitido("verValores") && <p className="text-[16px] font-semibold text-slate-900 tabular-nums">{brl(totalOS(os))}</p>}
+            <Pill tone={ST_OS[os.status].tone} className="mt-1.5">{ST_OS[os.status].label}</Pill>
+            <div className="mt-2 text-[12px] flex justify-end"><Endereco valor={os.local} local={os.localServico} compacto className="max-w-[220px]" /></div>
+          </div>
+        </div>
+      </Linha>
+    );
+  };
+
+  const Bloco = ({ titulo, itens, vazio }) => (
+    <section className="mb-8">
+      <Rotulo>{titulo}{itens.length > 0 ? ` · ${itens.length}` : ""}</Rotulo>
+      <Panel className="divide-y divide-slate-100 overflow-hidden">
+        {itens.length === 0 ? <Empty icon={ClipboardList} title={vazio} /> : itens.map((os) => <Cartao key={os.id} os={os} />)}
+      </Panel>
+    </section>
+  );
+
+  return (
+    <>
+      <PageHead title={soMinhas ? "Minhas ordens de serviço" : "Ordens de serviço"} sub={`${diaSemana(HOJE)}, ${dataBR(HOJE)}`}
+        action={permitido("todasOS") ? <Btn icon={Plus} onClick={() => setCriando(true)}>Nova OS</Btn> : null} />
+      <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
+        opcoes={[{ id: "dia", label: "Meu dia" }, { id: "abertas", label: "Todas em aberto" }, { id: "concluidas", label: "Concluídas" }]} />
+
+      {filtro === "dia" && (
+        <>
+          {atrasadas.length > 0 && <Bloco titulo="Atrasadas" itens={atrasadas} />}
+          <Bloco titulo="Hoje" itens={hoje} vazio="Nenhum atendimento marcado para hoje" />
+          <Bloco titulo="Próximos atendimentos" itens={proximos.slice(0, 6)} vazio="Nada agendado à frente" />
+          <Bloco titulo="Aguardando agendamento" itens={semData} vazio="Tudo agendado" />
+        </>
+      )}
+      {filtro === "abertas" && <Bloco titulo="Em aberto" itens={[...atrasadas, ...hoje, ...proximos, ...semData]} vazio="Nenhuma ordem em aberto" />}
+      {filtro === "concluidas" && <Bloco titulo="Concluídas" itens={concluidas} vazio="Nenhuma ordem concluída ainda" />}
+
+      {criando && <NovaOS {...p} onClose={() => setCriando(false)} />}
+    </>
+  );
+}
+
+/* Abertura de OS pensada para o campo: descrever o problema já basta.
+   O catálogo é atalho, não obrigação. */
+function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual }) {
+  const [novoCliente, setNovoCliente] = useState(false);
+  const [f, setF] = useState({
+    clienteId: "", descricaoLivre: "", local: "", localServico: "",
+    itens: [], data: "", hora: "09:00", responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null, obs: "",
+  });
+  const [catalogo, setCatalogo] = useState(false);
+  const [abaCat, setAbaCat] = useState("servicos");
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  const escolherCliente = (id) => {
+    const cl = clientes.find((x) => x.id === id);
+    setF((s) => ({ ...s, clienteId: id, local: cl?.endereco || s.local }));
+  };
+  const pronto = f.clienteId && (f.descricaoLivre.trim() || f.itens.length > 0);
+
+  const criar = () => {
+    salvarOS({
+      ...f, status: f.data ? "agendada" : "aguardando", checklist: [],
+      responsavel: f.responsavel || empresa.responsavel,
+    });
+    onClose();
+  };
+
+  return (
+    <>
+      <Modal open onClose={onClose} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
+        footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+          <Btn disabled={!pronto} onClick={criar}>Abrir ordem de serviço</Btn></>}>
+
+        <Field label="Cliente">
+          <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+            <Select value={f.clienteId} onChange={(e) => escolherCliente(e.target.value)} className="flex-1">
+              <option value="">Selecione um cliente</option>
+              {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+            </Select>
+            <Btn variant="soft" icon={Plus} onClick={() => setNovoCliente(true)} className="shrink-0">Cadastrar novo cliente</Btn>
+          </div>
+        </Field>
+
+        <Field label="O que precisa ser feito?" hint="Fale ou escreva com suas palavras. Isso já é suficiente para abrir a ordem.">
+          <CampoVoz rows={4} valor={f.descricaoLivre} onChange={(v) => set("descricaoLivre", v)}
+            placeholder="Ex.: cliente informou que o portão está abrindo sozinho. Verificar central, sensores, controles cadastrados e alimentação." />
+        </Field>
+
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Endereço do atendimento"><Input value={f.local} onChange={(e) => set("local", e.target.value)} placeholder="Rua, número, bairro" /></Field>
+          <Field label="Local do serviço" hint="Ex.: Portaria, Apto 304, Loja 4."><Input value={f.localServico} onChange={(e) => set("localServico", e.target.value)} /></Field>
+        </div>
+
+        <div>
+          <button onClick={() => setCatalogo((v) => !v)} className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
+            {catalogo ? "Ocultar catálogo" : "Adicionar serviços ou produtos do catálogo (opcional)"}
+          </button>
+          {f.itens.length > 0 && (
+            <div className="rounded-xl ring-1 ring-slate-200 divide-y divide-slate-100 mt-3">
+              {f.itens.map((i, idx) => (
+                <div key={i.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-[14px] text-slate-800 truncate">{i.nome}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <input type="number" min="0" step="0.5" value={i.qtd} aria-label="Quantidade"
+                        onChange={(e) => set("itens", f.itens.map((x, k) => (k === idx ? { ...x, qtd: num(e.target.value) } : x)))}
+                        className="w-16 rounded-lg ring-1 ring-slate-200 px-2 py-1.5 text-[13px]" />
+                      <span className="text-[12px] text-slate-400">{unidadeLabel(i.unidade)} × {brl(i.preco)}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</span>
+                    <button onClick={() => set("itens", f.itens.filter((_, k) => k !== idx))} aria-label={`Remover ${i.nome}`}
+                      className={cx("p-2 rounded-lg text-slate-300 hover:text-rose-600", ring)}><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {catalogo && (
+            <div className="mt-3 space-y-3">
+              <Tabs valor={abaCat} onChange={setAbaCat} opcoes={[{ id: "servicos", label: "Serviços" }, { id: "produtos", label: "Produtos" }]} />
+              <div className="flex flex-wrap gap-2">
+                {(abaCat === "servicos" ? servicos : produtos).filter((x) => x.ativo).map((x) => (
+                  <button key={x.id} onClick={() => set("itens", [...f.itens, abaCat === "servicos" ? itemServico(x, 1) : itemProduto(x, 1)])}
+                    className={cx("inline-flex items-center gap-2 rounded-xl bg-slate-50 ring-1 ring-slate-200 px-3 py-2 text-[13px] text-slate-700 hover:bg-white hover:ring-teal-500", ring)}>
+                    <Plus className="w-3.5 h-3.5 text-teal-700" />{x.nome}<span className="text-slate-400">{brlCurto(x.preco)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Data" hint="Deixe vazio para agendar depois."><Input type="date" value={f.data} onChange={(e) => set("data", e.target.value)} /></Field>
+          {f.data && <Field label="Horário"><Input type="time" value={f.hora} onChange={(e) => set("hora", e.target.value)} /></Field>}
+        </div>
+        {empresa.temEquipe && (
+          <Field label="Responsável" hint="A ordem aparece em 'Minhas OS' de quem for atribuído.">
+            <Select value={f.responsavelId || ""} onChange={(e) => {
+              const m = equipe.find((x) => x.usuarioId === e.target.value);
+              setF((st) => ({ ...st, responsavelId: e.target.value || null, responsavel: m?.usuario?.nome || st.responsavel }));
+            }}>
+              <option value="">Selecione</option>
+              {equipe.filter((m) => m.ativo).map((m) => (
+                <option key={m.usuarioId} value={m.usuarioId}>{m.usuario?.nome}{m.papel === "proprietario" ? " (proprietário)" : ""}</option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        <Field label="Observações antes do atendimento" hint="Opcional. O que a equipe precisa saber antes de ir.">
+          <CampoVoz rows={2} valor={f.obs} onChange={(v) => set("obs", v)} placeholder="Ex.: falar com o síndico antes de entrar" />
+        </Field>
+      </Modal>
+
+      <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
+        onSave={(novo) => { const id = salvarCliente(novo); if (id) escolherCliente(id); }} />
+    </>
+  );
+}
+
+function OSDetalhe(p) {
+  const { os, cliente, nomeCliente, setOsAberta, mudarStatusOS, setOrdens, servicos, produtos, orcamentos, setTela, setOrcamentoAberto,
+    lancamentos, ordens, agendarOS, desagendarOS, empresa, pedirConfirmacao, garantias, finalizarOS, abrirGarantia, abrirOS,
+    permitido, equipe, usuarioAtual } = p;
+  const verValores = permitido("verValores");
+  const c = cliente(os.clienteId);
+  const [novoItem, setNovoItem] = useState(null);
+  const [txtCheck, setTxtCheck] = useState("");
+  const [agendando, setAgendando] = useState(false);
+  const [finalizando, setFinalizando] = useState(false);
+  const orc = orcamentos.find((o) => o.id === os.orcamentoId);
+  const cobranca = lancamentos.find((l) => l.origemTipo === "os" && l.origemId === os.id);
+  const gar = garantias.filter((g) => g.osId === os.id);
+  const garantiaOrigem = os.garantiaId ? garantias.find((g) => g.id === os.garantiaId) : null;
+  const osOrigem = os.osOrigemId ? ordens.find((o) => o.id === os.osOrigemId) : null;
+
+  const up = (patch) => setOrdens((l) => l.map((x) => (x.id === os.id ? { ...x, ...patch } : x)));
+  const toggleCheck = (id) => up({ checklist: os.checklist.map((k) => (k.id === id ? { ...k, feito: !k.feito } : k)) });
+  const addCheck = () => { if (!txtCheck.trim()) return; up({ checklist: [...os.checklist, { id: uid(), texto: txtCheck.trim(), feito: false }] }); setTxtCheck(""); };
+
+  const custoTotal = somaCustos(os.itens) + (os.custosExtras || 0);
+  const cobrado = totalOS(os);
+  const margem = cobrado > 0 ? Math.round(((cobrado - custoTotal) / cobrado) * 100) : 0;
+
+  const acoes = [];
+  if (os.status === "aguardando") acoes.push({ label: "Agendar", icon: CalendarClock, fn: () => setAgendando(true), principal: true });
+  if (os.status === "agendada") {
+    acoes.push({ label: "Iniciar atendimento", fn: () => mudarStatusOS(os, "andamento"), principal: true });
+    acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
+  }
+  if (os.status === "andamento") acoes.push({ label: "Finalizar atendimento", icon: Check, fn: () => setFinalizando(true), principal: true });
+
+  return (
+    <>
+      <button onClick={() => setOsAberta(null)} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
+        <ArrowLeft className="w-4 h-4" /> Ordens de serviço
+      </button>
+
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{os.numero}</h1>
+          <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {acoes.map((a) => <Btn key={a.label} size="sm" icon={a.icon} variant={a.principal ? "primary" : "soft"} onClick={a.fn}>{a.label}</Btn>)}
+          {os.status !== "concluida" && os.status !== "cancelada" && (
+            <Btn size="sm" variant="danger" onClick={() => pedirConfirmacao({
+              titulo: `Cancelar a ${os.numero}?`, texto: "A ordem sai da agenda e da lista de trabalhos em aberto. O histórico continua disponível.",
+              confirmar: "Cancelar ordem", acao: () => mudarStatusOS(os, "cancelada"),
+            })}>Cancelar OS</Btn>
+          )}
+        </div>
+      </div>
+
+      <Panel className="px-5 py-4 mb-6">
+        <Trilha e

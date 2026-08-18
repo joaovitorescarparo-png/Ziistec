@@ -1,0 +1,264 @@
+, origemTipo: "compra", origemId: "cp2", categoria: "Materiais" },
+  { id: "l5", tipo: "despesa", descricao: "Combustível", valor: 320, vencimento: addDays(HOJE, -5), pago: true, pagoEm: addDays(HOJE, -5), forma: "Dinheiro", origemTipo: "manual", categoria: "Deslocamento" },
+  { id: "l6", tipo: "despesa", descricao: "Plano de celular e internet", valor: 189, vencimento: addDays(HOJE, 4), pago: false, origemTipo: "manual", categoria: "Fixas" },
+  { id: "l8", tipo: "despesa", descricao: "Compra CMP-0001 · Distribuidora Eletro Sul", valor: 1842.5, vencimento: addDays(HOJE, 9), pago: false, origemTipo: "compra", origemId: "cp1", categoria: "Materiais" },
+];
+
+const COMPRAS_SEED = [
+  { id: "cp1", numero: "CMP-0001", fornecedor: "Distribuidora Eletro Sul", data: addDays(HOJE, -6), itens: [{ id: uid(), nome: "Fechadura digital biométrica · Intelbras FR 320", qtd: 2, custo: 620 }, { id: uid(), nome: "Câmera bullet Full HD · Intelbras VHD 1220 B", qtd: 2, custo: 210 }, { id: uid(), nome: "Tag de proximidade RFID · Intelbras TH 2000", qtd: 40, custo: 4.5 }], forma: "Boleto", vencimento: addDays(HOJE, 9), anexos: [{ id: uid(), nome: "boleto-eletro-sul-08.pdf" }], lancamentoId: "l8", obs: "Pedido 88412." },
+  { id: "cp2", numero: "CMP-0002", fornecedor: "Casa das Fontes", data: addDays(HOJE, -7), itens: [{ id: uid(), nome: "Fonte colmeia 12V 10A · Vetti VT-1210", qtd: 8, custo: 95 }], forma: "Pix", vencimento: addDays(HOJE, -7), anexos: [], lancamentoId: "l4", obs: "" },
+];
+
+const GARANTIAS_SEED = [
+  { id: "g1", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s5", descricao: "Manutenção de interfone", local: "Bloco B", inicio: addDays(HOJE, -4), dias: 30, ate: addDays(HOJE, 26), serie: "" },
+  { id: "g2", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s2", descricao: "Configuração de controle de acesso", local: "Bloco B", inicio: addDays(HOJE, -4), dias: 90, ate: addDays(HOJE, 86), serie: "" },
+  { id: "g3", clienteId: "c4", osId: null, tipo: "servico", servicoId: "s4", descricao: "Instalação de câmera CFTV", local: "Área de produção", inicio: addDays(HOJE, -120), dias: 90, ate: addDays(HOJE, -30), serie: "" },
+];
+
+/* ============================================ empresa · usuários · acesso
+   Os dados pertencem à EMPRESA, nunca ao e-mail. O usuário é identificado
+   pelo e-mail e se liga à empresa por uma MEMBRESIA, que carrega o papel.
+   Trocar o e-mail de um usuário não move nem perde dado empresarial.      */
+
+/* papel de plataforma vive fora dos papéis de empresa: um proprietário jamais o herda.
+   Declarado antes dos seeds porque USUARIOS_SEED depende dele. */
+const PLATFORM_ADMIN = "platform_admin";
+const ehPlataforma = (u) => u?.papelPlataforma === PLATFORM_ADMIN;
+
+const EMPRESAS_SEED = [
+  { ...EMPRESA_SEED, id: "e1", criadaEm: addDays(HOJE, -240) },
+  {
+    id: "e2", nome: "Carlos Elétrica", documento: "29.110.884/0001-30",
+    atividade: "Instalações elétricas prediais", telefone: "(11) 3411-9080",
+    whatsapp: "(11) 98330-1177", email: "contato@carloseletrica.com.br",
+    endereco: "Rua Tuiuti, 210 — Tatuapé, São Paulo/SP", responsavel: "Carlos Prado",
+    temEquipe: false, validadePadrao: 10, criadaEm: addDays(HOJE, -35),
+    condicaoPadrao: "Pagamento à vista na conclusão.", observacaoPadrao: "",
+  },
+];
+
+const USUARIOS_SEED = [
+  { id: "u1", nome: "Jonas Ribeiro", email: "jonas@jrservicostecnicos.com.br", ultimoAcesso: HOJE },
+  { id: "u2", nome: "Diego Farias", email: "diego@jrservicostecnicos.com.br", telefone: "(11) 97744-2019", funcao: "Técnico instalador", ultimoAcesso: addDays(HOJE, -1) },
+  { id: "u3", nome: "Carlos Prado", email: "carlos@carloseletrica.com.br", ultimoAcesso: addDays(HOJE, -4) },
+  { id: "u0", nome: "João — ZiisTec", email: "joao@ziistec.com.br", papelPlataforma: PLATFORM_ADMIN, ultimoAcesso: HOJE },
+];
+
+/* vínculo usuário ⇄ empresa: é aqui que mora o papel */
+const MEMBRESIAS_SEED = [
+  { id: "m1", usuarioId: "u1", empresaId: "e1", papel: "proprietario", ativo: true, desde: addDays(HOJE, -240) },
+  { id: "m2", usuarioId: "u2", empresaId: "e1", papel: "tecnico", ativo: true, desde: addDays(HOJE, -90) },
+  { id: "m3", usuarioId: "u3", empresaId: "e2", papel: "proprietario", ativo: true, desde: addDays(HOJE, -35) },
+];
+
+const PLANO = { nome: "ZiisTec Mensal", valor: 69.9 };
+const ASSINATURAS_SEED = [
+  { id: "a1", empresaId: "e1", plano: PLANO.nome, valor: PLANO.valor, status: "ativa", inicio: addDays(HOJE, -240), proximaCobranca: addDays(HOJE, 12) },
+  { id: "a2", empresaId: "e2", plano: PLANO.nome, valor: PLANO.valor, status: "pendente", inicio: addDays(HOJE, -35), proximaCobranca: addDays(HOJE, -3) },
+];
+const ST_ASSINATURA = {
+  trial: { label: "Avaliação", tone: "marca", libera: true },
+  ativa: { label: "Ativa", tone: "sucesso", libera: true },
+  pendente: { label: "Pagamento pendente", tone: "atencao", libera: true },
+  suspensa: { label: "Suspensa", tone: "erro", libera: false },
+  cancelada: { label: "Cancelada", tone: "neutro", libera: false },
+};
+
+/* permissões por papel. A lista é curta de propósito: dois papéis, regras claras. */
+const PERMISSOES = {
+  proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "equipe", "config", "assinatura", "verValores", "todasOS"],
+  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais"],
+};
+const pode = (papel, chave) => (PERMISSOES[papel] || []).includes(chave);
+
+/* papel de plataforma vive fora dos papéis de empresa: um proprietário jamais o herda */
+const senhaTemporaria = () => {
+  const letras = "ABCDEFGHJKLMNPQRSTUVWXYZ", nums = "23456789";
+  const sorteia = (s2, n) => Array.from({ length: n }, () => s2[Math.floor(Math.random() * s2.length)]).join("");
+  return `${sorteia(letras, 4)}-${sorteia(nums, 4)}`;
+};
+
+/* segundo conjunto de dados, de outra empresa — existe para o teste de isolamento */
+const DADOS_E2 = {
+  clientes: [{ id: "c9", empresaId: "e2", tipo: "PF", nome: "Ricardo Menezes", documento: "512.900.331-07", telefone: "(11) 4002-8922", whatsapp: "(11) 99120-4455", endereco: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", obs: "" }],
+  servicos: [{ id: "s9", empresaId: "e2", nome: "Troca de disjuntor", categoria: "Elétrica", unidade: "unidade", preco: 150, custo: 45, descricao: "Substituição com teste de carga.", ativo: true, garantiaDias: 90, retornoDias: 0 }],
+  ordens: [{ ...osBase, id: "os9", empresaId: "e2", numero: "OS-0001", clienteId: "c9", orcamentoId: null, status: "agendada", data: HOJE, hora: "15:00", responsavelId: "u3", responsavel: "Carlos Prado", local: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", localServico: "Quadro geral", itens: [], descricaoLivre: "Quadro desarmando ao ligar o chuveiro. Verificar disjuntor e fiação.", obs: "", checklist: [], historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] }],
+};
+
+/* toda entidade empresarial carrega empresaId desde a origem */
+const daEmpresa = (arr, empresaId) => arr.map((x) => ({ ...x, empresaId }));
+const RESPONSAVEIS = { "Jonas Ribeiro": "u1", "Diego Farias": "u2" };
+
+/* ========================================================== UI primitives */
+const cx = (...c) => c.filter(Boolean).join(" ");
+const ring = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50";
+
+function Btn({ children, onClick, variant = "primary", size = "md", icon: Icon, className, type = "button", disabled, title, ariaLabel }) {
+  const base = `inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors duration-150 active:scale-[0.99] select-none disabled:opacity-40 disabled:pointer-events-none ${ring}`;
+  const variants = {
+    primary: "bg-teal-700 text-white hover:bg-teal-800",
+    dark: "bg-slate-900 text-white hover:bg-slate-800",
+    soft: "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50",
+    quiet: "bg-slate-100 text-slate-700 hover:bg-slate-200",
+    ghost: "text-slate-600 hover:bg-slate-100",
+    danger: "text-rose-700 hover:bg-rose-50",
+  };
+  const sizes = { sm: "text-sm px-3 py-2", md: "text-sm px-4 py-3", lg: "text-base px-5 py-3.5" };
+  return (
+    <button type={type} onClick={onClick} disabled={disabled} title={title} aria-label={ariaLabel || title}
+      className={cx(base, variants[variant], sizes[size], className)}>
+      {Icon && <Icon className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />}
+      {children}
+    </button>
+  );
+}
+
+const TONE = {
+  neutro: "bg-slate-100 text-slate-600",
+  atencao: "bg-amber-50 text-amber-800 ring-1 ring-amber-200/70",
+  marca: "bg-teal-50 text-teal-800 ring-1 ring-teal-200/70",
+  sucesso: "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/70",
+  erro: "bg-rose-50 text-rose-800 ring-1 ring-rose-200/70",
+};
+const Pill = ({ tone = "neutro", children, className }) => (
+  <span className={cx("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap", TONE[tone], className)}>{children}</span>
+);
+
+const ST_ORC = {
+  rascunho: { label: "Rascunho", tone: "neutro" },
+  enviado: { label: "Aguardando resposta", tone: "atencao" },
+  aprovado: { label: "Aprovado", tone: "marca" },
+  recusado: { label: "Recusado", tone: "erro" },
+  expirado: { label: "Expirado", tone: "neutro" },
+};
+const ST_OS = {
+  aguardando: { label: "Sem agendamento", tone: "neutro" },
+  agendada: { label: "Agendada", tone: "marca" },
+  andamento: { label: "Em andamento", tone: "atencao" },
+  concluida: { label: "Concluída", tone: "sucesso" },
+  cancelada: { label: "Cancelada", tone: "erro" },
+};
+const statusLanc = (l) => (l.pago ? { label: l.tipo === "receita" ? "Recebido" : "Pago", tone: "sucesso" } : l.vencimento < HOJE ? { label: "Vencido", tone: "erro" } : { label: l.tipo === "receita" ? "A receber" : "A pagar", tone: "atencao" });
+
+const Panel = ({ children, className }) => <div className={cx("bg-white rounded-2xl ring-1 ring-slate-200/70", className)}>{children}</div>;
+
+const Rotulo = ({ children, acao }) => (
+  <div className="flex items-end justify-between gap-4 mb-3">
+    <h2 className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em]">{children}</h2>
+    {acao}
+  </div>
+);
+
+const Field = ({ label, children, hint, className }) => (
+  <label className={cx("block", className)}>
+    <span className="block text-[13px] font-medium text-slate-600 mb-1.5">{label}</span>
+    {children}
+    {hint && <span className="block text-xs text-slate-400 mt-1.5 leading-relaxed">{hint}</span>}
+  </label>
+);
+
+const inputCls = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 transition focus:outline-none focus:ring-2 focus:ring-teal-600";
+const Input = (p) => <input {...p} className={cx(inputCls, p.className)} />;
+const Textarea = (p) => <textarea {...p} className={cx(inputCls, "resize-none leading-relaxed", p.className)} />;
+const Select = ({ children, ...p }) => <select {...p} className={cx(inputCls, "appearance-none", p.className)}>{children}</select>;
+
+function Modal({ open, onClose, title, sub, children, footer, wide }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className={cx("relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[92vh] sm:max-h-[88vh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
+        <div className="flex items-start justify-between gap-4 px-5 sm:px-7 pt-6 pb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 tracking-tight">{title}</h3>
+            {sub && <p className="text-sm text-slate-500 mt-0.5">{sub}</p>}
+          </div>
+          <button onClick={onClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
+        </div>
+        <div className="overflow-y-auto px-5 sm:px-7 pb-6 space-y-5">{children}</div>
+        {footer && <div className="px-5 sm:px-7 py-4 border-t border-slate-100 flex gap-3 justify-end">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Confirm({ estado, onClose }) {
+  if (!estado) return null;
+  return (
+    <Modal open onClose={onClose} title={estado.titulo}
+      footer={<><Btn variant="ghost" onClick={onClose}>Voltar</Btn>
+        <Btn variant="dark" onClick={() => { estado.acao(); onClose(); }}>{estado.confirmar}</Btn></>}>
+      <p className="text-[15px] text-slate-600 leading-relaxed">{estado.texto}</p>
+    </Modal>
+  );
+}
+
+const PageHead = ({ title, sub, action }) => (
+  <div className="flex items-start justify-between gap-4 mb-7">
+    <div>
+      <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{title}</h1>
+      {sub && <p className="text-slate-500 mt-1.5 text-[15px]">{sub}</p>}
+    </div>
+    {action && <div className="shrink-0">{action}</div>}
+  </div>
+);
+
+const Empty = ({ icon: Icon, title, sub, action }) => (
+  <div className="text-center py-12 px-6">
+    <div className="w-12 h-12 rounded-2xl bg-white ring-1 ring-slate-200/70 mx-auto flex items-center justify-center text-slate-300"><Icon className="w-5 h-5" /></div>
+    <p className="mt-4 font-medium text-slate-800">{title}</p>
+    {sub && <p className="text-sm text-slate-500 mt-1.5 max-w-sm mx-auto leading-relaxed">{sub}</p>}
+    {action && <div className="mt-5 flex justify-center">{action}</div>}
+  </div>
+);
+
+const SearchBox = ({ value, onChange, placeholder, autoFocus }) => (
+  <div className="relative">
+    <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} autoFocus={autoFocus} className={cx(inputCls, "pl-11")} />
+  </div>
+);
+
+const Avatar = ({ nome, tipo, size = "md" }) => (
+  <div className={cx("rounded-xl flex items-center justify-center shrink-0 font-semibold",
+    size === "lg" ? "w-14 h-14 text-base" : "w-11 h-11 text-sm",
+    tipo === "PJ" ? "bg-slate-900 text-white" : "bg-teal-50 text-teal-800 ring-1 ring-teal-200/70")}>
+    {tipo === "PJ" ? <Building2 className={size === "lg" ? "w-6 h-6" : "w-5 h-5"} /> : iniciais(nome)}
+  </div>
+);
+
+const Tabs = ({ valor, onChange, opcoes, className }) => (
+  <div className={cx("flex gap-2 overflow-x-auto pb-1 -mx-1 px-1", className)}>
+    {opcoes.map((o) => (
+      <button key={o.id} onClick={() => onChange(o.id)} aria-pressed={valor === o.id}
+        className={cx("px-4 py-2.5 rounded-xl text-[13px] font-medium whitespace-nowrap transition-colors", ring,
+          valor === o.id ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+        {o.label}
+      </button>
+    ))}
+  </div>
+);
+
+function Trilha({ etapas }) {
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      {etapas.map((e, i) => (
+        <React.Fragment key={e.label + i}>
+          <span className={cx("inline-flex items-center gap-1.5 text-[11px] font-medium",
+            e.feito ? "text-teal-800" : e.alerta ? "text-amber-700" : "text-slate-400")}>
+            {e.feito ? <CheckCircle2 className="w-3.5 h-3.5" /> : e.alerta ? <Clock className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5" />}
+            {e.label}
+          </span>
+          {i < etapas.length - 1 && <span className={cx("w-4 h-px", e.feito ? "bg-teal-300" : "bg-slate-200")} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+const Linha = ({ children, onClick, className }) => {
+  const cls = cx("w-full text-left px-4 sm:px-5 py-4 transition-colors", onClick && "hover:bg-slate-50/80", className);
+  return onClick ? <button onClick={onClick} className={cx(cls, ring, "block")}>{children}</button> : <div className={cls}>{children}</div>;
+};
+
+/* en

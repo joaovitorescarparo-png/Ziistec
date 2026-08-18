@@ -1,0 +1,267 @@
+="hidden sm:block text-[12px] text-slate-300 w-20 text-right shrink-0">custo {brlCurto(s.custo)}</span>
+        <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+      </div>
+    </Linha>
+  );
+  const LinhaProduto = ({ p, apagado }) => (
+    <Linha onClick={() => setFormP(p)} className={apagado ? "opacity-55" : ""}>
+      <div className="flex items-center gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-slate-900 truncate">{p.nome}</p>
+          <p className="text-[13px] text-slate-500 truncate">
+            {[p.marca, p.modelo].filter(Boolean).join(" ")}{p.garantiaMeses > 0 ? ` · garantia de fábrica ${p.garantiaMeses} meses` : ""}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-[15px] font-semibold text-slate-900 tabular-nums">{brl(p.preco)}</p>
+          <p className="text-[12px] text-slate-400">por {unidadeLabel(p.unidade)}</p>
+        </div>
+        <span className="hidden sm:block text-[12px] text-slate-300 w-20 text-right shrink-0">custo {brlCurto(p.custo)}</span>
+        <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+      </div>
+    </Linha>
+  );
+
+  const inativos = aba === "servicos" ? inativosS : inativosP;
+
+  return (
+    <>
+      <PageHead title="Serviços e produtos" sub="O que você vende, quanto cobra e como cobra."
+        action={aba === "servicos"
+          ? <Btn icon={Plus} onClick={() => setFormS({ unidade: "unidade", ativo: true, preco: 0, custo: 0, categoria: "", garantiaDias: 0, retornoDias: 0 })}>Novo serviço</Btn>
+          : <Btn icon={Plus} onClick={() => setFormP({ unidade: "unidade", ativo: true, preco: 0, custo: 0, garantiaMeses: 0 })}>Novo produto</Btn>} />
+
+      <Tabs valor={aba} onChange={setAba} opcoes={[{ id: "servicos", label: `Serviços · ${ativosS.length}` }, { id: "produtos", label: `Produtos e materiais · ${ativosP.length}` }]} className="mb-5" />
+      <div className="mb-6 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder={aba === "servicos" ? "Buscar serviço" : "Buscar produto, marca ou modelo"} /></div>
+
+      {aba === "servicos" ? (
+        <div className="space-y-7">
+          {ativosS.length === 0 && <Panel><Empty icon={Wrench} title="Nenhum serviço encontrado" sub="Cadastre o que você vende para montar orçamentos em segundos." /></Panel>}
+          {categorias.map((cat) => (
+            <section key={cat}>
+              <Rotulo>{cat}</Rotulo>
+              <Panel className="divide-y divide-slate-100 overflow-hidden">
+                {ativosS.filter((s) => s.categoria === cat).map((s) => <LinhaServico key={s.id} s={s} />)}
+              </Panel>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <>
+          {ativosP.length === 0 ? <Panel><Empty icon={Package} title="Nenhum produto encontrado" sub="Cadastre os equipamentos e materiais que você revende junto com o serviço." /></Panel> : (
+            <Panel className="divide-y divide-slate-100 overflow-hidden">{ativosP.map((p) => <LinhaProduto key={p.id} p={p} />)}</Panel>
+          )}
+        </>
+      )}
+
+      {inativos.length > 0 && (
+        <section className="mt-8">
+          <button onClick={() => setVerInativos((v) => !v)} className={cx("text-[13px] font-medium text-slate-500 hover:text-slate-800 py-2", ring)}>
+            {verInativos ? "Ocultar" : "Mostrar"} {inativos.length} item{inativos.length > 1 ? "ns" : ""} inativo{inativos.length > 1 ? "s" : ""}
+          </button>
+          {verInativos && (
+            <Panel className="divide-y divide-slate-100 overflow-hidden mt-2">
+              {aba === "servicos" ? inativosS.map((s) => <LinhaServico key={s.id} s={s} apagado />) : inativosP.map((p) => <LinhaProduto key={p.id} p={p} apagado />)}
+            </Panel>
+          )}
+        </section>
+      )}
+
+      {formS && (
+        <Modal open onClose={() => setFormS(null)} title={formS.id ? "Editar serviço" : "Novo serviço"} wide
+          footer={<><Btn variant="ghost" onClick={() => setFormS(null)}>Cancelar</Btn>
+            <Btn onClick={() => { salvarServico(formS); setFormS(null); }} disabled={!formS.nome}>Salvar serviço</Btn></>}>
+          <Field label="Nome do serviço"><Input value={formS.nome || ""} onChange={(e) => setFormS({ ...formS, nome: e.target.value })} placeholder="Ex.: Instalação de fechadura digital" /></Field>
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Categoria"><Input value={formS.categoria || ""} onChange={(e) => setFormS({ ...formS, categoria: e.target.value })} placeholder="Ex.: Controle de acesso" /></Field>
+            <Field label="Cobrado por" hint="Define como a quantidade é contada nos orçamentos.">
+              <Select value={formS.unidade} onChange={(e) => setFormS({ ...formS, unidade: e.target.value })}>
+                {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Preço de venda"><Input type="number" min="0" value={formS.preco} onChange={(e) => setFormS({ ...formS, preco: Number(e.target.value) })} /></Field>
+            <Field label="Custo estimado" hint="Uso interno. Nunca aparece para o cliente."><Input type="number" min="0" value={formS.custo} onChange={(e) => setFormS({ ...formS, custo: Number(e.target.value) })} /></Field>
+          </div>
+          <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-4">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <p className="text-[14px] font-medium text-slate-800">Este serviço tem garantia?</p>
+                <p className="text-[12.5px] text-slate-500 mt-0.5">Ao finalizar uma OS com este serviço, a garantia nasce sozinha.</p>
+              </div>
+              <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
+                {[["nao", "Não"], ["sim", "Sim"]].map(([v, label]) => {
+                  const ativo = v === "sim" ? formS.garantiaDias > 0 : !formS.garantiaDias;
+                  return (
+                    <button key={v} onClick={() => setFormS({ ...formS, garantiaDias: v === "sim" ? (formS.garantiaDias || 90) : 0 })}
+                      aria-pressed={ativo}
+                      className={cx("px-5 py-2 rounded-lg text-[14px] font-medium transition-colors", ativo ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {formS.garantiaDias > 0 && (
+              <div className="flex flex-wrap gap-2 items-end">
+                {PRAZOS_GARANTIA.map((p) => (
+                  <button key={p.dias} onClick={() => setFormS({ ...formS, garantiaDias: p.dias })} aria-pressed={formS.garantiaDias === p.dias}
+                    className={cx("px-3.5 py-2.5 rounded-xl text-[13px] font-medium transition-colors", ring,
+                      formS.garantiaDias === p.dias ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+                    {p.label}
+                  </button>
+                ))}
+                <div className="w-[150px]">
+                  <Field label="Personalizado">
+                    <Input type="number" min="1" value={formS.garantiaDias} aria-label="Prazo de garantia em dias"
+                      onChange={(e) => setFormS({ ...formS, garantiaDias: Math.max(1, Number(e.target.value)) })} />
+                  </Field>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Recomendar novo atendimento em" hint="Usado para pós-venda.">
+              <Select value={formS.retornoDias || 0} onChange={(e) => setFormS({ ...formS, retornoDias: Number(e.target.value) })}>
+                {PRAZOS_RETORNO.map((d) => <option key={d} value={d}>{d === 0 ? "Não recomendar" : d === 365 ? "12 meses" : d === 180 ? "6 meses" : `${d} dias`}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <Field label="Descrição">
+            <CampoVoz rows={3} valor={formS.descricao || ""} onChange={(v) => setFormS({ ...formS, descricao: v })} placeholder="O que está incluso neste serviço" />
+          </Field>
+          <label className="flex items-center gap-3 py-1">
+            <input type="checkbox" checked={formS.ativo} onChange={(e) => setFormS({ ...formS, ativo: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" />
+            <span className="text-[14px] text-slate-700">Disponível para uso em orçamentos</span>
+          </label>
+        </Modal>
+      )}
+
+      {formP && (
+        <Modal open onClose={() => setFormP(null)} title={formP.id ? "Editar produto" : "Novo produto ou material"} wide
+          footer={<><Btn variant="ghost" onClick={() => setFormP(null)}>Cancelar</Btn>
+            <Btn onClick={() => { salvarProduto(formP); setFormP(null); }} disabled={!formP.nome}>Salvar produto</Btn></>}>
+          <Field label="Nome do produto"><Input value={formP.nome || ""} onChange={(e) => setFormP({ ...formP, nome: e.target.value })} placeholder="Ex.: Fechadura digital biométrica" /></Field>
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Marca"><Input value={formP.marca || ""} onChange={(e) => setFormP({ ...formP, marca: e.target.value })} placeholder="Ex.: Intelbras" /></Field>
+            <Field label="Modelo ou referência"><Input value={formP.modelo || ""} onChange={(e) => setFormP({ ...formP, modelo: e.target.value })} placeholder="Ex.: FR 320" /></Field>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Custo de compra"><Input type="number" min="0" value={formP.custo} onChange={(e) => setFormP({ ...formP, custo: Number(e.target.value) })} /></Field>
+            <Field label="Preço de venda"><Input type="number" min="0" value={formP.preco} onChange={(e) => setFormP({ ...formP, preco: Number(e.target.value) })} /></Field>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Unidade">
+              <Select value={formP.unidade} onChange={(e) => setFormP({ ...formP, unidade: e.target.value })}>
+                {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+              </Select>
+            </Field>
+            <Field label="Garantia do fabricante" hint="Separada da garantia do seu serviço.">
+              <Select value={formP.garantiaMeses || 0} onChange={(e) => setFormP({ ...formP, garantiaMeses: Number(e.target.value) })}>
+                {[0, 3, 6, 12, 24, 36].map((m) => <option key={m} value={m}>{m === 0 ? "Sem garantia" : `${m} meses`}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <Field label="Fornecedor" hint="Opcional."><Input value={formP.fornecedor || ""} onChange={(e) => setFormP({ ...formP, fornecedor: e.target.value })} /></Field>
+          <Field label="Descrição" hint="Opcional."><Textarea rows={2} value={formP.descricao || ""} onChange={(e) => setFormP({ ...formP, descricao: e.target.value })} /></Field>
+          <label className="flex items-center gap-3 py-1">
+            <input type="checkbox" checked={formP.ativo} onChange={(e) => setFormP({ ...formP, ativo: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" />
+            <span className="text-[14px] text-slate-700">Disponível para uso em orçamentos</span>
+          </label>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/* ============================================================== Orçamentos */
+function Orcamentos(p) {
+  const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto } = p;
+  const [filtro, setFiltro] = useState("todos");
+  const [voz, setVoz] = useState(false);
+  const [rascunhoVoz, setRascunhoVoz] = useState(null);
+
+  if (orcamentoAberto) {
+    if (String(orcamentoAberto).startsWith("novo")) {
+      const preCliente = String(orcamentoAberto).split(":")[1] || "";
+      return <OrcamentoEditor {...p} inicial={{ clienteId: preCliente }} onFechar={() => setOrcamentoAberto(null)} />;
+    }
+    const o = orcamentos.find((x) => x.id === orcamentoAberto);
+    if (o) return <OrcamentoDoc {...p} orc={o} />;
+  }
+  if (rascunhoVoz) return <OrcamentoEditor {...p} inicial={rascunhoVoz} onFechar={() => setRascunhoVoz(null)} />;
+
+  const filtrados = orcamentos.filter((o) => filtro === "todos" || o.status === filtro);
+
+  return (
+    <>
+      <PageHead title="Orçamentos" sub="Monte, envie e acompanhe a resposta do cliente."
+        action={
+          <div className="flex gap-2">
+            <Btn variant="soft" icon={Mic} onClick={() => setVoz(true)}>Por voz</Btn>
+            <Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo</Btn>
+          </div>
+        } />
+      <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
+        opcoes={[{ id: "todos", label: "Todos" }, { id: "rascunho", label: "Rascunhos" }, { id: "enviado", label: "Aguardando" }, { id: "aprovado", label: "Aprovados" }]} />
+
+      {filtrados.length === 0 ? (
+        <Panel><Empty icon={FileText} title="Nenhum orçamento por aqui" sub="Crie um orçamento em menos de um minuto usando seus serviços cadastrados."
+          action={<Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo orçamento</Btn>} /></Panel>
+      ) : (
+        <Panel className="divide-y divide-slate-100 overflow-hidden">
+          {filtrados.map((o) => (
+            <Linha key={o.id} onClick={() => setOrcamentoAberto(o.id)}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-900 truncate">{nomeCliente(o.clienteId)}</p>
+                  <p className="text-[13px] text-slate-500">{o.numero} · {dataBR(o.data)} · {o.itens.length} item{o.itens.length > 1 ? "ns" : ""}</p>
+                  <div className="mt-2.5">
+                    <Trilha etapas={[
+                      { label: "Orçamento", feito: true },
+                      { label: "Aprovado", feito: o.status === "aprovado", alerta: o.status === "enviado" },
+                      { label: "Ordem de serviço", feito: !!o.osId },
+                    ]} />
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[17px] font-semibold text-slate-900 tabular-nums">{brl(totalDoc(o))}</p>
+                  <Pill tone={ST_ORC[o.status].tone} className="mt-1.5">{ST_ORC[o.status].label}</Pill>
+                </div>
+              </div>
+            </Linha>
+          ))}
+        </Panel>
+      )}
+
+      {voz && <OrcamentoVoz {...p} onClose={() => setVoz(false)} onConfirmar={(rasc) => { setVoz(false); setRascunhoVoz(rasc); }} />}
+    </>
+  );
+}
+
+/* ------------------------------------------- orçamento por voz (com confirmação) */
+function OrcamentoVoz({ onClose, onConfirmar, clientes, servicos, produtos, empresa, salvarCliente, aviso }) {
+  const [fala, setFala] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState(null);
+  const [previa, setPrevia] = useState(null);
+  const [comando, setComando] = useState("");
+  const [novoCliente, setNovoCliente] = useState(null);
+
+  const interpretar = async (comandoCorrecao) => {
+    setCarregando(true); setErro(null);
+    try {
+      const bruto = await chamarIA(promptOrcamento({
+        fala, clientes, servicos, produtos,
+        rascunho: comandoCorrecao ? previa.bruto : null, comando: comandoCorrecao,
+      }));
+      setPrevia(montarPrevia(bruto));
+      setComando("");
+    } catch (e) {
+      setErro("Não consegui interpretar agora. Você pode tentar de novo ou montar o orçamento manualmente.");
+    }
+    setCarregando(false);
+  };
+
+  const montarPrevia = (br

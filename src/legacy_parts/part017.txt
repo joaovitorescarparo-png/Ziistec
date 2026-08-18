@@ -1,0 +1,248 @@
+so].campo].trim()} onClick={() => setPasso(passo + 1)}>Continuar</Btn>
+                  : <Btn icon={Check} onClick={() => onCriarConta(novo)}>Entrar no ZiisTec</Btn>}
+              </div>
+            </Panel>
+            <AvisoAuth />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AssinaturaBloqueada({ assinatura, empresa, sair, reativar }) {
+  const st = ST_ASSINATURA[assinatura.status];
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased">
+      <div className="w-full max-w-md text-center">
+        <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center mx-auto mb-5">
+          <Lock className="w-5 h-5 text-teal-400" aria-hidden="true" />
+        </div>
+        <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
+          {assinatura.status === "cancelada" ? "Sua assinatura foi cancelada" : "Sua assinatura está pausada"}
+        </h1>
+        <p className="text-[15px] text-slate-500 mt-2 leading-relaxed">
+          Os dados da {empresa.nome} continuam armazenados: clientes, orçamentos, ordens, financeiro, garantias e histórico.
+          Nada foi apagado.
+        </p>
+        <Panel className="p-5 mt-7 text-left space-y-3">
+          <div className="flex justify-between text-[14px]"><span className="text-slate-500">Plano</span><span className="font-medium">{assinatura.plano}</span></div>
+          <div className="flex justify-between text-[14px]"><span className="text-slate-500">Valor</span><span className="font-medium tabular-nums">{brl(assinatura.valor)}/mês</span></div>
+          <div className="flex justify-between items-center text-[14px]"><span className="text-slate-500">Situação</span><Pill tone={st.tone}>{st.label}</Pill></div>
+        </Panel>
+        <Btn className="w-full mt-5" icon={CreditCard} onClick={reativar}>Reativar assinatura</Btn>
+        <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">
+          A reativação aqui apenas muda o estado interno. A cobrança real depende da integração com um provedor de pagamento,
+          ainda não contratada.
+        </p>
+        <button onClick={sair} className={cx("text-[13px] text-slate-500 mt-6 hover:text-slate-800", ring)}>Sair da conta</button>
+      </div>
+    </div>
+  );
+}
+
+function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarColaborador, reenviarAcesso, alternarColaborador, ordens, pedirConfirmacao, aviso }) {
+  const [form, setForm] = useState(null);
+  const [editando, setEditando] = useState(null);
+  const [credencial, setCredencial] = useState(null);
+
+  const convidar = () => {
+    const r = salvarColaborador(form);
+    setForm(null);
+    if (r) setCredencial({ nome: form.nome, email: form.email.trim().toLowerCase(), senha: r.senhaTemporaria });
+  };
+
+  return (
+    <>
+      <PageHead title="Equipe" sub="Quem tem acesso à sua empresa e o que cada um enxerga."
+        action={<Btn icon={Plus} onClick={() => setForm({ nome: "", email: "", telefone: "", funcao: "", papel: "tecnico" })}>Adicionar colaborador</Btn>} />
+
+      <Panel className="divide-y divide-slate-100 overflow-hidden">
+        {equipe.map((m) => {
+          const minhas = ordens.filter((o) => o.responsavelId === m.usuarioId && o.status !== "concluida" && o.status !== "cancelada");
+          const pendente = m.convite === "pendente" || m.usuario?.precisaTrocarSenha;
+          return (
+            <Linha key={m.id}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center text-sm font-semibold shrink-0">
+                    {iniciais(m.usuario?.nome)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900 truncate">
+                      {m.usuario?.nome}{m.usuarioId === usuarioAtual?.id && <span className="text-slate-400 font-normal"> · você</span>}
+                    </p>
+                    <p className="text-[13px] text-slate-500 truncate">
+                      {m.usuario?.email}{m.usuario?.funcao ? ` · ${m.usuario.funcao}` : ""}
+                    </p>
+                    <p className="text-[12px] text-slate-400 mt-0.5">
+                      {minhas.length > 0 ? `${minhas.length} ordem(ns) em aberto` : "sem ordens em aberto"}
+                      {m.usuario?.ultimoAcesso ? ` · último acesso ${dataBR(m.usuario.ultimoAcesso)}` : " · nunca acessou"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <Pill tone={m.papel === "proprietario" ? "marca" : "neutro"}>{m.papel === "proprietario" ? "Proprietário" : "Técnico"}</Pill>
+                  {!m.ativo && <Pill tone="erro">Desativado</Pill>}
+                  {m.ativo && pendente && m.papel !== "proprietario" && <Pill tone="atencao">Primeiro acesso pendente</Pill>}
+                  {m.papel !== "proprietario" && (
+                    <>
+                      <Btn size="sm" variant="soft" icon={Pencil} onClick={() => setEditando({ ...m.usuario })} ariaLabel="Editar colaborador" title="Editar" />
+                      <Btn size="sm" variant="soft" onClick={() => setCredencial({
+                        nome: m.usuario?.nome, email: m.usuario?.email, senha: reenviarAcesso(m.usuarioId), reenvio: true,
+                      })}>Novo acesso</Btn>
+                      <Btn size="sm" variant={m.ativo ? "ghost" : "soft"} onClick={() => pedirConfirmacao({
+                        titulo: m.ativo ? `Desativar ${m.usuario?.nome}?` : `Reativar ${m.usuario?.nome}?`,
+                        texto: m.ativo
+                          ? "A pessoa perde o acesso à empresa imediatamente. As ordens, relatos e fotos que ela registrou continuam pertencendo à empresa e não são apagados."
+                          : "A pessoa volta a acessar as ordens atribuídas a ela.",
+                        confirmar: m.ativo ? "Desativar" : "Reativar", acao: () => alternarColaborador(m),
+                      })}>{m.ativo ? "Desativar" : "Reativar"}</Btn>
+                    </>
+                  )}
+                </div>
+              </div>
+            </Linha>
+          );
+        })}
+      </Panel>
+
+      <Panel className="p-5 mt-6">
+        <p className="text-[13px] text-slate-600 leading-relaxed">
+          <span className="font-medium text-slate-800">O que o técnico enxerga:</span> início, agenda e as ordens atribuídas a ele —
+          com cliente, endereço, rota, o que precisa ser feito, relato por voz, fotos, materiais e pendências.
+          A carteira de clientes, orçamentos, garantias, financeiro, compras, equipe e configurações ficam fora do acesso dele.
+        </p>
+      </Panel>
+
+      {form && (
+        <Modal open onClose={() => setForm(null)} wide title="Adicionar colaborador"
+          sub="Você cadastra a pessoa e entrega o acesso. Ela não cria a própria conta."
+          footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
+            <Btn disabled={!form.nome.trim() || !form.email.trim()} onClick={convidar}>Criar acesso</Btn></>}>
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Nome"><Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} autoFocus /></Field>
+            <Field label="Telefone" hint="Opcional."><Input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} /></Field>
+          </div>
+          <Field label="E-mail" hint="É por ele que a pessoa entra no ZiisTec.">
+            <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </Field>
+          <Field label="Função" hint="Opcional. Ex.: técnico instalador, ajudante.">
+            <Input value={form.funcao} onChange={(e) => setForm({ ...form, funcao: e.target.value })} />
+          </Field>
+          <div>
+            <p className="text-[13px] font-medium text-slate-600 mb-2">Papel de acesso</p>
+            <div className="flex gap-2">
+              {[["tecnico", "Técnico"], ["proprietario", "Proprietário"]].map(([v, label]) => (
+                <button key={v} onClick={() => setForm({ ...form, papel: v })} aria-pressed={form.papel === v}
+                  className={cx("flex-1 py-3.5 rounded-xl text-[15px] font-medium transition-colors", ring,
+                    form.papel === v ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600")}>{label}</button>
+              ))}
+            </div>
+            <p className="text-[12.5px] text-slate-500 mt-3 leading-relaxed">
+              {form.papel === "tecnico"
+                ? "Vê apenas as ordens atribuídas a ele e o necessário para executá-las."
+                : "Acesso completo à empresa, incluindo financeiro e configurações."}
+            </p>
+          </div>
+        </Modal>
+      )}
+
+      {editando && (
+        <Modal open onClose={() => setEditando(null)} wide title="Editar colaborador"
+          footer={<><Btn variant="ghost" onClick={() => setEditando(null)}>Cancelar</Btn>
+            <Btn onClick={() => { atualizarColaborador(editando.id, { nome: editando.nome, telefone: editando.telefone, funcao: editando.funcao }); setEditando(null); aviso("Colaborador atualizado"); }}>Salvar</Btn></>}>
+          <Field label="Nome"><Input value={editando.nome || ""} onChange={(e) => setEditando({ ...editando, nome: e.target.value })} /></Field>
+          <Field label="Telefone"><Input value={editando.telefone || ""} onChange={(e) => setEditando({ ...editando, telefone: e.target.value })} /></Field>
+          <Field label="Função"><Input value={editando.funcao || ""} onChange={(e) => setEditando({ ...editando, funcao: e.target.value })} /></Field>
+          <p className="text-[12.5px] text-slate-400 leading-relaxed">
+            O e-mail identifica o acesso e não é alterado aqui. Para trocar de pessoa, desative este colaborador e cadastre outro —
+            as ordens já executadas continuam com a empresa.
+          </p>
+        </Modal>
+      )}
+
+      {credencial && (
+        <Modal open onClose={() => setCredencial(null)} title={credencial.reenvio ? "Novo acesso gerado" : "Acesso criado"}
+          sub={credencial.nome}
+          footer={<Btn onClick={() => setCredencial(null)}>Já entreguei</Btn>}>
+          <div className="rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100">
+            <div className="px-4 py-3.5 flex justify-between gap-3">
+              <span className="text-[14px] text-slate-500">E-mail</span>
+              <span className="text-[14px] text-slate-900">{credencial.email}</span>
+            </div>
+            <div className="px-4 py-3.5 flex items-center justify-between gap-3">
+              <span className="text-[14px] text-slate-500">Senha temporária</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[16px] font-semibold text-slate-900 tracking-wider tabular-nums">{credencial.senha}</span>
+                <Btn size="sm" variant="soft" icon={Copy} title="Copiar" ariaLabel="Copiar senha"
+                  onClick={() => { navigator.clipboard?.writeText(credencial.senha); aviso("Senha copiada"); }} />
+              </div>
+            </div>
+          </div>
+          <p className="text-[13px] text-slate-600 leading-relaxed">
+            Entregue esta senha a {credencial.nome?.split(" ")[0]}. No primeiro acesso o ZiisTec vai pedir que ela crie uma senha pessoal.
+          </p>
+          <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3 flex gap-2.5">
+            <Lock className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" aria-hidden="true" />
+            <p className="text-[12.5px] text-amber-900 leading-relaxed">
+              Esta senha aparece uma única vez e não fica guardada no sistema — nem você consegue vê-la de novo.
+              Se a pessoa perder, gere um novo acesso. A validação real da senha depende da autenticação, ainda não conectada.
+            </p>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/* Administração da plataforma: assinaturas e contas, nunca o conteúdo das empresas. */
+function AdminPlataforma({ empresas, usuarios, membresias, assinaturas, mudarAssinatura, sair, toast }) {
+  const [aba, setAba] = useState("empresas");
+  const [intervencao, setIntervencao] = useState(null);
+  /* mudar assinatura à mão é intervenção administrativa: sempre passa por confirmação
+     e, quando o gateway existir, ele é que dita o status de pagamento */
+  const pedirIntervencao = (empresaAlvo, status, nome) => setIntervencao({ empresaAlvo, status, nome });
+  const [busca, setBusca] = useState("");
+  const lista = empresas.filter((e) => semAcento(e.nome + e.responsavel).includes(semAcento(busca)));
+  const ativas = assinaturas.filter((a) => a.status === "ativa").length;
+  const receita = assinaturas.filter((a) => ST_ASSINATURA[a.status].libera).reduce((t, a) => t + a.valor, 0);
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans antialiased">
+      <header className="bg-slate-900 px-4 sm:px-8 h-14 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-teal-500 flex items-center justify-center"><span className="text-slate-900 font-bold text-sm">Z</span></div>
+          <span className="text-white font-semibold tracking-tight">ZiisTec · plataforma</span>
+        </div>
+        <button onClick={sair} className="text-slate-300 text-[13px] flex items-center gap-2 px-2 py-1.5"><LogOut className="w-4 h-4" />Sair</button>
+      </header>
+
+      <div className="max-w-[1180px] mx-auto px-4 sm:px-8 py-8">
+        <PageHead title="Administração da plataforma" sub="Contas e assinaturas do ZiisTec. Nada aqui abre o conteúdo das empresas." />
+        <Tabs valor={aba} onChange={setAba} className="mb-6"
+          opcoes={[{ id: "empresas", label: "Empresas" }, { id: "financeiro", label: "Financeiro da plataforma" }]} />
+
+        {aba === "empresas" && <>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <Panel className="p-5"><p className="text-[12.5px] text-slate-500">Empresas</p><p className="text-[22px] font-semibold mt-1 tabular-nums">{empresas.length}</p></Panel>
+          <Panel className="p-5"><p className="text-[12.5px] text-slate-500">Assinaturas ativas</p><p className="text-[22px] font-semibold mt-1 tabular-nums">{ativas}</p></Panel>
+          <Panel className="p-5"><p className="text-[12.5px] text-slate-500">Usuários</p><p className="text-[22px] font-semibold mt-1 tabular-nums">{usuarios.filter((u) => !ehPlataforma(u)).length}</p></Panel>
+          <Panel className="p-5 bg-slate-900 ring-slate-900"><p className="text-[12.5px] text-slate-400">Receita recorrente</p>
+            <p className="text-[22px] font-semibold text-white mt-1 tabular-nums">{brl(receita)}</p></Panel>
+        </div>
+
+        <div className="mb-5 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder="Buscar empresa ou responsável" /></div>
+
+        <Panel className="divide-y divide-slate-100 overflow-hidden">
+          {lista.map((e) => {
+            const a = assinaturas.find((x) => x.empresaId === e.id);
+            const membros = membresias.filter((m) => m.empresaId === e.id);
+            const dono = usuarios.find((u) => u.id === membros.find((m) => m.papel === "proprietario")?.usuarioId);
+            const st = a ? ST_ASSINATURA[a.status] : null;
+            return (
+              <Linha key={e.id}>
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900 truncate">{e.nome}</p>
+                    

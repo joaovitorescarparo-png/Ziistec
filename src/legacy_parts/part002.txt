@@ -1,0 +1,283 @@
+dereço que abre rota no mapa */
+const Endereco = ({ valor, local, className, compacto }) => {
+  if (!valor) return null;
+  const destino = [local, valor].filter(Boolean).join(", ");
+  return (
+    <a href={mapsUrl(destino)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+      className={cx("inline-flex items-start gap-1.5 text-teal-800 hover:underline", ring, className)}>
+      <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />
+      <span className={compacto ? "truncate" : ""}>{local ? `${local} · ${valor}` : valor}</span>
+    </a>
+  );
+};
+
+/* =============================================== voz + interpretação por IA */
+function usarReconhecimento() {
+  const [suportado] = useState(() => typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition));
+  const [ouvindo, setOuvindo] = useState(false);
+  const [erro, setErro] = useState(null);
+  const rec = useRef(null);
+
+  const iniciar = (aoTexto) => {
+    if (!suportado) return;
+    setErro(null);
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const r = new Rec();
+    r.lang = "pt-BR"; r.continuous = true; r.interimResults = true;
+    let finalizado = "";
+    r.onresult = (ev) => {
+      let parcial = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const t = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalizado += t + " "; else parcial += t;
+      }
+      aoTexto((finalizado + parcial).trim());
+    };
+    r.onerror = (ev) => {
+      const msgs = {
+        "not-allowed": "Permissão de microfone negada. Libere o microfone nas configurações do navegador.",
+        "service-not-allowed": "O navegador bloqueou o reconhecimento de voz neste site.",
+        "no-speech": "Não ouvi nada. Toque no microfone e fale mais perto do aparelho.",
+        "audio-capture": "Nenhum microfone disponível neste aparelho.",
+        network: "Sem conexão para transcrever agora.",
+        aborted: null,
+      };
+      const m = msgs[ev.error];
+      if (m !== null) setErro(m || "Não consegui capturar o áudio.");
+      setOuvindo(false);
+    };
+    r.onend = () => setOuvindo(false);
+    rec.current = r;
+    try { r.start(); setOuvindo(true); } catch { setErro("Microfone indisponível."); }
+  };
+  const parar = () => { rec.current?.stop(); setOuvindo(false); };
+  return { suportado, ouvindo, erro, iniciar, parar };
+}
+
+/* Componente único de ditado. Usado em TODO campo de texto livre do ZiisTec.
+   A voz complementa o campo: o texto ditado é acrescentado ao que já existe,
+   nunca substitui, e continua editável à mão. */
+function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica }) {
+  const { suportado, ouvindo, erro, iniciar, parar } = usarReconhecimento();
+  const baseRef = useRef("");
+  const comecar = () => {
+    baseRef.current = valor.trim() ? valor.trimEnd() + " " : "";
+    iniciar((t) => onChange(baseRef.current + t));
+  };
+  const alternar = () => (ouvindo ? parar() : comecar());
+
+  return (
+    <div>
+      <div className="relative">
+        <Textarea rows={rows} value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
+          className={cx(suportado && !destaque && "pr-14", ouvindo && "ring-2 ring-teal-600")} />
+        {suportado && !destaque && (
+          <button onClick={alternar} aria-label={ouvindo ? "Parar de gravar" : "Ditar por voz"} title={ouvindo ? "Parar de gravar" : "Ditar por voz"}
+            className={cx("absolute right-2.5 bottom-2.5 p-2.5 rounded-lg transition-colors", ring,
+              ouvindo ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700")}>
+            {ouvindo ? <MicOff className="w-[18px] h-[18px]" /> : <Mic className="w-[18px] h-[18px]" />}
+          </button>
+        )}
+      </div>
+
+      {suportado && destaque && (
+        <Btn className="w-full mt-3" size="lg" variant={ouvindo ? "dark" : "primary"} icon={ouvindo ? MicOff : Mic} onClick={alternar}>
+          {ouvindo ? "Parar de gravar" : valor.trim() ? "Continuar falando" : "Falar o que foi feito"}
+        </Btn>
+      )}
+
+      <div className="flex items-center gap-3 mt-2 flex-wrap min-h-[18px]">
+        {ouvindo ? (
+          <span className="inline-flex items-center gap-2 text-[12.5px] font-medium text-teal-800">
+            <span className="w-2 h-2 rounded-full bg-rose-500" aria-hidden="true" />
+            Ouvindo… pode falar. O texto entra depois do que já está escrito.
+          </span>
+        ) : (
+          <>
+            {!suportado && <span className="text-[12px] text-slate-400">Ditado indisponível neste navegador — funciona no Chrome. Pode digitar normalmente.</span>}
+            {suportado && dica && <span className="text-[12px] text-slate-400">{dica}</span>}
+          </>
+        )}
+      </div>
+      {erro && <p className="text-[12.5px] text-rose-700 mt-1">{erro} Você pode continuar digitando.</p>}
+    </div>
+  );
+}
+
+async function chamarIA(prompt) {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
+  });
+  if (!resp.ok) throw new Error("Serviço de interpretação indisponível.");
+  const data = await resp.json();
+  const texto = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const limpo = texto.replace(/```json/g, "").replace(/```/g, "").trim();
+  return JSON.parse(limpo);
+}
+
+const promptOrcamento = ({ fala, clientes, servicos, produtos, rascunho, comando }) => `Você interpreta pedidos de orçamento de um prestador de serviços brasileiro e devolve APENAS JSON, sem markdown e sem comentários.
+
+CATÁLOGO DE CLIENTES: ${JSON.stringify(clientes.map((c) => ({ id: c.id, nome: c.fantasia || c.nome })))}
+CATÁLOGO DE SERVIÇOS: ${JSON.stringify(servicos.filter((s) => s.ativo).map((s) => ({ id: s.id, nome: s.nome, preco: s.preco, unidade: s.unidade })))}
+CATÁLOGO DE PRODUTOS: ${JSON.stringify(produtos.filter((p) => p.ativo).map((p) => ({ id: p.id, nome: `${p.nome} ${p.marca || ""} ${p.modelo || ""}`.trim(), preco: p.preco, unidade: p.unidade })))}
+
+${rascunho ? `RASCUNHO ATUAL: ${JSON.stringify(rascunho)}\nCOMANDO DE CORREÇÃO DO USUÁRIO: "${comando}"\nAplique somente a correção pedida e devolva o rascunho completo atualizado.` : `FALA DO USUÁRIO: "${fala}"`}
+
+Regras:
+- Use itens do catálogo sempre que o nome corresponder; nesse caso preencha catalogoId e tipo ("servico" ou "produto").
+- Se o usuário não disser preço, deixe preco como null (o sistema usará o preço do catálogo).
+- Se disser um preço, use exatamente esse valor.
+- Se um item não existir no catálogo, use catalogoId null e preencha nome; se não houver preço dito, deixe preco null.
+- Nunca invente cliente. Se não houver correspondência clara, deixe clienteId null e preencha clienteSugerido com o nome dito.
+- Liste em "avisos" tudo que ficou incerto, em português simples.
+
+Formato exato:
+{"clienteId":string|null,"clienteSugerido":string|null,"itens":[{"tipo":"servico"|"produto","catalogoId":string|null,"nome":string,"qtd":number,"unidade":string|null,"preco":number|null}],"desconto":number,"acrescimo":number,"validadeDias":number|null,"condicao":string|null,"obs":string|null,"localServico":string|null,"avisos":[string]}`;
+
+const promptRelato = (fala) => `Organize o relato de atendimento abaixo em seções, em português. Devolva APENAS JSON.
+RELATO FALADO: "${fala}"
+
+Regras rígidas:
+- Não invente diagnóstico, material, medida, marca, preço, teste ou resultado.
+- Não acrescente conclusões técnicas que não foram ditas.
+- Se algo não foi dito, simplesmente não crie a seção.
+- Mantenha as palavras do profissional sempre que possível; corrija apenas pontuação e concordância.
+
+Formato: {"texto":"DIAGNÓSTICO\\n...\\n\\nSERVIÇO EXECUTADO\\n...\\n\\nTESTES\\n...\\n\\nRESULTADO\\n..."}`;
+
+/* ================================================================== App */
+export default function ZiisTec({ contexto }) {
+  /* contexto vem do Supabase (Fase 1). Quando presente, substitui a
+     autenticação simulada e os dados de demonstração de empresa/usuário. */
+  const real = Boolean(contexto);
+  const [tela, setTela] = useState("inicio");
+  const [drawer, setDrawer] = useState(false);
+  const [busca, setBusca] = useState(false);
+  /* --- identidade e acesso --- */
+  const [empresas, setEmpresas] = useState(() => (real ? [contexto.empresa] : EMPRESAS_SEED));
+  const [usuarios, setUsuarios] = useState(() => (real ? contexto.usuarios : USUARIOS_SEED));
+  const [membresias, setMembresias] = useState(() => (real ? contexto.membresias : MEMBRESIAS_SEED));
+  const [assinaturas, setAssinaturas] = useState(() => (real ? [contexto.assinatura] : ASSINATURAS_SEED));
+  const [sessao, setSessao] = useState(() => (real ? contexto.sessao : null));
+
+  /* mudou empresa, papel ou usuário no Supabase: o app acompanha */
+  useEffect(() => {
+    if (!real) return;
+    setEmpresas([contexto.empresa]);
+    setUsuarios(contexto.usuarios);
+    setMembresias(contexto.membresias);
+    setAssinaturas([contexto.assinatura]);
+    setSessao(contexto.sessao);
+  }, [real, contexto?.chave]);
+
+  /* --- dados empresariais: guardados juntos, sempre com empresaId --- */
+  const [clientes, setClientes] = useState(() => real ? [] : ([...daEmpresa(CLIENTES_SEED, "e1"), ...DADOS_E2.clientes]));
+  const [servicos, setServicos] = useState(() => real ? [] : ([...daEmpresa(SERVICOS_SEED, "e1"), ...DADOS_E2.servicos]));
+  const [produtos, setProdutos] = useState(() => real ? [] : (daEmpresa(PRODUTOS_SEED, "e1")));
+  const [orcamentos, setOrcamentos] = useState(() => real ? [] : (daEmpresa(ORCAMENTOS_SEED, "e1")));
+  const [ordens, setOrdens] = useState(() => (real ? [] : [
+    ...daEmpresa(ORDENS_SEED, "e1").map((o) => ({ ...o, responsavelId: RESPONSAVEIS[o.responsavel] || "u1" })),
+    ...DADOS_E2.ordens,
+  ]));
+  const [lancamentos, setLancamentos] = useState(() => real ? [] : (daEmpresa(LANCAMENTOS_SEED, "e1")));
+  const [compras, setCompras] = useState(() => real ? [] : (daEmpresa(COMPRAS_SEED, "e1")));
+  const [garantias, setGarantias] = useState(() => real ? [] : (daEmpresa(GARANTIAS_SEED, "e1")));
+  const [toast, setToast] = useState(null);
+  const [confirmar, setConfirmar] = useState(null);
+
+  const [clienteAberto, setClienteAberto] = useState(null);
+  const [orcamentoAberto, setOrcamentoAberto] = useState(null);
+  const [osAberta, setOsAberta] = useState(null);
+  const [compraAberta, setCompraAberta] = useState(null);
+  const [garantiaAberta, setGarantiaAberta] = useState(null);
+
+  const aviso = (t) => { setToast(t); setTimeout(() => setToast(null), 3000); };
+
+  /* ---- contexto de acesso: usuário → membresia → empresa ---- */
+  const usuarioAtual = usuarios.find((u) => u.id === sessao?.usuarioId) || null;
+  const membresia = membresias.find((m) => m.id === sessao?.membresiaId) || null;
+  const papel = membresia?.papel || null;
+  const empresaId = membresia?.empresaId || null;
+  const empresa = empresas.find((e) => e.id === empresaId) || EMPRESA_SEED;
+  const assinatura = assinaturas.find((a) => a.empresaId === empresaId) || null;
+  const permitido = (chave) => pode(papel, chave);
+
+  /* ---- escopo: nada é lido sem passar pelo filtro da empresa da sessão ---- */
+  const doTenant = (arr) => (empresaId ? arr.filter((x) => x.empresaId === empresaId) : []);
+  const servicosEmp = permitido("catalogo") ? doTenant(servicos) : [];
+  const produtosEmp = (permitido("catalogo") || permitido("registrarMateriais")) ? doTenant(produtos) : [];
+  const ordensEmp = doTenant(ordens).filter((o) => permitido("todasOS") || o.responsavelId === usuarioAtual?.id);
+  /* sem a permissão de carteira, o técnico só alcança os clientes das ordens dele —
+     vale também para busca global, e não só para a aba Clientes */
+  const clientesEmp = permitido("clientes")
+    ? doTenant(clientes)
+    : doTenant(clientes).filter((c) => ordensEmp.some((o) => o.clienteId === c.id));
+  const orcamentosEmp = permitido("orcamentos") ? doTenant(orcamentos) : [];
+  const lancamentosEmp = permitido("financeiro") ? doTenant(lancamentos) : [];
+  const comprasEmp = permitido("compras") ? doTenant(compras) : [];
+  const garantiasEmp = permitido("garantias")
+    ? doTenant(garantias)
+    : doTenant(garantias).filter((g) => ordensEmp.some((o) => o.id === g.osId || o.garantiaId === g.id));
+  const equipe = membresias.filter((m) => m.empresaId === empresaId)
+    .map((m) => ({ ...m, usuario: usuarios.find((u) => u.id === m.usuarioId) }));
+
+  const cliente = (id) => clientesEmp.find((c) => c.id === id);
+  const nomeCliente = (id) => { const c = cliente(id); return c?.fantasia || c?.nome || "Cliente"; };
+
+  const irPara = (t) => {
+    setTela(t); setClienteAberto(null); setOrcamentoAberto(null); setOsAberta(null); setCompraAberta(null);
+    setGarantiaAberta(null); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
+  };
+  const abrirOS = (id) => { setTela("ordens"); setOsAberta(id); setBusca(false); setDrawer(false); };
+  const abrirOrc = (id) => { setTela("orcamentos"); setOrcamentoAberto(id); setBusca(false); setDrawer(false); };
+  const abrirCliente = (id) => { setTela("clientes"); setClienteAberto(id); setBusca(false); setDrawer(false); };
+  const abrirCompra = (id) => { setTela("compras"); setCompraAberta(id); setBusca(false); setDrawer(false); };
+  const abrirGarantia = (id) => { setTela("garantias"); setGarantiaAberta(id); setBusca(false); setDrawer(false); };
+
+  const proxNumero = (lista, prefixo) => {
+    const n = lista.reduce((m, x) => Math.max(m, Number(x.numero?.split("-")[1] || 0)), 0) + 1;
+    return `${prefixo}-${String(n).padStart(4, "0")}`;
+  };
+
+  /* --------- cadastros --------- */
+  const salvarEmpresa = async (dados) => {
+    setEmpresas((l) => l.map((e) => (e.id === empresaId ? { ...e, ...dados, id: e.id } : e)));
+    if (real) {
+      const erro = await contexto.salvarEmpresa(dados);
+      if (erro) { aviso(erro); contexto.recarregar(); }
+    }
+  };
+
+  /* equipe: usuário é criado uma vez e vinculado à empresa por membresia */
+  /* Convite: o colaborador nunca cria a própria conta nem uma segunda empresa.
+     A senha temporária é exibida uma única vez ao proprietário e NÃO é guardada —
+     guardar senha exige hash no servidor, que ainda não existe. */
+  const salvarColaborador = ({ nome, email, telefone, funcao, papel: pp }) => {
+    const limpo = email.trim().toLowerCase();
+    const existente = usuarios.find((u) => u.email.toLowerCase() === limpo);
+    if (existente && membresias.some((m) => m.usuarioId === existente.id && m.empresaId === empresaId)) {
+      aviso("Esta pessoa já faz parte da sua equipe."); return null;
+    }
+    const usuarioId = existente?.id || uid();
+    if (!existente) setUsuarios((l) => [...l, {
+      id: usuarioId, nome, email: limpo, telefone: telefone || "", funcao: funcao || "",
+      ultimoAcesso: null, precisaTrocarSenha: true,
+    }]);
+    setMembresias((l) => [...l, {
+      id: uid(), usuarioId, empresaId, papel: pp, ativo: true, desde: HOJE, convite: "pendente",
+    }]);
+    aviso(`${nome} foi convidado para a equipe.`);
+    return { usuarioId, senhaTemporaria: senhaTemporaria() };
+  };
+  const atualizarColaborador = (usuarioId, dados) =>
+    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, ...dados } : u)));
+  const reenviarAcesso = (usuarioId) => {
+    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, precisaTrocarSenha: true } : u)));
+    setMembresias((l) => l.map((m) => (m.usuarioId === usuarioId && m.empresaId === empresaId ? { ...m, convite: "pendente" } : m)));
+    return senhaTemporaria();
+  };
+  const concluirPrimeiroAcesso = (usuarioId) => {
+    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, precisaTrocarSenha: false, ultimoAcesso: HOJE } : u)));
+    setMembresias((l) => l.map((m) => (m.usua
