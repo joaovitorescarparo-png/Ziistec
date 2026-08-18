@@ -1,10 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 
-/* Credenciais vêm do .env — nunca ficam no código.
-   A chave anon é pública por design: quem protege os dados é a RLS.
-   A service_role jamais entra no frontend. */
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+/*
+  Preferimos variáveis de ambiente. Como o Vercel conectado nesta fase não
+  permite gravá-las pelo conector, usamos como fallback SOMENTE dados públicos
+  do Supabase: URL do projeto e publishable key. A service_role/secret key
+  jamais entra no frontend. A autorização real continua sendo feita pela RLS.
+*/
+const url = import.meta.env.VITE_SUPABASE_URL || "https://diztevlpbcfqleizswxr.supabase.co";
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
 
 export const configurado = Boolean(url && anonKey && !url.includes("SEU-PROJETO"));
 
