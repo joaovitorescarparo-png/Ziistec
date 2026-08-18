@@ -69,6 +69,11 @@ export function useSessao() {
       if (escolhida) {
         setEmpresaId(escolhida.company_id);
         setEmpresa(escolhida.companies);
+
+        /* Trial/assinatura vencida é recalculada no servidor antes de liberar o app. */
+        const { error: refreshError } = await supabase.rpc("zt_refresh_subscription_status", { p_company: escolhida.company_id });
+        if (refreshError) throw refreshError;
+
         const { data: sub, error: e3 } = await supabase
           .from("subscriptions").select("*")
           .eq("company_id", escolhida.company_id).maybeSingle();
