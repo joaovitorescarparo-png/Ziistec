@@ -4,10 +4,14 @@ export async function chamarIAReal(prompt) {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new Error('Sua sessão expirou. Entre novamente.');
+
+  const companyId = localStorage.getItem('ziistec_empresa_id');
+  if (!companyId) throw new Error('Empresa ativa não encontrada. Recarregue o ZiisTec.');
+
   const resp = await fetch('/api/ai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, companyId }),
   });
   const payload = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(payload.error || 'Serviço de interpretação indisponível.');
