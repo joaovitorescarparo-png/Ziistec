@@ -1,8 +1,12 @@
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://diztevlpbcfqleizswxr.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw';
 
+const jsonHeaders = { 'Cache-Control': 'no-store' };
+
 export default async function handler(req, res) {
+  Object.entries(jsonHeaders).forEach(([k, v]) => res.setHeader(k, v));
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
+
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Sessão necessária.' });
 
@@ -12,7 +16,25 @@ export default async function handler(req, res) {
   if (!verify.ok) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
 
   const prompt = String(req.body?.prompt || '').trim();
-  if (!prompt || prompt.length > 40000) return res.status(400).json({ error: 'Solicitação de IA inválida.' });
+  if (!prompt || prompt.length > 10000) return res.status(400).json({ error: 'Solicitação de IA inválida.' });
+
+  // A própria RPC valida empresa ativa, assinatura e limites por usuário.
+  const quota = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_ai_quota`, {
+    method: 'POST',
+    headers: {
+      Authorization: auth,
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      'content-type': 'application/json',
+    },
+    body: '{}',
+  });
+  if (!quota.ok) {
+    const detail = await quota.json().catch(() => ({}));
+    const message = detail?.message || 'IA indisponível para esta conta.';
+    const status = quota.status === 401 ? 401 : quota.status === 403 ? 403 : 429;
+    return res.status(status).json({ error: message });
+  }
+
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return res.status(503).json({ error: 'IA ainda não configurada no servidor.' });
 
@@ -32,14 +54,14 @@ export default async function handler(req, res) {
     });
     if (!upstream.ok) {
       const body = await upstream.text();
-      console.error('Anthropic error', upstream.status, body.slice(0, 500));
+      console.error('Anthropic error', upstream.status, body.slice(0, 300));
       return res.status(502).json({ error: 'Serviço de interpretação indisponível.' });
     }
     const data = await upstream.json();
     const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
     return res.status(200).json({ text });
   } catch (error) {
-    console.error('AI proxy error', error);
+    console.error('AI proxy error', error instanceof Error ? error.message : 'unknown');
     return res.status(502).json({ error: 'Serviço de interpretação indisponível.' });
   }
 }
