@@ -82,6 +82,11 @@ export async function atualizarOSDB(id, patch){ const r=await supabase.from('wor
 export async function finalizarOSDB(id, extras={}){ const r=await supabase.rpc('zt_complete_work_order',{p_wo:id,p_report:extras.relato||extras.relatorio||null,p_pending:extras.pendencia||null,p_extra_cost:n(extras.valorAdicional||extras.custosExtras),p_due_days:7}); check(r); return true; }
 export async function atualizarStatusOrcamentoDB(id,status){ const r=await supabase.from('quotes').update({status:qStatusToDb[status]||'draft'}).eq('id',id).select('*, quote_items(*)').single(); return fromQuote(check(r)); }
 
+export async function salvarLancamentoDB(x,companyId){
+  const row={company_id:companyId,kind:x.tipo==='receita'?'income':'expense',description:x.descricao?.trim(),amount:n(x.valor),due_date:x.vencimento||new Date().toISOString().slice(0,10),paid:Boolean(x.pago),paid_at:x.pago?(x.pagoEm||new Date().toISOString().slice(0,10)):null,payment_method:x.pago?(x.forma||null):null,category:x.categoria||null,client_id:x.tipo==='receita'?(x.clienteId||null):null};
+  const r=x.id?await supabase.from('financial_entries').update(row).eq('id',x.id).select().single():await supabase.from('financial_entries').insert(row).select().single();
+  return fromFinancial(check(r));
+}
 export async function baixarLancamentoDB(x, forma){ const r=await supabase.from('financial_entries').update({paid:!x.pago,paid_at:x.pago?null:new Date().toISOString().slice(0,10),payment_method:x.pago?null:forma}).eq('id',x.id).select().single(); return fromFinancial(check(r)); }
 
 export async function recarregarSeguro(companyId){ try{return {data:await carregarDadosEmpresa(companyId),error:null};}catch(e){return {data:null,error:mensagemErro(e)};} }
