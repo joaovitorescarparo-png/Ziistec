@@ -8,20 +8,22 @@ const safe=(name)=>String(name||'arquivo').normalize('NFD').replace(/[\u0300-\u0
 async function signed(bucket,path){const r=await supabase.storage.from(bucket).createSignedUrl(path,3600);return r.error?null:r.data?.signedUrl||null;}
 
 export async function hidratarComplementosDB(data,companyId){
-  const [rr,aa,mm]=await Promise.all([
+  const [rr,aa,mm,cc]=await Promise.all([
     supabase.from('work_order_reports').select('*').eq('company_id',companyId).order('created_at',{ascending:true}),
     supabase.from('attachments').select('*').eq('company_id',companyId).order('created_at',{ascending:true}),
     supabase.from('work_order_materials').select('*').eq('company_id',companyId).order('created_at',{ascending:true}),
+    supabase.from('work_order_checklists').select('*').eq('company_id',companyId).order('position',{ascending:true}),
   ]);
-  check(rr);check(aa);check(mm);
+  check(rr);check(aa);check(mm);check(cc);
   const attachments=await Promise.all((aa.data||[]).map(async a=>({...a,url:await signed(a.bucket,a.path)})));
   const ordens=(data.ordens||[]).map(o=>{
     const reps=(rr.data||[]).filter(r=>r.work_order_id===o.id);
     const reports=reps.filter(r=>r.entry_type==='report');
     const hist=reps.filter(r=>r.entry_type==='history').map(r=>({id:r.id,quando:(r.created_at||'').slice(0,10),texto:r.body}));
     const mats=(mm.data||[]).filter(m=>m.work_order_id===o.id).map(m=>({id:m.id,tipo:'produto',catalogoId:m.product_id,nome:m.name,unidade:'unidade',qtd:Number(m.quantity||1),preco:0,custo:Number(m.unit_cost||0),materialRegistrado:true,serie:m.serial_number||''}));
+    const checklist=(cc.data||[]).filter(c=>c.work_order_id===o.id).map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done)}));
     const fotos=attachments.filter(a=>a.work_order_id===o.id).map(a=>({id:a.id,nome:a.file_name,categoria:a.category||'Foto',url:a.url,path:a.path,bucket:a.bucket,persistido:true}));
-    return {...o,relato:reports.at(-1)?.body||o.relato||'',historico:hist.length?hist:o.historico||[],fotos,itens:[...(o.itens||[]),...mats],custosExtras:Number(o.valorAdicional||o.custosExtras||0),valorAdicional:0};
+    return {...o,relato:reports.at(-1)?.body||o.relato||'',historico:hist.length?hist:o.historico||[],checklist,fotos,itens:[...(o.itens||[]),...mats],custosExtras:Number(o.valorAdicional||o.custosExtras||0),valorAdicional:0};
   });
   const compras=(data.compras||[]).map(c=>({...c,anexos:attachments.filter(a=>a.purchase_id===c.id).map(a=>({id:a.id,nome:a.file_name,url:a.url,path:a.path,bucket:a.bucket,persistido:true}))}));
   return {...data,ordens,compras};
@@ -58,12 +60,27 @@ export async function uploadLogoEmpresaDB(file,companyId){
   return {path,url:await signed('zt-branding',path)};
 }
 
+async function persistirChecklist(os,checklist,companyId,userId){
+  const current=check(await supabase.from('work_order_checklists').select('id').eq('work_order_id',os.id))||[];
+  const keep=new Set((checklist||[]).map(c=>c.id).filter(isUuid));
+  const apagar=current.map(c=>c.id).filter(id=>!keep.has(id));
+  if(apagar.length) check(await supabase.from('work_order_checklists').delete().in('id',apagar));
+  for(let i=0;i<(checklist||[]).length;i++){
+    const c=checklist[i];
+    if(isUuid(c.id)) check(await supabase.from('work_order_checklists').update({text:c.texto||'Item',done:Boolean(c.feito),position:i,updated_at:new Date().toISOString()}).eq('id',c.id));
+    else check(await supabase.from('work_order_checklists').insert({work_order_id:os.id,company_id:companyId,text:c.texto||'Item',done:Boolean(c.feito),position:i,created_by:userId||null}));
+  }
+  const fresh=check(await supabase.from('work_order_checklists').select('*').eq('work_order_id',os.id).order('position',{ascending:true}))||[];
+  return fresh.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done)}));
+}
+
 export async function persistirEdicaoOSDB(os,patch,companyId,userId,papel){
+  if('checklist' in patch) return {checklist:await persistirChecklist(os,patch.checklist,companyId,userId)};
   if('itens' in patch){
-    if(papel!=='proprietario') return;
+    if(papel!=='proprietario') return null;
     const limpos=(os.itens||[]).filter(i=>!i.materialRegistrado);
     await salvarOSDB({...os,itens:limpos},companyId,userId);
-    return;
+    return null;
   }
   const db={};
   if('local' in patch) db.address=patch.local||null;
@@ -79,6 +96,7 @@ export async function persistirEdicaoOSDB(os,patch,companyId,userId,papel){
     if(q.data?.id) check(await supabase.from('work_order_reports').update({body:patch.relato||''}).eq('id',q.data.id));
     else if((patch.relato||'').trim()) check(await supabase.from('work_order_reports').insert({work_order_id:os.id,company_id:companyId,entry_type:'report',body:patch.relato,author_id:userId||null}));
   }
+  return null;
 }
 
 export async function prepararFinalizacaoOSDB(os,extras,companyId,userId,papel){
