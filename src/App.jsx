@@ -8,8 +8,6 @@ import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
 import ZiisTecApp from "./legacy/ZiisTecApp";
 
-/* Traduz o vocabulário do banco para o que a interface já usa,
-   sem mexer no design nem renomear nada dentro do app. */
 const PAPEL = { owner: "proprietario", technician: "tecnico" };
 const STATUS_ASSINATURA = {
   trial: "trial", active: "ativa", past_due: "pendente",
@@ -37,7 +35,6 @@ function paraEmpresaApp(c) {
   };
 }
 
-/* caminho inverso: só os campos que a tela de configurações edita */
 function paraEmpresaBanco(d) {
   return {
     name: d.nome, trade_name: d.fantasia || null, tax_id: d.documento || null,
@@ -46,6 +43,27 @@ function paraEmpresaBanco(d) {
     has_team: Boolean(d.temEquipe), default_validity_days: d.validadePadrao ?? 15,
     default_payment_terms: d.condicaoPadrao || null, default_notes: d.observacaoPadrao || null,
   };
+}
+
+function SeletorEmpresa({ sessao }) {
+  if (sessao.membresias.length < 2) return null;
+  return (
+    <div className="fixed top-3 right-3 z-[9999] rounded-xl border border-slate-200 bg-white/95 shadow-sm backdrop-blur px-2 py-1.5">
+      <select
+        aria-label="Empresa ativa"
+        disabled={sessao.trocandoEmpresa}
+        value={sessao.empresaId || ""}
+        onChange={(e) => sessao.trocarEmpresa(e.target.value)}
+        className="max-w-[220px] bg-transparent text-xs font-medium text-slate-700 outline-none disabled:opacity-60"
+      >
+        {sessao.membresias.map((m) => (
+          <option key={m.company_id} value={m.company_id}>
+            {m.companies?.trade_name || m.companies?.name || "Empresa"}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 export default function App() {
@@ -86,7 +104,7 @@ export default function App() {
         return error ? mensagemErro(error) : null;
       },
     };
-  }, [s.perfil, s.empresa, s.membresiaAtual, s.assinatura, s.membresias, s.empresaId]);
+  }, [s.perfil, s.empresa, s.membresiaAtual, s.assinatura, s.membresias, s.empresaId, s.sair, s.recarregar]);
 
   if (!configurado) return <Login />;
   if (s.carregando) return <Carregando texto="Abrindo o ZiisTec" />;
@@ -108,15 +126,18 @@ export default function App() {
     );
   }
 
-  /* Administrador da plataforma nunca entra no tenant nem no onboarding. */
   if (s.ehPlataforma && s.perfil) return <PlatformAdmin perfil={s.perfil} sair={s.sair} />;
 
-  /* autenticado, mas ainda sem empresa: onboarding cria tudo pela RPC */
   if (s.precisaEmpresa) {
     return <Onboarding perfil={s.perfil} sair={s.sair} aoCriar={async () => { await s.recarregar(); }} />;
   }
 
-  if (!contexto) return <Carregando texto="Carregando sua empresa" />;
+  if (!contexto || s.trocandoEmpresa) return <Carregando texto={s.trocandoEmpresa ? "Trocando de empresa" : "Carregando sua empresa"} />;
 
-  return <ZiisTecApp contexto={contexto} />;
+  return (
+    <>
+      <SeletorEmpresa sessao={s} />
+      <ZiisTecApp key={contexto.chave} contexto={contexto} />
+    </>
+  );
 }
