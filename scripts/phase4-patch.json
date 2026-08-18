@@ -1,0 +1,48 @@
+[
+  {
+    "start": 24,
+    "delete": 0,
+    "expect": [],
+    "insert": ["import { cancelarAssinaturaDB, reativarAssinaturaDB } from \"../lib/subscriptionApi\";"]
+  },
+  {
+    "start": 750,
+    "delete": 1,
+    "expect": ["  const mudarAssinatura = (empresaAlvo, status) => {"],
+    "insert": [
+      "  const mudarAssinatura = async (empresaAlvo, status) => {",
+      "    if (real) {",
+      "      try {",
+      "        let novoStatus = status;",
+      "        if (status === \"cancelada\") novoStatus = await cancelarAssinaturaDB(empresaAlvo);",
+      "        else if (status === \"ativa\") novoStatus = await reativarAssinaturaDB(empresaAlvo);",
+      "        setAssinaturas((l) => l.map((a) => (a.empresaId === empresaAlvo ? { ...a, status: novoStatus } : a)));",
+      "        await contexto.recarregar();",
+      "        aviso(`Assinatura marcada como ${ST_ASSINATURA[novoStatus]?.label?.toLowerCase() || novoStatus}`);",
+      "      } catch (e) { aviso(mensagemErro(e)); }",
+      "      return;",
+      "    }"
+    ]
+  },
+  {
+    "start": 4065,
+    "delete": 1,
+    "expect": ["                  texto: \"O acesso ao ZiisTec é interrompido no fim do período pago. Seus dados não são apagados — cancelar assinatura é diferente de excluir a conta, e você pode reativar depois de onde parou.\","],
+    "insert": ["                  texto: \"O acesso ao ZiisTec será interrompido ao confirmar. Seus dados não são apagados — cancelar assinatura é diferente de excluir a conta. Você pode reativar enquanto o período atual ainda estiver válido.\","]
+  },
+  {
+    "start": 4070,
+    "delete": 1,
+    "expect": ["                Cobrança e checkout dependem de um provedor de pagamento ainda não integrado. Aqui só o estado da assinatura muda."],
+    "insert": ["                Cobrança e checkout dependem de um provedor de pagamento ainda não integrado. O cancelamento, porém, já é gravado no servidor e mantém todos os seus dados."]
+  },
+  {
+    "start": 4527,
+    "delete": 2,
+    "expect": [
+      "          A reativação aqui apenas muda o estado interno. A cobrança real depende da integração com um provedor de pagamento,",
+      "          ainda não contratada."
+    ],
+    "insert": ["          Se o período atual ainda estiver válido, a reativação restaura o acesso sem apagar nada. Depois do vencimento, uma nova cobrança será necessária quando o provedor de pagamento estiver integrado."]
+  }
+]
