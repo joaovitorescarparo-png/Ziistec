@@ -9,21 +9,11 @@ const papelToDb={proprietario:'owner',tecnico:'technician'};
 const fromPurchase=(x)=>({id:x.id,empresaId:x.company_id,numero:x.number,fornecedor:x.supplier_name,data:x.purchase_date,forma:x.payment_method||'',vencimento:x.due_date||'',obs:x.notes||'',lancamentoId:x.entry_id,itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)}))});
 
 export async function salvarCompraDB(x,companyId,userId){
-  const total=(x.itens||[]).reduce((t,i)=>t+n(i.qtd)*n(i.custo),0);
-  let number=x.numero;
-  if(!x.id){number=check(await supabase.rpc('zt_next_number',{comp:companyId,doc:'purchase',prefix:'CMP'}));}
-  const row={company_id:companyId,number,supplier_name:x.fornecedor?.trim()||'Fornecedor',purchase_date:x.data||new Date().toISOString().slice(0,10),payment_method:x.forma||null,due_date:x.vencimento||null,notes:x.obs||null,created_by:userId||null};
-  let saved;
-  if(x.id) saved=check(await supabase.from('purchases').update(row).eq('id',x.id).select().single());
-  else saved=check(await supabase.from('purchases').insert(row).select().single());
-  check(await supabase.from('purchase_items').delete().eq('purchase_id',saved.id));
-  if(x.itens?.length) check(await supabase.from('purchase_items').insert(x.itens.map(i=>({purchase_id:saved.id,company_id:companyId,product_id:i.catalogoId||null,name:i.nome||'Item',quantity:n(i.qtd)||1,unit_cost:n(i.custo)}))));
-  let entryId=saved.entry_id||x.lancamentoId||null;
-  const entry={company_id:companyId,kind:'expense',description:`Compra ${number} · ${row.supplier_name}`,amount:total,due_date:x.vencimento||row.purchase_date,paid:Boolean(x.jaPago),paid_at:x.jaPago?row.purchase_date:null,payment_method:x.jaPago?(x.forma||null):null,category:'Materiais',purchase_id:saved.id};
-  if(entryId) check(await supabase.from('financial_entries').update(entry).eq('id',entryId));
-  else {const e=check(await supabase.from('financial_entries').insert(entry).select().single());entryId=e.id;check(await supabase.from('purchases').update({entry_id:entryId}).eq('id',saved.id));}
-  const full=check(await supabase.from('purchases').select('*, purchase_items(*)').eq('id',saved.id).single());
-  return {...fromPurchase(full),lancamentoId:entryId};
+  const row={supplier_name:x.fornecedor?.trim()||'Fornecedor',purchase_date:x.data||new Date().toISOString().slice(0,10),payment_method:x.forma||null,due_date:x.vencimento||null,notes:x.obs||null,paid:Boolean(x.jaPago)};
+  const items=(x.itens||[]).map(i=>({product_id:i.catalogoId||null,name:i.nome||'Item',quantity:n(i.qtd)||1,unit_cost:n(i.custo)}));
+  const id=check(await supabase.rpc('zt_save_purchase',{p_company:companyId,p_purchase:x.id||null,p_row:row,p_items:items}));
+  const full=check(await supabase.from('purchases').select('*, purchase_items(*)').eq('id',id).single());
+  return fromPurchase(full);
 }
 
 export async function duplicarOrcamentoDB(x,companyId,userId,validUntil){
