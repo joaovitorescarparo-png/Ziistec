@@ -3,6 +3,7 @@ import { useSessao } from "./lib/useSessao";
 import { supabase, mensagemErro, configurado } from "./lib/supabase";
 import Login from "./screens/Login";
 import NovaSenha from "./screens/NovaSenha";
+import PlatformAdmin from "./screens/PlatformAdmin";
 import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
 import ZiisTecApp from "./legacy/ZiisTecApp";
@@ -106,6 +107,9 @@ export default function App() {
       </div>
     );
   }
+
+  /* Administrador da plataforma nunca entra no tenant nem no onboarding. */
+  if (s.ehPlataforma && s.perfil) return <PlatformAdmin perfil={s.perfil} sair={s.sair} />;
 
   /* autenticado, mas ainda sem empresa: onboarding cria tudo pela RPC */
   if (s.precisaEmpresa) {
