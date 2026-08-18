@@ -36,6 +36,7 @@ export default function Login() {
   const [aviso, setAviso] = useState(null);
 
   const entrar = async () => {
+    if (!email.trim() || !senha) return;
     setOcupado(true); setErro(null);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: senha });
     if (error) setErro(mensagemErro(error));
@@ -43,6 +44,7 @@ export default function Login() {
   };
 
   const criarConta = async () => {
+    if (senha.length < 8) { setErro("Use uma senha com pelo menos 8 caracteres."); return; }
     setOcupado(true); setErro(null); setAviso(null);
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(), password: senha,
@@ -66,7 +68,7 @@ export default function Login() {
     if (!email.trim()) { setErro("Informe seu e-mail para receber o link."); return; }
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
     if (error) setErro(mensagemErro(error));
-    else setAviso("Enviamos um link de recuperação para o seu e-mail.");
+    else setAviso("Se existir uma conta com esse e-mail, enviaremos as instruções de recuperação.");
   };
 
   if (!configurado) {
@@ -85,7 +87,7 @@ export default function Login() {
   }
 
   const criando = modo === "criar";
-  const pronto = email.trim() && senha.length >= 6 && (!criando || nome.trim());
+  const pronto = email.trim() && (criando ? senha.length >= 8 && nome.trim() : Boolean(senha));
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased">
@@ -103,14 +105,14 @@ export default function Login() {
         <div className="bg-white rounded-2xl ring-1 ring-slate-200/70 p-6 space-y-4">
           {criando && (
             <Campo label="Seu nome">
-              <input className={campo} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" />
+              <input className={campo} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" maxLength={200} />
             </Campo>
           )}
           <Campo label="E-mail">
             <input className={campo} type="email" autoComplete="email" value={email}
-              onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
+              onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" maxLength={320} />
           </Campo>
-          <Campo label="Senha" dica={criando ? "Mínimo de 6 caracteres." : undefined}>
+          <Campo label="Senha" dica={criando ? "Use pelo menos 8 caracteres. Uma senha única e longa é mais segura." : undefined}>
             <input className={campo} type="password" value={senha}
               autoComplete={criando ? "new-password" : "current-password"}
               onChange={(e) => setSenha(e.target.value)}
