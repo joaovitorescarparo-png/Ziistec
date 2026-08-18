@@ -59,22 +59,18 @@ export async function salvarServicoDB(x, companyId){ return fromService(await up
 export async function salvarProdutoDB(x, companyId){ return fromProduct(await upsertOne('products',toProduct(x,companyId),x.id)); }
 
 export async function salvarOrcamentoDB(x, companyId, userId){
-  let number=x.numero;
-  if(!x.id){ const r=await supabase.rpc('zt_next_number',{comp:companyId,doc:'quote',prefix:'ORC'}); number=check(r); }
-  const saved=await upsertOne('quotes',quoteRow(x,companyId,userId,number),x.id);
-  check(await supabase.from('quote_items').delete().eq('quote_id',saved.id));
-  if(x.itens?.length) check(await supabase.from('quote_items').insert(x.itens.map((i,idx)=>toItem(i,companyId,'quote_id',saved.id,idx,false))));
-  const full=check(await supabase.from('quotes').select('*, quote_items(*)').eq('id',saved.id).single());
+  const row=quoteRow(x,companyId,userId,x.numero||null);
+  const items=(x.itens||[]).map((i,idx)=>toItem(i,companyId,'quote_id',null,idx,false));
+  const id=check(await supabase.rpc('zt_save_quote',{p_company:companyId,p_quote:x.id||null,p_row:row,p_items:items}));
+  const full=check(await supabase.from('quotes').select('*, quote_items(*)').eq('id',id).single());
   return fromQuote(full);
 }
 
 export async function salvarOSDB(x, companyId, userId){
-  let number=x.numero;
-  if(!x.id){ const r=await supabase.rpc('zt_next_number',{comp:companyId,doc:'work_order',prefix:'OS'}); number=check(r); }
-  const saved=await upsertOne('work_orders',woRow(x,companyId,userId,number),x.id);
-  check(await supabase.from('work_order_items').delete().eq('work_order_id',saved.id));
-  if(x.itens?.length) check(await supabase.from('work_order_items').insert(x.itens.map(i=>toItem(i,companyId,'work_order_id',saved.id,0,true))));
-  const full=check(await supabase.from('work_orders').select('*, work_order_items(*)').eq('id',saved.id).single());
+  const row=woRow(x,companyId,userId,x.numero||null);
+  const items=(x.itens||[]).map(i=>toItem(i,companyId,'work_order_id',null,0,true));
+  const id=check(await supabase.rpc('zt_save_work_order',{p_company:companyId,p_wo:x.id||null,p_row:row,p_items:items}));
+  const full=check(await supabase.from('work_orders').select('*, work_order_items(*)').eq('id',id).single());
   return fromWorkOrder(full);
 }
 
