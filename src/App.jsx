@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useMemo } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useSessao } from "./lib/useSessao";
 import { supabase, mensagemErro, configurado } from "./lib/supabase";
 import Login from "./screens/Login";
@@ -44,6 +44,27 @@ function paraEmpresaBanco(d) {
     has_team: Boolean(d.temEquipe), default_validity_days: d.validadePadrao ?? 15,
     default_payment_terms: d.condicaoPadrao || null, default_notes: d.observacaoPadrao || null,
   };
+}
+
+function EstadoConexao() {
+  const [online, setOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
+  const [voltou, setVoltou] = useState(false);
+  useEffect(() => {
+    let timer;
+    const on = () => {
+      setOnline(true); setVoltou(true);
+      clearTimeout(timer); timer = setTimeout(() => setVoltou(false), 3500);
+    };
+    const off = () => { clearTimeout(timer); setVoltou(false); setOnline(false); };
+    window.addEventListener("online", on); window.addEventListener("offline", off);
+    return () => { clearTimeout(timer); window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+  if (online && !voltou) return null;
+  return (
+    <div role="status" className={`fixed left-1/2 top-3 z-[10000] -translate-x-1/2 rounded-xl px-4 py-2.5 text-xs font-semibold shadow-lg ${online ? "bg-emerald-700 text-white" : "bg-amber-500 text-slate-950"}`}>
+      {online ? "Conexão restabelecida" : "Sem internet — aguarde a conexão voltar antes de salvar"}
+    </div>
+  );
 }
 
 function SeletorEmpresa({ sessao }) {
@@ -107,13 +128,15 @@ export default function App() {
     };
   }, [s.perfil, s.empresa, s.membresiaAtual, s.assinatura, s.membresias, s.empresaId, s.sair, s.recarregar]);
 
-  if (!configurado) return <Login />;
-  if (s.carregando) return <Carregando texto="Abrindo o ZiisTec" />;
-  if (s.recuperandoSenha && s.sessaoAuth) return <NovaSenha aoConcluir={s.finalizarRecuperacaoSenha} />;
-  if (!s.sessaoAuth) return <Login />;
+  const comConexao = (conteudo) => <><EstadoConexao />{conteudo}</>;
+
+  if (!configurado) return comConexao(<Login />);
+  if (s.carregando) return comConexao(<Carregando texto="Abrindo o ZiisTec" />);
+  if (s.recuperandoSenha && s.sessaoAuth) return comConexao(<NovaSenha aoConcluir={s.finalizarRecuperacaoSenha} />);
+  if (!s.sessaoAuth) return comConexao(<Login />);
 
   if (s.erro) {
-    return (
+    return comConexao(
       <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 font-sans">
         <div className="max-w-md text-center">
           <p className="text-[15px] text-slate-800 font-medium">Não consegui carregar sua conta</p>
@@ -128,7 +151,7 @@ export default function App() {
   }
 
   if (s.ehPlataforma && s.perfil) {
-    return (
+    return comConexao(
       <Suspense fallback={<Carregando texto="Verificando administração" />}>
         <PlatformAdminGate perfil={s.perfil} sair={s.sair} />
       </Suspense>
@@ -136,12 +159,12 @@ export default function App() {
   }
 
   if (s.precisaEmpresa) {
-    return <Onboarding perfil={s.perfil} sair={s.sair} aoCriar={async () => { await s.recarregar(); }} />;
+    return comConexao(<Onboarding perfil={s.perfil} sair={s.sair} aoCriar={async () => { await s.recarregar(); }} />);
   }
 
-  if (!contexto || s.trocandoEmpresa) return <Carregando texto={s.trocandoEmpresa ? "Trocando de empresa" : "Carregando sua empresa"} />;
+  if (!contexto || s.trocandoEmpresa) return comConexao(<Carregando texto={s.trocandoEmpresa ? "Trocando de empresa" : "Carregando sua empresa"} />);
 
-  return (
+  return comConexao(
     <>
       <SeletorEmpresa sessao={s} />
       <Suspense fallback={<Carregando texto="Carregando seu ambiente" />}>
