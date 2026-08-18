@@ -7,7 +7,7 @@ import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
 
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
-const PlatformAdmin = lazy(() => import("./screens/PlatformAdmin"));
+const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
 
 const PAPEL = { owner: "proprietario", technician: "tecnico" };
 const STATUS_ASSINATURA = {
@@ -129,8 +129,8 @@ export default function App() {
 
   if (s.ehPlataforma && s.perfil) {
     return (
-      <Suspense fallback={<Carregando texto="Abrindo administração" />}>
-        <PlatformAdmin perfil={s.perfil} sair={s.sair} />
+      <Suspense fallback={<Carregando texto="Verificando administração" />}>
+        <PlatformAdminGate perfil={s.perfil} sair={s.sair} />
       </Suspense>
     );
   }
