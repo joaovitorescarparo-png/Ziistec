@@ -7,7 +7,16 @@ const safe=(name)=>String(name||'arquivo').normalize('NFD').replace(/[\u0300-\u0
 const purchaseDocTypes=new Set(['application/pdf','image/jpeg','image/png','image/webp']);
 const workOrderPhotoTypes=new Set(['image/jpeg','image/png','image/webp','image/heic','image/heif']);
 const brandingTypes=new Set(['image/jpeg','image/png','image/webp']);
+const osWriteQueues=new Map();
 
+function enqueueOsWrite(osId,task){
+  const previous=osWriteQueues.get(osId)||Promise.resolve();
+  const current=previous.then(task,task);
+  const guard=current.then(()=>undefined,()=>undefined);
+  osWriteQueues.set(osId,guard);
+  guard.finally(()=>{if(osWriteQueues.get(osId)===guard) osWriteQueues.delete(osId);});
+  return current;
+}
 async function signed(bucket,path){const r=await supabase.storage.from(bucket).createSignedUrl(path,3600);return r.error?null:r.data?.signedUrl||null;}
 async function sha256File(file){
   const bytes=await file.arrayBuffer();
@@ -130,7 +139,7 @@ async function persistirChecklist(os,checklist,companyId,userId){
   return fresh.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done)}));
 }
 
-export async function persistirEdicaoOSDB(os,patch,companyId,userId,papel){
+async function persistirEdicaoOSDBNow(os,patch,companyId,userId,papel){
   if('checklist' in patch) return {checklist:await persistirChecklist(os,patch.checklist,companyId,userId)};
   if('itens' in patch){
     if(papel!=='proprietario') return null;
@@ -153,6 +162,10 @@ export async function persistirEdicaoOSDB(os,patch,companyId,userId,papel){
     else if((patch.relato||'').trim()) check(await supabase.from('work_order_reports').insert({work_order_id:os.id,company_id:companyId,entry_type:'report',body:patch.relato,author_id:userId||null}));
   }
   return null;
+}
+
+export function persistirEdicaoOSDB(os,patch,companyId,userId,papel){
+  return enqueueOsWrite(os.id,()=>persistirEdicaoOSDBNow(os,patch,companyId,userId,papel));
 }
 
 export async function prepararFinalizacaoOSDB(os,extras,companyId,userId,papel){
