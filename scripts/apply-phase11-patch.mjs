@@ -15,8 +15,8 @@ once(
 );
 
 once(
-  'try { const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await recarregarDados(); aviso(c.id ? "Compra atualizada" : `${salva.numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(salva.id); }',
-  'try { const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await persistirDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id); await recarregarDados(); aviso(c.id ? "Compra atualizada" : `${salva.numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(salva.id); return salva; }',
+  'const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id);',
+  'const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await persistirDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id);',
   'persistência de documentos ao salvar compra'
 );
 
