@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/reassemble.mjs && node scripts/apply-operational-patch.mjs && node scripts/apply-phase2-patch.mjs && node scripts/apply-phase3-patch.mjs && node scripts/apply-phase4-patch.mjs && node scripts/apply-phase5-patch.mjs && node scripts/apply-phase6-patch.mjs && node scripts/apply-phase7-patch.mjs && node scripts/apply-phase8-patch.mjs && node scripts/apply-phase9-patch.mjs && node scripts/apply-phase10-patch.mjs && node scripts/apply-phase11-patch.mjs",
+    "predev": "node scripts/reassemble.mjs && node scripts/apply-operational-patch.mjs && node scripts/apply-phase2-patch.mjs && node scripts/apply-phase3-patch.mjs && node scripts/apply-phase4-patch.mjs && node scripts/apply-phase5-patch.mjs && node scripts/apply-phase6-patch.mjs && node scripts/apply-phase7-patch.mjs && node scripts/apply-phase8-patch.mjs && node scripts/apply-phase9-patch.mjs && node scripts/apply-phase10-patch.mjs && node scripts/apply-phase11-patch.mjs && node scripts/apply-phase12-patch.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/reassemble.mjs && node scripts/apply-operational-patch.mjs && node scripts/apply-phase2-patch.mjs && node scripts/apply-phase3-patch.mjs && node scripts/apply-phase4-patch.mjs && node scripts/apply-phase5-patch.mjs && node scripts/apply-phase6-patch.mjs && node scripts/apply-phase7-patch.mjs && node scripts/apply-phase8-patch.mjs && node scripts/apply-phase9-patch.mjs && node scripts/apply-phase10-patch.mjs && node scripts/apply-phase11-patch.mjs",
+    "prebuild": "node scripts/reassemble.mjs && node scripts/apply-operational-patch.mjs && node scripts/apply-phase2-patch.mjs && node scripts/apply-phase3-patch.mjs && node scripts/apply-phase4-patch.mjs && node scripts/apply-phase5-patch.mjs && node scripts/apply-phase6-patch.mjs && node scripts/apply-phase7-patch.mjs && node scripts/apply-phase8-patch.mjs && node scripts/apply-phase9-patch.mjs && node scripts/apply-phase10-patch.mjs && node scripts/apply-phase11-patch.mjs && node scripts/apply-phase12-patch.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "security:audit": "npm audit --audit-level=high"
