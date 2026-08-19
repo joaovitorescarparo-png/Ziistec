@@ -5,6 +5,8 @@ const check=(r)=>{if(r?.error) throw r.error; return r?.data;};
 const isUuid=(v)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v||''));
 const safe=(name)=>String(name||'arquivo').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/-+/g,'-').slice(-120);
 const purchaseDocTypes=new Set(['application/pdf','image/jpeg','image/png','image/webp']);
+const workOrderPhotoTypes=new Set(['image/jpeg','image/png','image/webp','image/heic','image/heif']);
+const brandingTypes=new Set(['image/jpeg','image/png','image/webp']);
 
 async function signed(bucket,path){const r=await supabase.storage.from(bucket).createSignedUrl(path,3600);return r.error?null:r.data?.signedUrl||null;}
 async function sha256File(file){
@@ -70,7 +72,12 @@ async function uploadAttachment({file,companyId,bucket,folder,category,workOrder
 export async function uploadFotosOSDB(osId,fotos,companyId,userId){
   const novos=(fotos||[]).filter(f=>f?.arquivo instanceof File);
   const enviados=[];
-  for(const f of novos) enviados.push(await uploadAttachment({file:f.arquivo,companyId,bucket:'zt-work-orders',folder:`work-orders/${osId}`,category:f.categoria||'Foto',workOrderId:osId,userId}));
+  for(const f of novos){
+    const file=f.arquivo;
+    if(!workOrderPhotoTypes.has(file.type)) throw new Error('Formato de foto não permitido. Use JPG, PNG, WEBP ou HEIC.');
+    if(file.size>15*1024*1024) throw new Error('Cada foto da OS pode ter no máximo 15 MB.');
+    enviados.push(await uploadAttachment({file,companyId,bucket:'zt-work-orders',folder:`work-orders/${osId}`,category:f.categoria||'Foto',workOrderId:osId,userId}));
+  }
   return enviados;
 }
 
@@ -88,11 +95,24 @@ export async function uploadDocumentosCompraDB(purchaseId,anexos,companyId,userI
 
 export async function uploadLogoEmpresaDB(file,companyId){
   if(!(file instanceof File)) throw new Error('Selecione uma imagem.');
+  if(!brandingTypes.has(file.type)) throw new Error('Formato de logo não permitido. Use JPG, PNG ou WEBP.');
+  if(file.size>2*1024*1024) throw new Error('A logo pode ter no máximo 2 MB.');
+
+  const atual=check(await supabase.from('companies').select('logo_path').eq('id',companyId).single());
   const ext=(file.name.split('.').pop()||'png').toLowerCase();
   const path=`${companyId}/branding/logo-${Date.now()}.${safe(ext)}`;
   const up=await supabase.storage.from('zt-branding').upload(path,file,{contentType:file.type||undefined,upsert:false});
   if(up.error) throw up.error;
-  check(await supabase.from('companies').update({logo_path:path}).eq('id',companyId));
+
+  const saved=await supabase.from('companies').update({logo_path:path}).eq('id',companyId).select('id').single();
+  if(saved.error){
+    await supabase.storage.from('zt-branding').remove([path]);
+    throw saved.error;
+  }
+
+  if(atual?.logo_path && atual.logo_path!==path && String(atual.logo_path).startsWith(`${companyId}/`)){
+    await supabase.storage.from('zt-branding').remove([atual.logo_path]);
+  }
   return {path,url:await signed('zt-branding',path)};
 }
 
