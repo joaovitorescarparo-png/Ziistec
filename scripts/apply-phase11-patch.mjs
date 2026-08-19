@@ -9,54 +9,15 @@ const once=(oldText,newText,label)=>{
 };
 
 once(
-  'import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";\n',
-  'import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";\nimport { carregarDocumentosCompraDB, persistirDocumentosCompraDB } from "../lib/purchaseDocuments";\n',
-  'import documentos de compra'
-);
-
-once(
-  'const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id);',
-  'const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await persistirDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id);',
-  'persistência de documentos ao salvar compra'
-);
-
-once(
-  'function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, setCompraAberta, setTela, pedirConfirmacao }) {\n  const [form, setForm] = useState(null);\n',
-  `function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, setCompraAberta, setTela, pedirConfirmacao, empresaId, real, aviso }) {
-  const [form, setForm] = useState(null);
-  const [docsCompra,setDocsCompra]=useState([]);
-  useEffect(()=>{
-    if(!real||!compraAberta){setDocsCompra([]);return;}
-    let ativo=true;
-    carregarDocumentosCompraDB(compraAberta).then((d)=>{if(ativo)setDocsCompra(d);}).catch((e)=>aviso?.(e?.message||"Não foi possível carregar os documentos da compra."));
-    return()=>{ativo=false;};
-  },[real,compraAberta,empresaId]);
-`,
-  'estado documentos da compra'
-);
-
-once(
-  '{c.anexos?.length ? c.anexos.map((a) => (',
-  '{(real ? docsCompra : (c.anexos||[])).length ? (real ? docsCompra : (c.anexos||[])).map((a) => (',
-  'fonte persistente dos documentos'
-);
-
-once(
-  '<p className="text-[12px] text-slate-400 mt-3 leading-relaxed">Os arquivos ficam apenas nesta sessão até conectarmos o armazenamento.</p>',
-  '{real ? <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">Documentos privados da empresa. O link de abertura é temporário e expira automaticamente.</p> : <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">Os arquivos ficam apenas nesta sessão no modo de demonstração.</p>}',
-  'mensagem dos documentos persistentes'
-);
-
-once(
-  '<Field label="Documentos" hint="Boleto, nota ou pedido. Ficam apenas nesta sessão até conectarmos o armazenamento.">',
+  '<Field label="Documentos" hint="Boleto, nota ou pedido. Os novos arquivos são enviados ao salvar a compra.">',
   '<Field label="Documentos" hint="Boleto, nota ou pedido. PDF ou imagem, até 20 MB por arquivo.">',
   'texto do campo documentos'
 );
 
 once(
-  '<input type="file" multiple className="hidden"\n              onChange={(e) => set("anexos", [...(form.anexos || []), ...Array.from(e.target.files || []).map((a) => ({ id: uid(), nome: a.name }))])} />',
-  '<input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden"\n              onChange={(e) => set("anexos", [...(form.anexos || []), ...Array.from(e.target.files || []).map((a) => ({ id: uid(), nome: a.name, arquivo: a, categoria: "Documento de compra" }))])} />',
-  'captura do arquivo real'
+  '<input type="file" multiple className="hidden"',
+  '<input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden"',
+  'formatos aceitos para documentos'
 );
 
 once(
@@ -71,4 +32,4 @@ once(
 );
 
 fs.writeFileSync(file,s);
-console.log('Applied ZiisTec phase 11 purchase documents patch (8 changes)');
+console.log('Applied ZiisTec phase 11 purchase documents patch (3 changes)');
