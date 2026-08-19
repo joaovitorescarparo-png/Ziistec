@@ -1,7 +1,7 @@
 create or replace function public.zt_guard_financial_entry()
 returns trigger
 language plpgsql
-security definer
+security invoker
 set search_path = public, pg_temp
 as $$
 begin
