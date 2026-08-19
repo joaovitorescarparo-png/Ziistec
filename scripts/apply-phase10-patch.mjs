@@ -41,7 +41,7 @@ once(
   'estado pós-venda'
 );
 
-const marker='      <Tabs valor={filtro} onChange={setFiltro} className="mb-5"';
+const marker='      <PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`} />\n';
 const block=`      {revisoes.filter((r)=>r.status === "pending").length > 0 && (
         <section className="mb-7">
           <Rotulo>Pós-venda programado · {revisoes.filter((r)=>r.status === "pending").length}</Rotulo>
@@ -65,7 +65,7 @@ const block=`      {revisoes.filter((r)=>r.status === "pending").length > 0 && (
         </section>
       )}
 `;
-once(marker,block+marker,'bloco pós-venda');
+once(marker,marker+block,'bloco pós-venda na tela Garantias');
 
 fs.writeFileSync(file,s);
 console.log('Applied ZiisTec phase 10 post-sale followup patch (4 changes)');
