@@ -108,11 +108,19 @@ export async function persistirEdicaoOSDB(os,patch,companyId,userId,papel){
 export async function prepararFinalizacaoOSDB(os,extras,companyId,userId,papel){
   await uploadFotosOSDB(os.id,extras.fotos||[],companyId,userId);
   const baseIds=new Set((os.itens||[]).map(i=>i.id));
-  const materiais=(extras.itens||[]).filter(i=>!baseIds.has(i.id) && !i.adicional && !i.isExtra);
-  for(const m of materiais){
-    check(await supabase.from('work_order_materials').insert({work_order_id:os.id,company_id:companyId,product_id:isUuid(m.catalogoId)?m.catalogoId:null,name:m.nome||'Material',quantity:Number(m.qtd||1),unit_cost:papel==='proprietario'?Number(m.custo||0):0,created_by:userId||null}));
-  }
-  for(const a of (extras.adicionais||[])){
-    check(await supabase.from('work_order_items').insert({work_order_id:os.id,company_id:companyId,kind:'free',name:a.nome||'Adicional',unit:a.unidade||'unidade',quantity:Number(a.qtd||1),unit_price:papel==='proprietario'?Number(a.preco||0):0,unit_cost:0,is_extra:true,price_pending:papel!=='proprietario',notes:a.obs||null}));
-  }
+  const materiais=(extras.itens||[]).filter(i=>!baseIds.has(i.id) && !i.adicional && !i.isExtra).map(m=>({
+    product_id:isUuid(m.catalogoId)?m.catalogoId:null,
+    name:m.nome||'Material',
+    quantity:Number(m.qtd||1),
+    unit_cost:papel==='proprietario'?Number(m.custo||0):0,
+    serial_number:m.serie||null,
+  }));
+  const adicionais=(extras.adicionais||[]).map(a=>({
+    name:a.nome||'Adicional',
+    unit:a.unidade||'unidade',
+    quantity:Number(a.qtd||1),
+    unit_price:papel==='proprietario'?Number(a.preco||0):0,
+    notes:a.obs||null,
+  }));
+  return {materiaisDB:materiais,adicionaisDB:adicionais};
 }
