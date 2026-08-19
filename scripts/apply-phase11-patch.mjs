@@ -9,6 +9,18 @@ const once=(oldText,newText,label)=>{
 };
 
 once(
+  '<Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm(c)}>Editar</Btn>',
+  '<Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm({ ...c, jaPago: Boolean(lanc?.pago) })}>Editar</Btn>',
+  'estado de pagamento ao editar compra'
+);
+
+once(
+  '{ id: uid(), produtoId: p.id, nome:',
+  '{ id: uid(), catalogoId: p.id, nome:',
+  'vínculo do produto de catálogo'
+);
+
+once(
   '<Field label="Documentos" hint="Boleto, nota ou pedido. Os novos arquivos são enviados ao salvar a compra.">',
   '<Field label="Documentos" hint="Boleto, nota ou pedido. PDF ou imagem, até 20 MB por arquivo.">',
   'texto do campo documentos'
@@ -32,4 +44,4 @@ once(
 );
 
 fs.writeFileSync(file,s);
-console.log('Applied ZiisTec phase 11 purchase documents patch (3 changes)');
+console.log('Applied ZiisTec phase 11 purchase documents patch (5 changes)');
