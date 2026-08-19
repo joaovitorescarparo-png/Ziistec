@@ -52,8 +52,8 @@ export default async function handler(req,res){
   if(!UUID_RE.test(quoteId)||!UUID_RE.test(companyId)) return res.status(400).json({error:'Orçamento ou empresa inválidos.'});
 
   try {
-    const verify=await sbFetch('/auth/v1/user',auth); if(!verify.ok) return res.status(401).json({error:'Sessão inválida.'});
-    const ownerResp=await sbFetch('/rest/v1/rpc/zt_is_owner',auth,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({comp:companyId})});
+    await sbFetch('/auth/v1/user',auth);
+    const ownerResp=await sbFetch('/rest/v1/rpc/zt_is_owner',auth,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({target:companyId})});
     const isOwner=await ownerResp.json();
     if(isOwner!==true) return res.status(403).json({error:'Somente o proprietário pode gerar este PDF.'});
 
@@ -79,7 +79,6 @@ export default async function handler(req,res){
     const text=(t,x,yy,size=10,font=normal,color=dark)=>page.drawText(clean(t),{x,y:yy,size,font,color});
     const wrapped=(t,x,maxW,size=10,font=normal,color=dark,lineH=14)=>{const lines=wrapText(t,font,size,maxW); ensure(lines.length*lineH+4); for(const line of lines){text(line,x,y,size,font,color);y-=lineH;} return lines.length;};
 
-    // Branding/logo privado; falha de imagem não impede o documento.
     if(company.logo_path){
       try{
         const encoded=String(company.logo_path).split('/').map(encodeURIComponent).join('/');
@@ -104,7 +103,6 @@ export default async function handler(req,res){
     if(clientInfo) wrapped(clientInfo,margin,width,8.5,normal,muted,12);
     if(quote.service_place||quote.address){const loc=[quote.service_place&&`Local: ${quote.service_place}`,quote.address].filter(Boolean).join(' - ');wrapped(loc,margin,width,8.5,normal,muted,12);} y-=12;
 
-    // Cabeçalho da tabela
     ensure(40); page.drawRectangle({x:margin,y:y-18,width,height:22,color:light});
     text('Descrição',margin+6,y-12,8,bold,dark); text('Qtd.',margin+315,y-12,8,bold,dark); text('Unitário',margin+365,y-12,8,bold,dark); text('Total',margin+445,y-12,8,bold,dark); y-=30;
     let subtotal=0;
