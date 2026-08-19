@@ -7,6 +7,20 @@ const safe=(name)=>String(name||'arquivo').normalize('NFD').replace(/[\u0300-\u0
 const purchaseDocTypes=new Set(['application/pdf','image/jpeg','image/png','image/webp']);
 
 async function signed(bucket,path){const r=await supabase.storage.from(bucket).createSignedUrl(path,3600);return r.error?null:r.data?.signedUrl||null;}
+async function sha256File(file){
+  const bytes=await file.arrayBuffer();
+  const digest=await crypto.subtle.digest('SHA-256',bytes);
+  return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function findAttachment({companyId,bucket,category,workOrderId,purchaseId,fingerprint}){
+  let q=supabase.from('attachments').select('*').eq('company_id',companyId).eq('bucket',bucket).eq('content_sha256',fingerprint);
+  q=category==null?q.is('category',null):q.eq('category',category);
+  if(workOrderId) q=q.eq('work_order_id',workOrderId);
+  if(purchaseId) q=q.eq('purchase_id',purchaseId);
+  const r=await q.limit(1).maybeSingle();
+  if(r.error) throw r.error;
+  return r.data||null;
+}
 
 export async function hidratarComplementosDB(data,companyId){
   const [rr,aa,mm,cc]=await Promise.all([
@@ -32,28 +46,44 @@ export async function hidratarComplementosDB(data,companyId){
 
 async function uploadAttachment({file,companyId,bucket,folder,category,workOrderId,purchaseId,userId}){
   if(!(file instanceof File)) return null;
+  const fingerprint=await sha256File(file);
+  const lookup={companyId,bucket,category:category||null,workOrderId,purchaseId,fingerprint};
+  const existing=await findAttachment(lookup);
+  if(existing) return {...existing,url:await signed(existing.bucket,existing.path),deduplicated:true};
+
   const path=`${companyId}/${folder}/${crypto.randomUUID()}-${safe(file.name)}`;
   const up=await supabase.storage.from(bucket).upload(path,file,{contentType:file.type||undefined,upsert:false});
   if(up.error) throw up.error;
-  const row={company_id:companyId,bucket,path,file_name:file.name,content_type:file.type||null,size_bytes:file.size||null,category:category||null,work_order_id:workOrderId||null,purchase_id:purchaseId||null,uploaded_by:userId||null};
+  const row={company_id:companyId,bucket,path,file_name:file.name,content_type:file.type||null,size_bytes:file.size||null,category:category||null,work_order_id:workOrderId||null,purchase_id:purchaseId||null,uploaded_by:userId||null,content_sha256:fingerprint};
   const ins=await supabase.from('attachments').insert(row).select().single();
-  if(ins.error){await supabase.storage.from(bucket).remove([path]);throw ins.error;}
-  return {...ins.data,url:await signed(bucket,path)};
+  if(ins.error){
+    await supabase.storage.from(bucket).remove([path]);
+    if(ins.error.code==='23505'){
+      const winner=await findAttachment(lookup);
+      if(winner) return {...winner,url:await signed(winner.bucket,winner.path),deduplicated:true};
+    }
+    throw ins.error;
+  }
+  return {...ins.data,url:await signed(bucket,path),deduplicated:false};
 }
 
 export async function uploadFotosOSDB(osId,fotos,companyId,userId){
   const novos=(fotos||[]).filter(f=>f?.arquivo instanceof File);
-  for(const f of novos) await uploadAttachment({file:f.arquivo,companyId,bucket:'zt-work-orders',folder:`work-orders/${osId}`,category:f.categoria||'Foto',workOrderId:osId,userId});
+  const enviados=[];
+  for(const f of novos) enviados.push(await uploadAttachment({file:f.arquivo,companyId,bucket:'zt-work-orders',folder:`work-orders/${osId}`,category:f.categoria||'Foto',workOrderId:osId,userId}));
+  return enviados;
 }
 
 export async function uploadDocumentosCompraDB(purchaseId,anexos,companyId,userId){
   const novos=(anexos||[]).filter(a=>a?.arquivo instanceof File);
+  const enviados=[];
   for(const a of novos){
     const file=a.arquivo;
     if(!purchaseDocTypes.has(file.type)) throw new Error('Formato não permitido. Use PDF, JPG, PNG ou WEBP.');
     if(file.size>20*1024*1024) throw new Error('Cada documento pode ter no máximo 20 MB.');
-    await uploadAttachment({file,companyId,bucket:'zt-documents',folder:`purchases/${purchaseId}`,category:'purchase_document',purchaseId,userId});
+    enviados.push(await uploadAttachment({file,companyId,bucket:'zt-documents',folder:`purchases/${purchaseId}`,category:'purchase_document',purchaseId,userId}));
   }
+  return enviados;
 }
 
 export async function uploadLogoEmpresaDB(file,companyId){
