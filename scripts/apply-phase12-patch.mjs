@@ -40,8 +40,8 @@ once(
 );
 
 once(
-  '    permitido, equipe, usuarioAtual } = p;\n  const verValores = permitido("verValores");',
-  `    permitido, equipe, usuarioAtual, resolverPrecificacao } = p;
+  '    permitido, equipe, usuarioAtual, real, empresaId, aviso, papel } = p;\n  const verValores = permitido("verValores");',
+  `    permitido, equipe, usuarioAtual, real, empresaId, aviso, papel, resolverPrecificacao } = p;
   const verValores = permitido("verValores");
   const [precosPendentes, setPrecosPendentes] = useState({});
   const [liberandoCobranca, setLiberandoCobranca] = useState(false);
