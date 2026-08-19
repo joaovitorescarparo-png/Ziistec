@@ -84,5 +84,5 @@ export async function salvarLancamentoDB(x,companyId){
   const id=check(response);
   return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',id).single()));
 }
-export async function baixarLancamentoDB(x, forma){ const r=await supabase.from('financial_entries').update({paid:!x.pago,paid_at:x.pago?null:new Date().toISOString().slice(0,10),payment_method:x.pago?null:forma}).eq('id',x.id).select().single(); return fromFinancial(check(r)); }
+export async function baixarLancamentoDB(x, forma){ const r=await supabase.rpc('zt_set_financial_paid',{p_entry:x.id,p_paid:!x.pago,p_method:x.pago?null:forma}); check(r); return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',x.id).single())); }
 export async function recarregarSeguro(companyId){ try{return {data:await carregarDadosEmpresa(companyId),error:null};}catch(e){return {data:null,error:mensagemErro(e)};} }
