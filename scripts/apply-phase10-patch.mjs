@@ -21,6 +21,36 @@ once(
 );
 
 once(
+  'function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel }) {\n  const verFinanceiro = permitido("financeiro");\n',
+  `function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso }) {
+  const verFinanceiro = permitido("financeiro");
+  const [revisoesInicio, setRevisoesInicio] = useState([]);
+  useEffect(() => {
+    if (!real || !empresaId || papel !== "proprietario") { setRevisoesInicio([]); return; }
+    let ativo=true;
+    carregarRevisoesDB(empresaId).then((r)=>{ if(ativo) setRevisoesInicio(r); }).catch((e)=>aviso?.(e?.message || "Não foi possível carregar o pós-venda."));
+    return ()=>{ ativo=false; };
+  }, [real, empresaId, papel]);
+`,
+  'pós-venda no dashboard'
+);
+
+once(
+  '  const pend = [];\n  if (verFinanceiro) {\n',
+  `  const pend = [];
+  if (papel === "proprietario") {
+    const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= HOJE);
+    const atrasadas = revisoesPendentes.filter((r)=>r.data < HOJE);
+    const hoje = revisoesPendentes.filter((r)=>r.data === HOJE);
+    if (atrasadas.length) pend.push({ id:"pos-venda-atrasado", tom:"erro", titulo:`${atrasadas.length} retorno${atrasadas.length>1?"s":""} de pós-venda atrasado${atrasadas.length>1?"s":""}`, detalhe:`Mais antigo: ${dataBR(atrasadas[0].data)}`, acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
+    if (hoje.length) pend.push({ id:"pos-venda-hoje", tom:"atencao", titulo:`${hoje.length} retorno${hoje.length>1?"s":""} de pós-venda para hoje`, detalhe:"Revisar clientes e concluir ou dispensar", acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
+  }
+  if (verFinanceiro) {
+`,
+  'alertas pós-venda no dashboard'
+);
+
+once(
   'function Clientes(p) {\n  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto } = p;\n',
   `function Clientes(p) {
   const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso } = p;
@@ -95,4 +125,4 @@ const block=`      {revisoes.filter((r)=>r.status === "pending").length > 0 && (
 once(marker,marker+block,'bloco pós-venda na tela Garantias');
 
 fs.writeFileSync(file,s);
-console.log('Applied ZiisTec phase 10 post-sale followup patch (7 changes)');
+console.log('Applied ZiisTec phase 10 post-sale followup patch (9 changes)');
