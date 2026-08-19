@@ -42,8 +42,8 @@ once(
     const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= HOJE);
     const atrasadas = revisoesPendentes.filter((r)=>r.data < HOJE);
     const hoje = revisoesPendentes.filter((r)=>r.data === HOJE);
-    if (atrasadas.length) pend.push({ id:"pos-venda-atrasado", tom:"erro", titulo:`${atrasadas.length} retorno${atrasadas.length>1?"s":""} de pós-venda atrasado${atrasadas.length>1?"s":""}`, detalhe:`Mais antigo: ${dataBR(atrasadas[0].data)}`, acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
-    if (hoje.length) pend.push({ id:"pos-venda-hoje", tom:"atencao", titulo:`${hoje.length} retorno${hoje.length>1?"s":""} de pós-venda para hoje`, detalhe:"Revisar clientes e concluir ou dispensar", acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
+    if (atrasadas.length) pend.push({ id:"pos-venda-atrasado", tom:"erro", titulo: atrasadas.length + " retorno" + (atrasadas.length>1?"s":"") + " de pós-venda atrasado" + (atrasadas.length>1?"s":""), detalhe:"Mais antigo: " + dataBR(atrasadas[0].data), acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
+    if (hoje.length) pend.push({ id:"pos-venda-hoje", tom:"atencao", titulo: hoje.length + " retorno" + (hoje.length>1?"s":"") + " de pós-venda para hoje", detalhe:"Revisar clientes e concluir ou dispensar", acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
   }
   if (verFinanceiro) {
 `,
