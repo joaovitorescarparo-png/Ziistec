@@ -52,9 +52,11 @@ once(
   /* margem dos serviços: usa conclusão real e cobrança efetivamente gerada para a OS */
   const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || HOJE) === mes);
   const cobrancaDaOS = (o) => lancamentos.find((l) => l.tipo === "receita" && l.origemTipo === "os" && l.origemId === o.id);
-  const custoDiretoOS = (o) => somaCustos(o.itens)
-    + (o.materiais || []).reduce((t, m) => t + (Number(m.qtd) || 0) * (Number(m.custo) || 0), 0)
-    + (Number(o.custosExtras) || 0);
+  const custoDiretoOS = (o) => {
+    const materiaisJaNosItens = (o.itens || []).some((i) => i.materialRegistrado);
+    const custoMateriais = materiaisJaNosItens ? 0 : (o.materiais || []).reduce((t, m) => t + (Number(m.qtd) || 0) * (Number(m.custo) || 0), 0);
+    return somaCustos(o.itens) + custoMateriais + (Number(o.custosExtras) || 0);
+  };
   const osFaturadasMes = osConcluidasMes.filter((o) => !!cobrancaDaOS(o));
   const faturadoServicos = osFaturadasMes.reduce((t, o) => t + (Number(cobrancaDaOS(o)?.valor) || 0), 0);
   const custoServicos = osFaturadasMes.reduce((t, o) => t + custoDiretoOS(o), 0);
