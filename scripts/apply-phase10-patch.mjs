@@ -15,12 +15,6 @@ once(
 );
 
 once(
-  '    usuarioAtual, papel, permitido, empresaId, assinatura, equipe, usuarios,\n',
-  '    usuarioAtual, papel, permitido, empresaId, assinatura, equipe, usuarios, real,\n',
-  'contexto real nos props'
-);
-
-once(
   'function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel }) {\n  const verFinanceiro = permitido("financeiro");\n',
   `function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso }) {
   const verFinanceiro = permitido("financeiro");
@@ -125,4 +119,4 @@ const block=`      {revisoes.filter((r)=>r.status === "pending").length > 0 && (
 once(marker,marker+block,'bloco pós-venda na tela Garantias');
 
 fs.writeFileSync(file,s);
-console.log('Applied ZiisTec phase 10 post-sale followup patch (9 changes)');
+console.log('Applied ZiisTec phase 10 post-sale followup patch (8 changes)');
