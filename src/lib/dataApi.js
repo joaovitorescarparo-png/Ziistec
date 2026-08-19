@@ -28,7 +28,7 @@ const fromQuote = (x) => ({ id:x.id, requestId:x.client_request_id||null, empres
 const quoteRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, status:qStatusToDb[x.status]||'draft', issue_date:x.data||new Date().toISOString().slice(0,10), valid_until:x.validade||null, discount:n(x.desconto), surcharge:n(x.acrescimo), payment_terms:x.condicao||null, notes:x.obs||null, address:x.local||null, service_place:x.localServico||null, created_by:userId||null });
 const fromWorkOrder = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, orcamentoId:x.quote_id, responsavelId:x.assigned_to, status:woStatusFromDb[x.status]||'aguardando', data:x.scheduled_date||'', hora:(x.scheduled_time||'').slice(0,5), local:x.address||'', localServico:x.service_place||'', descricaoLivre:x.request||'', obs:x.pre_notes||'', pendencia:x.pending_note||'', valorAdicional:n(x.extra_cost), emGarantia:Boolean(x.is_warranty_visit), garantiaId:x.warranty_id, osOrigemId:x.origin_wo_id, relatoProblema:x.problem_report||'', cobrancaId:x.billing_entry_id, itens:(x.work_order_items||[]).map(fromItem), checklist:[], historico:[], fotos:[], adicionais:[], custosExtras:0, relato:'' });
 const woRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, quote_id:x.orcamentoId||null, assigned_to:x.responsavelId||userId||null, status:woStatusToDb[x.status]||'unscheduled', scheduled_date:x.data||null, scheduled_time:x.hora||null, address:x.local||null, service_place:x.localServico||null, request:x.descricaoLivre||x.solicitacao||null, pre_notes:x.obs||null, pending_note:x.pendencia||null, extra_cost:n(x.valorAdicional||x.custosExtras), needs_return:Boolean(x.precisaRetorno), warranty_id:x.garantiaId||null, origin_wo_id:x.osOrigemId||null, is_warranty_visit:Boolean(x.emGarantia), problem_report:x.relatoProblema||null, created_by:userId||null });
-const fromFinancial = (x) => ({ id:x.id, empresaId:x.company_id, tipo:x.kind==='income'?'receita':'despesa', descricao:x.description, valor:n(x.amount), vencimento:x.due_date, pago:x.paid, pagoEm:x.paid_at, forma:x.payment_method||null, categoria:x.category||'', clienteId:x.client_id, origemTipo:x.work_order_id?'os':x.purchase_id?'compra':null, origemId:x.work_order_id||x.purchase_id||null });
+const fromFinancial = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, tipo:x.kind==='income'?'receita':'despesa', descricao:x.description, valor:n(x.amount), vencimento:x.due_date, pago:x.paid, pagoEm:x.paid_at, forma:x.payment_method||null, categoria:x.category||'', clienteId:x.client_id, origemTipo:x.work_order_id?'os':x.purchase_id?'compra':null, origemId:x.work_order_id||x.purchase_id||null });
 const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.client_id, osId:x.work_order_id, tipo:x.kind==='service'?'servico':'produto', servicoId:x.service_id, produtoId:x.product_id, descricao:x.description, local:x.service_place||'', inicio:x.starts_on, ate:x.ends_on, serie:x.serial_number||'' });
 const fromPurchase = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, fornecedor:x.supplier_name, data:x.purchase_date, forma:x.payment_method||'', vencimento:x.due_date||'', obs:x.notes||'', lancamentoId:x.entry_id, itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)})) });
 
@@ -63,7 +63,6 @@ export async function salvarOrcamentoDB(x, companyId, userId){
   const full=check(await supabase.from('quotes').select('*, quote_items(*)').eq('id',id).single());
   return fromQuote(full);
 }
-
 export async function salvarOSDB(x, companyId, userId){
   const row=woRow(x,companyId,userId,x.numero||null);
   const items=(x.itens||[]).map(i=>toItem(i,companyId,'work_order_id',null,0,true));
@@ -77,10 +76,13 @@ export async function salvarOSDB(x, companyId, userId){
 export async function atualizarOSDB(id, patch){ const r=await supabase.from('work_orders').update(patch).eq('id',id).select('*, work_order_items(*)').single(); return fromWorkOrder(check(r)); }
 export async function finalizarOSDB(id, extras={}){ const r=await supabase.rpc('zt_complete_work_order',{p_wo:id,p_report:extras.relato||extras.relatorio||null,p_pending:extras.pendencia||null,p_extra_cost:n(extras.valorAdicional||extras.custosExtras),p_due_days:7}); check(r); return true; }
 export async function atualizarStatusOrcamentoDB(id,status){ const r=await supabase.from('quotes').update({status:qStatusToDb[status]||'draft'}).eq('id',id).select('*, quote_items(*)').single(); return fromQuote(check(r)); }
+
 export async function salvarLancamentoDB(x,companyId){
-  const row={company_id:companyId,kind:x.tipo==='receita'?'income':'expense',description:x.descricao?.trim(),amount:n(x.valor),due_date:x.vencimento||new Date().toISOString().slice(0,10),paid:Boolean(x.pago),paid_at:x.pago?(x.pagoEm||new Date().toISOString().slice(0,10)):null,payment_method:x.pago?(x.forma||null):null,category:x.categoria||null,client_id:x.tipo==='receita'?(x.clienteId||null):null};
-  const r=x.id?await supabase.from('financial_entries').update(row).eq('id',x.id).select().single():await supabase.from('financial_entries').insert(row).select().single();
-  return fromFinancial(check(r));
+  const row={kind:x.tipo==='receita'?'income':'expense',description:x.descricao?.trim(),amount:n(x.valor),due_date:x.vencimento||new Date().toISOString().slice(0,10),paid:Boolean(x.pago),paid_at:x.pago?(x.pagoEm||new Date().toISOString().slice(0,10)):null,payment_method:x.pago?(x.forma||null):null,category:x.categoria||null,client_id:x.tipo==='receita'?(x.clienteId||null):null};
+  const req=ensureRequestId(x);
+  const response=await idempotentWrite(()=>supabase.rpc('zt_save_manual_financial_entry',{p_company:companyId,p_entry:x.id||null,p_request:req,p_row:row}));
+  const id=check(response);
+  return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',id).single()));
 }
 export async function baixarLancamentoDB(x, forma){ const r=await supabase.from('financial_entries').update({paid:!x.pago,paid_at:x.pago?null:new Date().toISOString().slice(0,10),payment_method:x.pago?null:forma}).eq('id',x.id).select().single(); return fromFinancial(check(r)); }
 export async function recarregarSeguro(companyId){ try{return {data:await carregarDadosEmpresa(companyId),error:null};}catch(e){return {data:null,error:mensagemErro(e)};} }
