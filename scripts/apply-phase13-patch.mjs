@@ -113,7 +113,8 @@ once(
 `              O custo dos serviços vem dos custos cadastrados em cada item das ordens concluídas no mês, mais os custos extras informados na finalização.
               Materiais comprados aparecem também em despesas pagas quando você dá baixa na conta.`,
 `              A margem usa a data real de conclusão da OS e o valor da cobrança gerada no Financeiro. Custos diretos incluem itens, materiais utilizados e custos extras registrados.
-              Compras automáticas de materiais não são subtraídas novamente aqui, evitando contar o mesmo material duas vezes.${'${pendentesPrecoMes.length ? ` Há ${pendentesPrecoMes.length} OS concluída${pendentesPrecoMes.length > 1 ? "s" : ""} aguardando preço e ainda fora da margem.` : ""}'} `,
+              Compras automáticas de materiais não são subtraídas novamente aqui, evitando contar o mesmo material duas vezes.
+              {pendentesPrecoMes.length > 0 && <> Há {pendentesPrecoMes.length} OS concluída{pendentesPrecoMes.length > 1 ? "s" : ""} aguardando preço e ainda fora da margem.</>}`,
   'explicação resultado operacional'
 );
 
