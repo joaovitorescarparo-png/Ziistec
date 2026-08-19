@@ -36,19 +36,15 @@ once(
 );
 
 once(
-  `                  {c.anexos?.length ? c.anexos.map((a) => (
-                    <div key={a.id} className="flex items-center gap-2.5 text-[13.5px] text-slate-700 py-1.5">
-                      <Paperclip className="w-4 h-4 text-slate-400 shrink-0" /><span className="truncate">{a.nome}</span>
-                    </div>
-                  )) : <p className="text-[13.5px] text-slate-500">Nenhum documento anexado.</p>}
-                  <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">Os arquivos ficam apenas nesta sessão até conectarmos o armazenamento.</p>`,
-  `                  {(real ? docsCompra : (c.anexos||[])).length ? (real ? docsCompra : (c.anexos||[])).map((a) => (
-                    a.url ? <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="flex items-center gap-2.5 text-[13.5px] text-slate-700 py-1.5 hover:underline">
-                      <Paperclip className="w-4 h-4 text-slate-400 shrink-0" /><span className="truncate">{a.nome}</span><span className="text-[11px] text-slate-400">Abrir</span>
-                    </a> : <div key={a.id} className="flex items-center gap-2.5 text-[13.5px] text-slate-700 py-1.5"><Paperclip className="w-4 h-4 text-slate-400 shrink-0" /><span className="truncate">{a.nome}</span></div>
-                  )) : <p className="text-[13.5px] text-slate-500">Nenhum documento anexado.</p>}
-                  {real && <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">Documentos privados da empresa. O link de abertura é temporário e expira automaticamente.</p>}`,
-  'visualização persistente dos documentos'
+  '{c.anexos?.length ? c.anexos.map((a) => (',
+  '{(real ? docsCompra : (c.anexos||[])).length ? (real ? docsCompra : (c.anexos||[])).map((a) => (',
+  'fonte persistente dos documentos'
+);
+
+once(
+  '<p className="text-[12px] text-slate-400 mt-3 leading-relaxed">Os arquivos ficam apenas nesta sessão até conectarmos o armazenamento.</p>',
+  '{real ? <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">Documentos privados da empresa. O link de abertura é temporário e expira automaticamente.</p> : <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">Os arquivos ficam apenas nesta sessão no modo de demonstração.</p>}',
+  'mensagem dos documentos persistentes'
 );
 
 once(
@@ -75,4 +71,4 @@ once(
 );
 
 fs.writeFileSync(file,s);
-console.log('Applied ZiisTec phase 11 purchase documents patch (7 changes)');
+console.log('Applied ZiisTec phase 11 purchase documents patch (8 changes)');
