@@ -77,7 +77,19 @@ export async function salvarOSDB(x, companyId, userId){
 }
 
 export async function atualizarOSDB(id, patch){ const r=await supabase.from('work_orders').update(patch).eq('id',id).select(WO_SELECT).single(); return fromWorkOrder(check(r)); }
-export async function finalizarOSDB(id, extras={}){ const r=await supabase.rpc('zt_complete_work_order',{p_wo:id,p_report:extras.relato||extras.relatorio||null,p_pending:extras.pendencia||null,p_extra_cost:n(extras.custosExtras),p_due_days:7}); check(r); return true; }
+export async function finalizarOSDB(id, extras={}){
+  const r=await supabase.rpc('zt_finalize_work_order_atomic',{
+    p_wo:id,
+    p_report:extras.relato||extras.relatorio||null,
+    p_pending:extras.pendencia||null,
+    p_extra_cost:n(extras.custosExtras),
+    p_due_days:7,
+    p_materials:extras.materiaisDB||[],
+    p_additions:extras.adicionaisDB||[],
+  });
+  check(r);
+  return true;
+}
 export async function resolverPrecificacaoOSDB(id,itens,dueDays=7){ const precos=(itens||[]).filter(i=>i.aguardandoValor).map(i=>({id:i.id,price:n(i.preco)})); const r=await supabase.rpc('zt_resolve_work_order_pricing',{p_wo:id,p_prices:precos,p_due_days:dueDays}); check(r); return true; }
 export async function atualizarStatusOrcamentoDB(id,status){ const r=await supabase.from('quotes').update({status:qStatusToDb[status]||'draft'}).eq('id',id).select('*, quote_items(*)').single(); return fromQuote(check(r)); }
 
