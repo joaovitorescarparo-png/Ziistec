@@ -21,6 +21,27 @@ once(
 );
 
 once(
+  'function Clientes(p) {\n  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto } = p;\n',
+  `function Clientes(p) {
+  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso } = p;
+  const [revisoesCliente, setRevisoesCliente] = useState([]);
+  useEffect(() => {
+    if (!real || !empresaId) return;
+    let ativo=true;
+    carregarRevisoesDB(empresaId).then((r)=>{ if(ativo) setRevisoesCliente(r); }).catch((e)=>aviso?.(e?.message || "Não foi possível carregar os retornos."));
+    return ()=>{ ativo=false; };
+  }, [real, empresaId]);
+`,
+  'pós-venda na ficha do cliente'
+);
+
+once(
+  '    const retornos = oss.filter((o) => o.retorno).map((o) => o.retorno);',
+  '    const retornos = real ? revisoesCliente.filter((r)=>r.clienteId===c.id && r.status==="pending").map((r)=>({ data:r.data, servico:r.descricao })) : oss.filter((o) => o.retorno).map((o) => o.retorno);',
+  'retornos persistentes do cliente'
+);
+
+once(
   'function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos }) {',
   'function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso }) {',
   'assinatura Garantias'
@@ -74,4 +95,4 @@ const block=`      {revisoes.filter((r)=>r.status === "pending").length > 0 && (
 once(marker,marker+block,'bloco pós-venda na tela Garantias');
 
 fs.writeFileSync(file,s);
-console.log('Applied ZiisTec phase 10 post-sale followup patch (5 changes)');
+console.log('Applied ZiisTec phase 10 post-sale followup patch (7 changes)');
