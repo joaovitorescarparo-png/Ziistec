@@ -1,0 +1,42 @@
+name: Consolidate ZiisTec Source
+
+on:
+  push:
+    branches: [consolidate-source]
+
+permissions:
+  contents: read
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-fund
+
+      - name: Generate final source through current trusted pipeline
+        run: |
+          npm run prebuild
+          mkdir -p consolidated
+          cp src/legacy/ZiisTecApp.jsx consolidated/ZiisTecApp.jsx
+          sha256sum consolidated/ZiisTecApp.jsx | tee consolidated/ZiisTecApp.sha256
+
+      - name: Prove generated source builds
+        run: npx vite build
+
+      - name: Upload consolidated source
+        uses: actions/upload-artifact@v4
+        with:
+          name: ziistec-consolidated-source
+          path: consolidated/
+          if-no-files-found: error
+          retention-days: 7
