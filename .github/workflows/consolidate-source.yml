@@ -25,14 +25,14 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts --no-fund
 
-      - name: Generate final source through current trusted pipeline
+      - name: Verify consolidated source
         run: |
           npm run prebuild
           mkdir -p consolidated
           cp src/legacy/ZiisTecApp.jsx consolidated/ZiisTecApp.jsx
           sha256sum consolidated/ZiisTecApp.jsx | tee consolidated/ZiisTecApp.sha256
 
-      - name: Prove generated source builds
+      - name: Prove consolidated source builds
         run: npx vite build
 
       - name: Upload consolidated source
@@ -43,17 +43,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Commit exact generated source to consolidation branch
+      - name: Commit deterministic source and dependency lock to branch
         if: github.event_name == 'push'
         run: |
-          mkdir -p src/legacy
-          cp consolidated/ZiisTecApp.jsx src/legacy/ZiisTecApp.jsx
-          git add -f src/legacy/ZiisTecApp.jsx
+          git add -f src/legacy/ZiisTecApp.jsx package-lock.json
           if git diff --cached --quiet; then
-            echo 'Consolidated source already matches generated output.'
+            echo 'Source and lockfile already match verified output.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'build: snapshot consolidated ZiisTec source'
+          git commit -m 'build: lock consolidated ZiisTec dependencies'
           git push origin HEAD:consolidate-source
