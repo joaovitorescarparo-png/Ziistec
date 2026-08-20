@@ -3,5 +3,4 @@ dist
 .env
 .env.local
 .vercel
-src/legacy/ZiisTecApp.jsx
 supabase/0001_ziistec_fundacao_FINAL.sql

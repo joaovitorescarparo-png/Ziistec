@@ -1,8 +1,0 @@
-[
-  {
-    "start": 2841,
-    "delete": 1,
-    "expect": ["      persistTimer.current = setTimeout(() => { persistirEdicaoOSDB(next, patch, empresaId, usuarioAtual?.id, papel).catch((e) => aviso(mensagemErro(e))); }, 500);"],
-    "insert": ["      persistTimer.current = setTimeout(() => { persistirEdicaoOSDB(next, patch, empresaId, usuarioAtual?.id, papel).then((r) => { if (r?.checklist) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, checklist: r.checklist } : x)); }).catch((e) => aviso(mensagemErro(e))); }, 500);"]
-  }
-]
