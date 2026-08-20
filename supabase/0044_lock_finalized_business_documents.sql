@@ -6,39 +6,43 @@ as $$
 begin
   if current_user <> 'authenticated' then return new; end if;
 
-  if tg_table_name = 'work_orders' and old.status = 'done' then
-    if new.client_id is distinct from old.client_id
-       or new.quote_id is distinct from old.quote_id
-       or new.assigned_to is distinct from old.assigned_to
-       or new.scheduled_date is distinct from old.scheduled_date
-       or new.scheduled_time is distinct from old.scheduled_time
-       or new.address is distinct from old.address
-       or new.service_place is distinct from old.service_place
-       or new.request is distinct from old.request
-       or new.pre_notes is distinct from old.pre_notes
-       or new.extra_cost is distinct from old.extra_cost
-       or new.needs_return is distinct from old.needs_return
-       or new.warranty_id is distinct from old.warranty_id
-       or new.origin_wo_id is distinct from old.origin_wo_id
-       or new.is_warranty_visit is distinct from old.is_warranty_visit
-       or new.problem_report is distinct from old.problem_report
-       or new.billing_entry_id is distinct from old.billing_entry_id
-       or new.completed_at is distinct from old.completed_at
-       or new.pending_pricing is distinct from old.pending_pricing then
-      raise exception 'OS concluída é histórica e não pode ter seus dados centrais alterados' using errcode='42501';
+  if tg_table_name = 'work_orders' then
+    if old.status = 'done' then
+      if new.client_id is distinct from old.client_id
+         or new.quote_id is distinct from old.quote_id
+         or new.assigned_to is distinct from old.assigned_to
+         or new.scheduled_date is distinct from old.scheduled_date
+         or new.scheduled_time is distinct from old.scheduled_time
+         or new.address is distinct from old.address
+         or new.service_place is distinct from old.service_place
+         or new.request is distinct from old.request
+         or new.pre_notes is distinct from old.pre_notes
+         or new.extra_cost is distinct from old.extra_cost
+         or new.needs_return is distinct from old.needs_return
+         or new.warranty_id is distinct from old.warranty_id
+         or new.origin_wo_id is distinct from old.origin_wo_id
+         or new.is_warranty_visit is distinct from old.is_warranty_visit
+         or new.problem_report is distinct from old.problem_report
+         or new.billing_entry_id is distinct from old.billing_entry_id
+         or new.completed_at is distinct from old.completed_at
+         or new.pending_pricing is distinct from old.pending_pricing then
+        raise exception 'OS concluída é histórica e não pode ter seus dados centrais alterados' using errcode='42501';
+      end if;
     end if;
-  elsif tg_table_name = 'quotes' and old.status = 'approved' then
-    if new.client_id is distinct from old.client_id
-       or new.status is distinct from old.status
-       or new.issue_date is distinct from old.issue_date
-       or new.valid_until is distinct from old.valid_until
-       or new.discount is distinct from old.discount
-       or new.surcharge is distinct from old.surcharge
-       or new.payment_terms is distinct from old.payment_terms
-       or new.notes is distinct from old.notes
-       or new.address is distinct from old.address
-       or new.service_place is distinct from old.service_place then
-      raise exception 'Orçamento aprovado é histórico e não pode ser alterado; duplique para criar uma nova versão' using errcode='42501';
+  elsif tg_table_name = 'quotes' then
+    if old.status = 'approved' then
+      if new.client_id is distinct from old.client_id
+         or new.status is distinct from old.status
+         or new.issue_date is distinct from old.issue_date
+         or new.valid_until is distinct from old.valid_until
+         or new.discount is distinct from old.discount
+         or new.surcharge is distinct from old.surcharge
+         or new.payment_terms is distinct from old.payment_terms
+         or new.notes is distinct from old.notes
+         or new.address is distinct from old.address
+         or new.service_place is distinct from old.service_place then
+        raise exception 'Orçamento aprovado é histórico e não pode ser alterado; duplique para criar uma nova versão' using errcode='42501';
+      end if;
     end if;
   end if;
   return new;
