@@ -3,6 +3,8 @@ name: Consolidate ZiisTec Source
 on:
   push:
     branches: [consolidate-source]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
