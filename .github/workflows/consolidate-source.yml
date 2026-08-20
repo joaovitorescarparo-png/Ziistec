@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   consolidate:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          persist-credentials: true
 
       - uses: actions/setup-node@v4
         with:
@@ -42,3 +42,18 @@ jobs:
           path: consolidated/
           if-no-files-found: error
           retention-days: 7
+
+      - name: Commit exact generated source to consolidation branch
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p src/legacy
+          cp consolidated/ZiisTecApp.jsx src/legacy/ZiisTecApp.jsx
+          git add -f src/legacy/ZiisTecApp.jsx
+          if git diff --cached --quiet; then
+            echo 'Consolidated source already matches generated output.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'build: snapshot consolidated ZiisTec source'
+          git push origin HEAD:consolidate-source
