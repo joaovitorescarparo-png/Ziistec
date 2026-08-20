@@ -126,15 +126,43 @@ export async function uploadLogoEmpresaDB(file,companyId){
 }
 
 async function persistirChecklist(os,checklist,companyId,userId){
-  const current=check(await supabase.from('work_order_checklists').select('id').eq('work_order_id',os.id))||[];
-  const keep=new Set((checklist||[]).map(c=>c.id).filter(isUuid));
-  const apagar=current.map(c=>c.id).filter(id=>!keep.has(id));
-  if(apagar.length) check(await supabase.from('work_order_checklists').delete().in('id',apagar));
-  for(let i=0;i<(checklist||[]).length;i++){
-    const c=checklist[i];
-    if(isUuid(c.id)) check(await supabase.from('work_order_checklists').update({text:c.texto||'Item',done:Boolean(c.feito),position:i,updated_at:new Date().toISOString()}).eq('id',c.id));
-    else check(await supabase.from('work_order_checklists').insert({work_order_id:os.id,company_id:companyId,text:c.texto||'Item',done:Boolean(c.feito),position:i,created_by:userId||null}));
+  const incoming=checklist||[];
+  const current=check(await supabase.from('work_order_checklists').select('*').eq('work_order_id',os.id).order('position',{ascending:true}))||[];
+  const currentById=new Map(current.map(row=>[row.id,row]));
+  const used=new Set();
+
+  for(let i=0;i<incoming.length;i++){
+    const item=incoming[i];
+    let target=null;
+
+    if(isUuid(item.id) && currentById.has(item.id)) target=currentById.get(item.id);
+    if(!target && current[i] && !used.has(current[i].id)) target=current[i];
+    if(!target) target=current.find(row=>!used.has(row.id) && row.text===(item.texto||'Item'))||null;
+
+    if(target){
+      used.add(target.id);
+      check(await supabase.from('work_order_checklists').update({
+        text:item.texto||'Item',
+        done:Boolean(item.feito),
+        position:i,
+        updated_at:new Date().toISOString(),
+      }).eq('id',target.id).eq('work_order_id',os.id));
+    }else{
+      const inserted=check(await supabase.from('work_order_checklists').insert({
+        work_order_id:os.id,
+        company_id:companyId,
+        text:item.texto||'Item',
+        done:Boolean(item.feito),
+        position:i,
+        created_by:userId||null,
+      }).select('id').single());
+      if(inserted?.id) used.add(inserted.id);
+    }
   }
+
+  const apagar=current.map(row=>row.id).filter(id=>!used.has(id));
+  if(apagar.length) check(await supabase.from('work_order_checklists').delete().eq('work_order_id',os.id).in('id',apagar));
+
   const fresh=check(await supabase.from('work_order_checklists').select('*').eq('work_order_id',os.id).order('position',{ascending:true}))||[];
   return fresh.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done)}));
 }
