@@ -22,10 +22,10 @@ jobs:
         with:
           node-version: '24.x'
 
-      - name: Reassemble and verify original integrity
+      - name: Verify consolidated source and foundation integrity
         run: |
           node scripts/reassemble.mjs
-          echo "6810efaac27ec494ca8436ade6d10a5f37e9a21ede25162b581c48f9d06faf31  src/legacy/ZiisTecApp.jsx" | sha256sum -c -
+          node scripts/verify-consolidated-source.mjs
           echo "80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd  supabase/0001_ziistec_fundacao_FINAL.sql" | sha256sum -c -
 
       - name: Install tested dependencies
