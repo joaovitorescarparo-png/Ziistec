@@ -9,6 +9,7 @@ import Carregando from "./screens/Carregando";
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
 const ProductStockV2 = lazy(() => import("./screens/v2/ProductStockV2"));
+const WorkOrderSaleV2 = lazy(() => import("./screens/v2/WorkOrderSaleV2"));
 
 const PAPEL = { owner: "proprietario", technician: "tecnico" };
 const STATUS_ASSINATURA = {
@@ -89,16 +90,24 @@ function SeletorEmpresa({ sessao }) {
   );
 }
 
-function AtalhoV2({ onOpen }) {
+function AtalhosV2({ owner, onOpen }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="fixed bottom-5 right-5 z-[9500] rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/15 transition hover:bg-emerald-800"
-      title="Abrir nova página de produtos e estoque"
-    >
-      Produtos / Estoque V2
-    </button>
+    <div className="fixed bottom-5 right-5 z-[9500] flex flex-col items-end gap-2">
+      {owner && <button
+        type="button"
+        onClick={() => onOpen("produtos")}
+        className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-xs font-bold text-emerald-800 shadow-lg shadow-slate-950/10 transition hover:bg-emerald-50"
+      >
+        Produtos / Estoque V2
+      </button>}
+      <button
+        type="button"
+        onClick={() => onOpen("venda-os")}
+        className="rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/15 transition hover:bg-emerald-800"
+      >
+        Venda na OS V2
+      </button>
+    </div>
   );
 }
 
@@ -206,13 +215,25 @@ export default function App() {
     );
   }
 
+  if (workspaceV2 === "venda-os") {
+    return comConexao(
+      <Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço" />}>
+        <WorkOrderSaleV2
+          companyId={s.empresaId}
+          companyName={contexto.empresa.fantasia || contexto.empresa.nome}
+          onClose={() => navegarV2(null)}
+        />
+      </Suspense>
+    );
+  }
+
   return comConexao(
     <>
       <SeletorEmpresa sessao={s} />
       <Suspense fallback={<Carregando texto="Carregando seu ambiente" />}>
         <ZiisTecApp key={contexto.chave} contexto={contexto} />
       </Suspense>
-      {owner && <AtalhoV2 onOpen={() => navegarV2("produtos")} />}
+      <AtalhosV2 owner={owner} onOpen={navegarV2} />
     </>
   );
 }
