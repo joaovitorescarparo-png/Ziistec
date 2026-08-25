@@ -99,6 +99,7 @@ create table if not exists public.maintenance_contracts (
   created_by uuid not null default auth.uid() references public.profiles(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint maintenance_contracts_id_company_key unique (id, company_id),
   constraint maintenance_contracts_status_valid check (status in ('active','paused','canceled','ended')),
   constraint maintenance_contracts_amount_nonnegative check (recurring_amount >= 0),
   constraint maintenance_contracts_frequency_valid check (frequency_months between 1 and 60),
