@@ -12,6 +12,30 @@ async function sbFetch(path,auth,init={}){const headers={apikey:SUPABASE_PUBLISH
 async function sbJson(path,auth){return(await sbFetch(path,auth)).json();}
 function wrapText(text,font,size,maxWidth){const paragraphs=clean(text).split(/\r?\n/),out=[];for(const p of paragraphs){const words=p.split(/\s+/).filter(Boolean);let line='';if(!words.length){out.push('');continue;}for(const w of words){const test=line?`${line} ${w}`:w;if(font.widthOfTextAtSize(test,size)<=maxWidth)line=test;else{if(line)out.push(line);line=w;}}if(line)out.push(line);}return out;}
 
+async function carregarImagensProdutos(items,companyId,auth){
+  const ids=[...new Set((items||[]).map(i=>i.product_id).filter(id=>UUID_RE.test(String(id))))].slice(0,20);
+  if(!ids.length)return new Map();
+  let products=[];
+  try{
+    // image_path só existe após a migration 0050. Se ainda não estiver homologada,
+    // o PDF continua funcionando sem thumbnails.
+    products=await sbJson(`/rest/v1/products?company_id=eq.${companyId}&id=in.(${ids.join(',')})&select=id,image_path`,auth);
+  }catch{return new Map();}
+  const pairs=await Promise.all((products||[]).filter(p=>p.image_path).map(async p=>{
+    try{
+      const encoded=String(p.image_path).split('/').map(encodeURIComponent).join('/');
+      const r=await sbFetch(`/storage/v1/object/authenticated/zt-branding/${encoded}`,auth);
+      const type=String(r.headers.get('content-type')||'').toLowerCase();
+      // pdf-lib incorpora PNG/JPEG nativamente. WEBP é ignorado sem quebrar o PDF.
+      if(!type.includes('png')&&!type.includes('jpeg')&&!type.includes('jpg'))return null;
+      const bytes=new Uint8Array(await r.arrayBuffer());
+      if(bytes.byteLength>2*1024*1024)return null;
+      return [p.id,{bytes,type}];
+    }catch{return null;}
+  }));
+  return new Map(pairs.filter(Boolean));
+}
+
 export default async function handler(req,res){
   Object.entries(commonHeaders).forEach(([k,v])=>res.setHeader(k,v));
   if(req.method!=='POST')return res.status(405).json({error:'Método não permitido.'});
@@ -30,10 +54,12 @@ export default async function handler(req,res){
     const[companies,quotes,items]=await Promise.all([
       sbJson(`/rest/v1/companies?id=eq.${companyId}&select=id,name,trade_name,tax_id,phone,whatsapp,email,address,logo_path,owner_name`,auth),
       sbJson(`/rest/v1/quotes?id=eq.${quoteId}&company_id=eq.${companyId}&select=*`,auth),
-      sbJson(`/rest/v1/quote_items?quote_id=eq.${quoteId}&company_id=eq.${companyId}&select=id,name,unit,quantity,unit_price,notes,position&order=position.asc`,auth),
+      // Sem unit_cost: o documento comercial do cliente nunca recebe custo ou margem.
+      sbJson(`/rest/v1/quote_items?quote_id=eq.${quoteId}&company_id=eq.${companyId}&select=id,product_id,name,unit,quantity,unit_price,notes,position&order=position.asc`,auth),
     ]);
     const company=companies?.[0],quote=quotes?.[0];if(!company||!quote)return res.status(404).json({error:'Orçamento não encontrado.'});
     const clients=quote.client_id?await sbJson(`/rest/v1/clients?id=eq.${quote.client_id}&company_id=eq.${companyId}&select=id,name,trade_name,tax_id,contact_name,phone,whatsapp,address`,auth):[];const client=clients?.[0]||{};
+    const productImages=await carregarImagensProdutos(items,companyId,auth);
 
     const pdf=await PDFDocument.create();pdf.setTitle(`Orçamento ${quote.number}`);pdf.setAuthor(company.trade_name||company.name||'ZiisTec');pdf.setSubject('Orçamento comercial');pdf.setCreator('ZiisTec');
     const normal=await pdf.embedFont(StandardFonts.Helvetica),bold=await pdf.embedFont(StandardFonts.HelveticaBold);const A4=[595.28,841.89],margin=42,width=A4[0]-margin*2;let page=pdf.addPage(A4),y=A4[1]-44;
@@ -45,7 +71,9 @@ export default async function handler(req,res){
     const compInfo=[company.tax_id&&`CNPJ/CPF: ${company.tax_id}`,company.phone&&`Tel.: ${company.phone}`,company.whatsapp&&`WhatsApp: ${company.whatsapp}`,company.email,company.address].filter(Boolean).join('  |  ');y-=22;wrapped(compInfo,margin,width-145,8.5,normal,muted,12);y-=10;page.drawLine({start:{x:margin,y},end:{x:A4[0]-margin,y},thickness:1,color:teal});y-=22;
     text('CLIENTE',margin,y,9,bold,teal);y-=15;wrapped(client.trade_name||client.name||'Cliente não informado',margin,width,12,bold,dark,15);const clientInfo=[client.tax_id&&`Documento: ${client.tax_id}`,client.contact_name&&`Contato: ${client.contact_name}`,client.phone&&`Tel.: ${client.phone}`,client.whatsapp&&`WhatsApp: ${client.whatsapp}`,client.address].filter(Boolean).join('  |  ');if(clientInfo)wrapped(clientInfo,margin,width,8.5,normal,muted,12);if(quote.service_place||quote.address){const loc=[quote.service_place&&`Local: ${quote.service_place}`,quote.address].filter(Boolean).join(' - ');wrapped(loc,margin,width,8.5,normal,muted,12);}y-=12;
     ensure(40);page.drawRectangle({x:margin,y:y-18,width,height:22,color:light});text('Descrição',margin+6,y-12,8,bold,dark);text('Qtd.',margin+315,y-12,8,bold,dark);text('Unitário',margin+365,y-12,8,bold,dark);text('Total',margin+445,y-12,8,bold,dark);y-=30;let subtotal=0;
-    for(const item of items||[]){const qty=Number(item.quantity||0),unit=Number(item.unit_price||0),total=qty*unit;subtotal+=total;const descLines=wrapText(item.name||'Item',normal,9,300),noteLines=item.notes?wrapText(item.notes,normal,7.5,300):[],rowH=Math.max(28,descLines.length*12+noteLines.length*10+8);ensure(rowH+6);let yy=y;for(const line of descLines){text(line,margin+6,yy,9,normal,dark);yy-=12;}for(const line of noteLines){text(line,margin+6,yy,7.5,normal,muted);yy-=10;}text(`${qty.toLocaleString('pt-BR')} ${clean(item.unit||'')}`,margin+315,y,8.5,normal,dark);text(money(unit),margin+365,y,8.5,normal,dark);text(money(total),margin+445,y,8.5,bold,dark);y-=rowH;page.drawLine({start:{x:margin,y:y+4},end:{x:A4[0]-margin,y:y+4},thickness:.5,color:light});}
+    const embeddedProductImages=new Map();
+    for(const [productId,source] of productImages){try{const img=source.type.includes('png')?await pdf.embedPng(source.bytes):await pdf.embedJpg(source.bytes);embeddedProductImages.set(productId,img);}catch{}}
+    for(const item of items||[]){const qty=Number(item.quantity||0),unit=Number(item.unit_price||0),total=qty*unit;subtotal+=total;const thumb=embeddedProductImages.get(item.product_id);const descX=thumb?margin+54:margin+6;const descW=thumb?252:300;const descLines=wrapText(item.name||'Item',normal,9,descW),noteLines=item.notes?wrapText(item.notes,normal,7.5,descW):[],rowH=Math.max(thumb?46:28,descLines.length*12+noteLines.length*10+8);ensure(rowH+6);if(thumb){const scale=Math.min(40/thumb.width,40/thumb.height,1);page.drawImage(thumb,{x:margin+6,y:y-40,width:thumb.width*scale,height:thumb.height*scale});}let yy=y;for(const line of descLines){text(line,descX,yy,9,normal,dark);yy-=12;}for(const line of noteLines){text(line,descX,yy,7.5,normal,muted);yy-=10;}text(`${qty.toLocaleString('pt-BR')} ${clean(item.unit||'')}`,margin+315,y,8.5,normal,dark);text(money(unit),margin+365,y,8.5,normal,dark);text(money(total),margin+445,y,8.5,bold,dark);y-=rowH;page.drawLine({start:{x:margin,y:y+4},end:{x:A4[0]-margin,y:y+4},thickness:.5,color:light});}
     y-=8;ensure(100);const discount=Number(quote.discount||0),surcharge=Number(quote.surcharge||0),grand=Math.max(0,subtotal-discount+surcharge),lx=A4[0]-margin-210,vx=A4[0]-margin-95;text('Subtotal',lx,y,9,normal,muted);text(money(subtotal),vx,y,9,normal,dark);y-=15;if(discount>0){text('Desconto',lx,y,9,normal,muted);text(`- ${money(discount)}`,vx,y,9,normal,dark);y-=15;}if(surcharge>0){text('Acréscimo',lx,y,9,normal,muted);text(`+ ${money(surcharge)}`,vx,y,9,normal,dark);y-=15;}text('TOTAL',lx,y,12,bold,dark);text(money(grand),vx,y,12,bold,teal);y-=30;
     if(quote.payment_terms){text('CONDIÇÕES DE PAGAMENTO',margin,y,8,bold,teal);y-=14;wrapped(quote.payment_terms,margin,width,9,normal,dark,13);y-=7;}if(quote.notes){text('OBSERVAÇÕES',margin,y,8,bold,teal);y-=14;wrapped(quote.notes,margin,width,9,normal,dark,13);y-=7;}ensure(50);page.drawLine({start:{x:margin,y:y-4},end:{x:A4[0]-margin,y:y-4},thickness:.5,color:light});y-=18;wrapped(`Orçamento emitido por ${companyName}${company.owner_name?` · Responsável: ${company.owner_name}`:''}.`,margin,width,7.5,normal,muted,11);
     const bytes=await pdf.save(),filename=`Orcamento-${safeFile(quote.number)}.pdf`;res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`attachment; filename="${filename}"`);res.setHeader('Content-Length',String(bytes.length));return res.status(200).send(Buffer.from(bytes));
