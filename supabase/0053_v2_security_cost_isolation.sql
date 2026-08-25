@@ -24,8 +24,11 @@ alter table public.maintenance_contracts
   references public.company_members(company_id, user_id);
 
 -- --------------------------------------------------------- owner-only cost ledgers
+-- A FK para o item/material é diferida porque o custo é capturado em BEFORE INSERT,
+-- quando o UUID do registro pai já existe mas a linha ainda não foi persistida.
 create table if not exists public.work_order_item_costs (
-  work_order_item_id uuid primary key references public.work_order_items(id) on delete cascade,
+  work_order_item_id uuid primary key
+    references public.work_order_items(id) on delete cascade deferrable initially deferred,
   work_order_id uuid not null,
   company_id uuid not null,
   unit_cost numeric(12,2) not null default 0 check (unit_cost >= 0),
@@ -42,12 +45,14 @@ create index if not exists idx_work_order_item_costs_company_wo
 alter table public.work_order_item_costs enable row level security;
 revoke all on table public.work_order_item_costs from public, anon, authenticated;
 grant select on table public.work_order_item_costs to authenticated;
+grant select, insert, update, delete on table public.work_order_item_costs to service_role;
 drop policy if exists p_work_order_item_costs_owner_select on public.work_order_item_costs;
 create policy p_work_order_item_costs_owner_select on public.work_order_item_costs
   for select to authenticated using (public.zt_is_owner(company_id));
 
 create table if not exists public.work_order_material_costs (
-  work_order_material_id uuid primary key references public.work_order_materials(id) on delete cascade,
+  work_order_material_id uuid primary key
+    references public.work_order_materials(id) on delete cascade deferrable initially deferred,
   work_order_id uuid not null,
   company_id uuid not null,
   unit_cost numeric(12,2) not null default 0 check (unit_cost >= 0),
@@ -64,6 +69,7 @@ create index if not exists idx_work_order_material_costs_company_wo
 alter table public.work_order_material_costs enable row level security;
 revoke all on table public.work_order_material_costs from public, anon, authenticated;
 grant select on table public.work_order_material_costs to authenticated;
+grant select, insert, update, delete on table public.work_order_material_costs to service_role;
 drop policy if exists p_work_order_material_costs_owner_select on public.work_order_material_costs;
 create policy p_work_order_material_costs_owner_select on public.work_order_material_costs
   for select to authenticated using (public.zt_is_owner(company_id));
@@ -92,80 +98,74 @@ alter table public.work_order_materials disable trigger trg_subscription_write_g
 update public.work_order_materials set unit_cost=0 where unit_cost <> 0;
 alter table public.work_order_materials enable trigger trg_subscription_write_guard;
 
--- ----------------------------------------------------- capture future inserts
-create or replace function zt_private.capture_work_order_item_cost_insert()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-begin
-  insert into public.work_order_item_costs(work_order_item_id, work_order_id, company_id, unit_cost)
-  values(new.id, new.work_order_id, new.company_id, greatest(coalesce(new.unit_cost,0),0))
-  on conflict (work_order_item_id) do update
-    set unit_cost=excluded.unit_cost, updated_at=now();
-
-  if coalesce(new.unit_cost,0) <> 0 then
-    update public.work_order_items set unit_cost=0 where id=new.id;
-  end if;
-  return new;
-end;
-$$;
-revoke all on function zt_private.capture_work_order_item_cost_insert() from public, anon, authenticated;
-
-drop trigger if exists trg_capture_work_order_item_cost_insert on public.work_order_items;
-create trigger trg_capture_work_order_item_cost_insert
-after insert on public.work_order_items
-for each row execute function zt_private.capture_work_order_item_cost_insert();
-
-create or replace function zt_private.capture_work_order_material_cost_insert()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-begin
-  insert into public.work_order_material_costs(work_order_material_id, work_order_id, company_id, unit_cost)
-  values(new.id, new.work_order_id, new.company_id, greatest(coalesce(new.unit_cost,0),0))
-  on conflict (work_order_material_id) do update
-    set unit_cost=excluded.unit_cost, updated_at=now();
-
-  if coalesce(new.unit_cost,0) <> 0 then
-    update public.work_order_materials set unit_cost=0 where id=new.id;
-  end if;
-  return new;
-end;
-$$;
-revoke all on function zt_private.capture_work_order_material_cost_insert() from public, anon, authenticated;
-
-drop trigger if exists trg_capture_work_order_material_cost_insert on public.work_order_materials;
-create trigger trg_capture_work_order_material_cost_insert
-after insert on public.work_order_materials
-for each row execute function zt_private.capture_work_order_material_cost_insert();
-
--- Bloqueia reintrodução de custo no registro técnico por UPDATE direto.
-create or replace function public.zt_guard_work_order_visible_cost()
+-- ------------------------------------------------ capture future writes atomically
+-- Escritas normais da aplicação que carregam custo passam por RPCs SECURITY DEFINER.
+-- Uma chamada direta como role authenticated nunca pode transformar um custo enviado
+-- pelo técnico em custo privado; ela é rejeitada antes da política RLS ser avaliada.
+create or replace function zt_private.capture_work_order_item_cost()
 returns trigger
 language plpgsql
 security invoker
 set search_path = ''
 as $$
 begin
-  if new.unit_cost is distinct from old.unit_cost and coalesce(new.unit_cost,0) <> 0 then
-    raise exception 'Custo interno não pode ser gravado no registro visível da OS' using errcode='42501';
+  if coalesce(new.unit_cost,0) < 0 then
+    raise exception 'Custo inválido' using errcode='22023';
   end if;
+
+  if current_user = 'authenticated' then
+    if coalesce(new.unit_cost,0) <> 0 then
+      raise exception 'Custo interno não pode ser gravado diretamente na OS' using errcode='42501';
+    end if;
+    new.unit_cost := 0;
+    return new;
+  end if;
+
+  insert into public.work_order_item_costs(work_order_item_id, work_order_id, company_id, unit_cost)
+  values(new.id, new.work_order_id, new.company_id, greatest(coalesce(new.unit_cost,0),0))
+  on conflict (work_order_item_id) do update
+    set unit_cost=excluded.unit_cost, updated_at=now();
   new.unit_cost := 0;
   return new;
 end;
 $$;
-revoke all on function public.zt_guard_work_order_visible_cost() from public, anon, authenticated;
+revoke all on function zt_private.capture_work_order_item_cost() from public, anon, authenticated;
 
-drop trigger if exists trg_guard_work_order_item_visible_cost on public.work_order_items;
-create trigger trg_guard_work_order_item_visible_cost
-before update of unit_cost on public.work_order_items
-for each row execute function public.zt_guard_work_order_visible_cost();
+drop trigger if exists trg_capture_work_order_item_cost on public.work_order_items;
+create trigger trg_capture_work_order_item_cost
+before insert or update of unit_cost on public.work_order_items
+for each row execute function zt_private.capture_work_order_item_cost();
 
-drop trigger if exists trg_guard_work_order_material_visible_cost on public.work_order_materials;
-create trigger trg_guard_work_order_material_visible_cost
-before update of unit_cost on public.work_order_materials
-for each row execute function public.zt_guard_work_order_visible_cost();
+create or replace function zt_private.capture_work_order_material_cost()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if coalesce(new.unit_cost,0) < 0 then
+    raise exception 'Custo inválido' using errcode='22023';
+  end if;
+
+  if current_user = 'authenticated' then
+    if coalesce(new.unit_cost,0) <> 0 then
+      raise exception 'Custo interno não pode ser gravado diretamente na OS' using errcode='42501';
+    end if;
+    new.unit_cost := 0;
+    return new;
+  end if;
+
+  insert into public.work_order_material_costs(work_order_material_id, work_order_id, company_id, unit_cost)
+  values(new.id, new.work_order_id, new.company_id, greatest(coalesce(new.unit_cost,0),0))
+  on conflict (work_order_material_id) do update
+    set unit_cost=excluded.unit_cost, updated_at=now();
+  new.unit_cost := 0;
+  return new;
+end;
+$$;
+revoke all on function zt_private.capture_work_order_material_cost() from public, anon, authenticated;
+
+drop trigger if exists trg_capture_work_order_material_cost on public.work_order_materials;
+create trigger trg_capture_work_order_material_cost
+before insert or update of unit_cost on public.work_order_materials
+for each row execute function zt_private.capture_work_order_material_cost();
