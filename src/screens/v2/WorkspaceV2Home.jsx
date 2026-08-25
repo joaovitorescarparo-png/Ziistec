@@ -1,10 +1,11 @@
 import React from 'react';
 import {
-  ArrowLeft, Boxes, ChevronRight, CircleDollarSign, ClipboardList, HardHat,
+  ArrowLeft, Boxes, ChevronRight, CircleDollarSign, ClipboardList, FileText, HardHat,
   LockKeyhole, PackageCheck, ShieldCheck, ShoppingCart, Sparkles, Wrench,
 } from 'lucide-react';
 
 const MODULES = [
+  { id:'orcamento-ia', ownerOnly:true, icon:FileText, title:'Orçamento com voz e IA', description:'Fale ou digite o pedido, revise ambiguidades, preços, custo e margem antes de salvar.', badge:'IA assistida' },
   { id:'produtos', ownerOnly:true, icon:Boxes, title:'Produtos e estoque', description:'Catálogo, custo, preço, margem, estoque mínimo, fotos e movimentações.', badge:'Proprietário' },
   { id:'compras', ownerOnly:true, icon:ShoppingCart, title:'Compras', description:'Fornecedor, itens, vencimento e entrada automática no estoque sem duplicar retries.', badge:'Estoque' },
   { id:'venda-os', ownerOnly:false, icon:PackageCheck, title:'Venda dentro da OS', description:'Adicionar produto durante o atendimento e baixar o estoque automaticamente.', badge:'Campo' },
