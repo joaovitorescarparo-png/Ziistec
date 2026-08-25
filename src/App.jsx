@@ -8,6 +8,7 @@ import Carregando from "./screens/Carregando";
 
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
+const WorkspaceV2Home = lazy(() => import("./screens/v2/WorkspaceV2Home"));
 const ProductStockV2 = lazy(() => import("./screens/v2/ProductStockV2"));
 const WorkOrderSaleV2 = lazy(() => import("./screens/v2/WorkOrderSaleV2"));
 const ManualWarrantyV2 = lazy(() => import("./screens/v2/ManualWarrantyV2"));
@@ -93,15 +94,16 @@ function SeletorEmpresa({ sessao }) {
   );
 }
 
-function AtalhosV2({ owner, onOpen }) {
+function AtalhoV2({ onOpen }) {
   return (
-    <div className="fixed bottom-5 right-5 z-[9500] flex flex-col items-end gap-2">
-      {owner && <button type="button" onClick={() => onOpen("financeiro")} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-lg shadow-slate-950/10 transition hover:bg-slate-50">Financeiro V2</button>}
-      {owner && <button type="button" onClick={() => onOpen("contratos")} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-lg shadow-slate-950/10 transition hover:bg-slate-50">Preventivas / Contratos V2</button>}
-      {owner && <button type="button" onClick={() => onOpen("garantias")} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-lg shadow-slate-950/10 transition hover:bg-slate-50">Garantias V2</button>}
-      {owner && <button type="button" onClick={() => onOpen("produtos")} className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-xs font-bold text-emerald-800 shadow-lg shadow-slate-950/10 transition hover:bg-emerald-50">Produtos / Estoque V2</button>}
-      <button type="button" onClick={() => onOpen("venda-os")} className="rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/15 transition hover:bg-emerald-800">Venda na OS V2</button>
-    </div>
+    <button
+      type="button"
+      onClick={() => onOpen("home")}
+      className="fixed bottom-5 right-5 z-[9500] rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-800"
+      title="Abrir a nova Stack V2"
+    >
+      Abrir Stack V2
+    </button>
   );
 }
 
@@ -197,8 +199,10 @@ export default function App() {
   if (!contexto || s.trocandoEmpresa) return comConexao(<Carregando texto={s.trocandoEmpresa ? "Trocando de empresa" : "Carregando sua empresa"} />);
 
   const owner = s.membresiaAtual?.role === "owner";
-  const workspaceProps = { companyId:s.empresaId, companyName:contexto.empresa.fantasia || contexto.empresa.nome, userId:s.perfil.id, onClose:() => navegarV2(null) };
+  const companyName = contexto.empresa.fantasia || contexto.empresa.nome;
+  const workspaceProps = { companyId:s.empresaId, companyName, userId:s.perfil.id, onClose:() => navegarV2("home") };
 
+  if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo a nova Stack"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={navegarV2} onClose={() => navegarV2(null)}/></Suspense>);
   if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "contratos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo preventivas e contratos"/>}><MaintenanceContractsV2 {...workspaceProps}/></Suspense>);
@@ -211,7 +215,7 @@ export default function App() {
       <Suspense fallback={<Carregando texto="Carregando seu ambiente" />}>
         <ZiisTecApp key={contexto.chave} contexto={contexto} />
       </Suspense>
-      <AtalhosV2 owner={owner} onOpen={navegarV2} />
+      <AtalhoV2 onOpen={navegarV2} />
     </>
   );
 }
