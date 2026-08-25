@@ -14,6 +14,7 @@ const PurchasesV2 = lazy(() => import("./screens/v2/PurchasesV2"));
 const QuoteAIV2 = lazy(() => import("./screens/v2/QuoteAIV2"));
 const QuotesManagementV2 = lazy(() => import("./screens/v2/QuotesManagementV2"));
 const WorkOrderSaleV2 = lazy(() => import("./screens/v2/WorkOrderSaleV2"));
+const WorkOrderMemoryV2 = lazy(() => import("./screens/v2/WorkOrderMemoryV2"));
 const ManualWarrantyV2 = lazy(() => import("./screens/v2/ManualWarrantyV2"));
 const MaintenanceContractsV2 = lazy(() => import("./screens/v2/MaintenanceContractsV2"));
 const FinanceV2 = lazy(() => import("./screens/v2/FinanceV2"));
@@ -214,6 +215,7 @@ export default function App() {
   if (workspaceV2 === "contratos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo preventivas e contratos"/>}><MaintenanceContractsV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "financeiro" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo financeiro"/>}><FinanceV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "memoria-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo memória técnica"/>}><WorkOrderMemoryV2 {...workspaceProps} owner={owner}/></Suspense>);
 
   return comConexao(
     <>
