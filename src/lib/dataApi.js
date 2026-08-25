@@ -159,7 +159,7 @@ export async function finalizarOSDB(id, extras={}){
     p_wo:id,
     p_report:extras.relato||extras.relatorio||null,
     p_pending:extras.pendencia||null,
-    p_extra_cost:n(extras.custosExtras),
+    p_extra_cost:Object.prototype.hasOwnProperty.call(extras,'custosExtras') ? n(extras.custosExtras) : null,
     p_due_days:7,
     p_materials:extras.materiaisDB||[],
     p_additions:extras.adicionaisDB||[],
