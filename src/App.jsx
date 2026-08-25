@@ -8,6 +8,7 @@ import Carregando from "./screens/Carregando";
 
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
+const ProductStockV2 = lazy(() => import("./screens/v2/ProductStockV2"));
 
 const PAPEL = { owner: "proprietario", technician: "tecnico" };
 const STATUS_ASSINATURA = {
@@ -88,8 +89,36 @@ function SeletorEmpresa({ sessao }) {
   );
 }
 
+function AtalhoV2({ onOpen }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="fixed bottom-5 right-5 z-[9500] rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/15 transition hover:bg-emerald-800"
+      title="Abrir nova página de produtos e estoque"
+    >
+      Produtos / Estoque V2
+    </button>
+  );
+}
+
+const workspaceInicial = () => {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("v2") || null;
+};
+
 export default function App() {
   const s = useSessao();
+  const [workspaceV2, setWorkspaceV2] = useState(workspaceInicial);
+
+  const navegarV2 = (valor) => {
+    setWorkspaceV2(valor || null);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (valor) url.searchParams.set("v2", valor);
+    else url.searchParams.delete("v2");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
 
   const contexto = useMemo(() => {
     if (!s.empresa || !s.membresiaAtual || !s.perfil) return null;
@@ -164,12 +193,26 @@ export default function App() {
 
   if (!contexto || s.trocandoEmpresa) return comConexao(<Carregando texto={s.trocandoEmpresa ? "Trocando de empresa" : "Carregando sua empresa"} />);
 
+  const owner = s.membresiaAtual?.role === "owner";
+  if (workspaceV2 === "produtos" && owner) {
+    return comConexao(
+      <Suspense fallback={<Carregando texto="Abrindo produtos e estoque" />}>
+        <ProductStockV2
+          companyId={s.empresaId}
+          companyName={contexto.empresa.fantasia || contexto.empresa.nome}
+          onClose={() => navegarV2(null)}
+        />
+      </Suspense>
+    );
+  }
+
   return comConexao(
     <>
       <SeletorEmpresa sessao={s} />
       <Suspense fallback={<Carregando texto="Carregando seu ambiente" />}>
         <ZiisTecApp key={contexto.chave} contexto={contexto} />
       </Suspense>
+      {owner && <AtalhoV2 onOpen={() => navegarV2("produtos")} />}
     </>
   );
 }
