@@ -51,12 +51,34 @@ const toItem = (x, companyId, parentKey, parentId, pos=0, workOrder=false) => ({
 const fromQuote = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, status:qStatusFromDb[x.status]||'rascunho', data:x.issue_date, validade:x.valid_until||'', desconto:n(x.discount), acrescimo:n(x.surcharge), condicao:x.payment_terms||'', obs:x.notes||'', local:x.address||'', localServico:x.service_place||'', itens:(x.quote_items||[]).sort((a,b)=>(a.position||0)-(b.position||0)).map(fromItem), osId:null });
 const quoteRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, status:qStatusToDb[x.status]||'draft', issue_date:x.data||new Date().toISOString().slice(0,10), valid_until:x.validade||null, discount:n(x.desconto), surcharge:n(x.acrescimo), payment_terms:x.condicao||null, notes:x.obs||null, address:x.local||null, service_place:x.localServico||null, created_by:userId||null });
 const fromWorkOrder = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, orcamentoId:x.quote_id, responsavelId:x.assigned_to, status:woStatusFromDb[x.status]||'aguardando', data:x.scheduled_date||'', concluidaEm:x.completed_at?String(x.completed_at).slice(0,10):'', hora:(x.scheduled_time||'').slice(0,5), local:x.address||'', localServico:x.service_place||'', descricaoLivre:x.request||'', obs:x.pre_notes||'', pendencia:x.pending_note||'', valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit), garantiaId:x.warranty_id, osOrigemId:x.origin_wo_id, relatoProblema:x.problem_report||'', cobrancaId:x.billing_entry_id, pendentePrecificacao:Boolean(x.pending_pricing), itens:(x.work_order_items||[]).map(fromItem), materiais:(x.work_order_materials||[]).map(fromMaterial), checklist:[], historico:[], fotos:[], adicionais:[], custosExtras:n(x.extra_cost), relato:'' });
-const woRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, quote_id:x.orcamentoId||null, assigned_to:x.responsavelId||userId||null, status:woStatusToDb[x.status]||'unscheduled', scheduled_date:x.data||null, scheduled_time:x.hora||null, address:x.local||null, service_place:x.localServico||null, request:x.descricaoLivre||x.solicitacao||null, pre_notes:x.obs||null, pending_note:x.pendencia||null, extra_cost:n(x.custosExtras), needs_return:Boolean(x.precisaRetorno), warranty_id:x.garantiaId||null, origin_wo_id:x.osOrigemId||null, is_warranty_visit:Boolean(x.emGarantia), problem_report:x.relatoProblema||null, created_by:userId||null });
+const woRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, quote_id:x.orcamentoId||null, assigned_to:x.responsavelId||userId||null, status:woStatusToDb[x.status]||'unscheduled', scheduled_date:x.data||null, scheduled_time:x.hora||null, address:x.local||null, service_place:x.service_place||x.localServico||null, request:x.descricaoLivre||x.solicitacao||null, pre_notes:x.obs||null, pending_note:x.pendencia||null, extra_cost:n(x.custosExtras), needs_return:Boolean(x.precisaRetorno), warranty_id:x.garantiaId||null, origin_wo_id:x.osOrigemId||null, is_warranty_visit:Boolean(x.emGarantia), problem_report:x.relatoProblema||null, created_by:userId||null });
 const fromFinancial = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, tipo:x.kind==='income'?'receita':'despesa', descricao:x.description, valor:n(x.amount), vencimento:x.due_date, pago:x.paid, pagoEm:x.paid_at, forma:x.payment_method||null, categoria:x.category||'', clienteId:x.client_id, origemTipo:x.work_order_id?'os':x.purchase_id?'compra':'manual', origemId:x.work_order_id||x.purchase_id||null });
 const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.client_id, osId:x.work_order_id, tipo:x.kind==='service'?'servico':'produto', servicoId:x.service_id, produtoId:x.product_id, descricao:x.description, local:x.service_place||'', inicio:x.starts_on, ate:x.ends_on, serie:x.serial_number||'', origem:x.source||'work_order', obs:x.notes||'' });
 const fromPurchase = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, fornecedor:x.supplier_name, data:x.purchase_date, forma:x.payment_method||'', vencimento:x.due_date||'', obs:x.notes||'', lancamentoId:x.entry_id, itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)})) });
 
 const WO_SELECT='*, work_order_items(*), work_order_materials(*)';
+
+const aplicarCustosPrivados = (rows, itemCosts=[], materialCosts=[]) => {
+  const itemMap = new Map((itemCosts||[]).map((x)=>[x.work_order_item_id,n(x.unit_cost)]));
+  const materialMap = new Map((materialCosts||[]).map((x)=>[x.work_order_material_id,n(x.unit_cost)]));
+  return (rows||[]).map((wo)=>({
+    ...wo,
+    work_order_items:(wo.work_order_items||[]).map((i)=>({...i,unit_cost:itemMap.get(i.id)??0})),
+    work_order_materials:(wo.work_order_materials||[]).map((m)=>({...m,unit_cost:materialMap.get(m.id)??0})),
+  }));
+};
+
+async function carregarOSCompletaDB(id) {
+  const wo = await supabase.from('work_orders').select(WO_SELECT).eq('id',id).single();
+  if (wo.error) throw wo.error;
+  const companyId = wo.data.company_id;
+  const [itemCosts,materialCosts] = await Promise.all([
+    supabase.from('work_order_item_costs').select('work_order_item_id,unit_cost').eq('company_id',companyId).eq('work_order_id',id),
+    supabase.from('work_order_material_costs').select('work_order_material_id,unit_cost').eq('company_id',companyId).eq('work_order_id',id),
+  ]);
+  const costError=itemCosts.error||materialCosts.error; if(costError) throw costError;
+  return aplicarCustosPrivados([wo.data],itemCosts.data,materialCosts.data)[0];
+}
 
 export async function carregarDadosEmpresa(companyId) {
   const reqs = await Promise.all([
@@ -68,9 +90,11 @@ export async function carregarDadosEmpresa(companyId) {
     supabase.from('financial_entries').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
     supabase.from('purchases').select('*, purchase_items(*)').eq('company_id',companyId).order('created_at',{ascending:false}),
     supabase.from('warranties').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
+    supabase.from('work_order_item_costs').select('work_order_item_id,unit_cost').eq('company_id',companyId),
+    supabase.from('work_order_material_costs').select('work_order_material_id,unit_cost').eq('company_id',companyId),
   ]);
   const firstError=reqs.find(r=>r.error)?.error; if(firstError) throw firstError;
-  const ordens=reqs[4].data.map(fromWorkOrder);
+  const ordens=aplicarCustosPrivados(reqs[4].data,reqs[8].data,reqs[9].data).map(fromWorkOrder);
   const orcamentos=reqs[3].data.map(fromQuote).map(q=>({...q,osId:ordens.find(o=>o.orcamentoId===q.id)?.id||null}));
   return { clientes:reqs[0].data.map(fromClient), servicos:reqs[1].data.map(fromService), produtos:reqs[2].data.map(fromProduct), orcamentos, ordens, lancamentos:reqs[5].data.map(fromFinancial), compras:reqs[6].data.map(fromPurchase), garantias:reqs[7].data.map(fromWarranty) };
 }
@@ -95,11 +119,14 @@ export async function salvarOSDB(x, companyId, userId){
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_work_order_idempotent',{p_company:companyId,p_wo:x.id||null,p_request:req,p_row:row,p_items:items}));
   const id=check(response);
-  const full=check(await supabase.from('work_orders').select(WO_SELECT).eq('id',id).single());
-  return fromWorkOrder(full);
+  return fromWorkOrder(await carregarOSCompletaDB(id));
 }
 
-export async function atualizarOSDB(id, patch){ const r=await supabase.from('work_orders').update(patch).eq('id',id).select(WO_SELECT).single(); return fromWorkOrder(check(r)); }
+export async function atualizarOSDB(id, patch){
+  const r=await supabase.from('work_orders').update(patch).eq('id',id).select('id').single();
+  check(r);
+  return fromWorkOrder(await carregarOSCompletaDB(id));
+}
 export async function finalizarOSDB(id, extras={}){
   const r=await supabase.rpc('zt_finalize_work_order_atomic',{
     p_wo:id,
