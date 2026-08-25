@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const path='src/legacy/ZiisTecApp.jsx';
 let src=readFileSync(path,'utf8');
@@ -153,4 +154,11 @@ const newData='itens: [], data: dataInicial || "", hora: "09:00", responsavel: e
 if(!src.includes(oldData)) throw new Error('NovaOS initial date not found');
 src=src.replace(oldData,newData);
 writeFileSync(path,src,'utf8');
-console.log('Agenda V2 source refactor applied');
+
+const hash=createHash('sha256').update(src,'utf8').digest('hex');
+const verifierPath='scripts/verify-consolidated-source.mjs';
+let verifier=readFileSync(verifierPath,'utf8');
+if(!/const expected = '[0-9a-f]{64}';/.test(verifier)) throw new Error('Verifier expected hash not found');
+verifier=verifier.replace(/const expected = '[0-9a-f]{64}';/,`const expected = '${hash}';`);
+writeFileSync(verifierPath,verifier,'utf8');
+console.log(`Agenda V2 source refactor applied (${hash})`);
