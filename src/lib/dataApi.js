@@ -10,12 +10,35 @@ const itemKindToDb = { servico:'service', produto:'product', livre:'free' };
 const itemKindFromDb = { service:'servico', product:'produto', free:'livre' };
 const check = (r) => { if (r?.error) throw r.error; return r?.data; };
 
-export const fromClient = (x) => ({ id:x.id, empresaId:x.company_id, tipo:x.person_type, nome:x.name, fantasia:x.trade_name||'', documento:x.tax_id||'', responsavel:x.contact_name||'', telefone:x.phone||'', whatsapp:x.whatsapp||'', endereco:x.address||'', obs:x.notes||'' });
-export const toClient = (x, companyId) => ({ company_id:companyId, person_type:x.tipo||'PF', name:x.nome?.trim(), trade_name:x.fantasia||null, tax_id:x.documento||null, contact_name:x.responsavel||null, phone:x.telefone||null, whatsapp:x.whatsapp||null, address:x.endereco||null, notes:x.obs||null });
+export const fromClient = (x) => ({
+  id:x.id, empresaId:x.company_id, tipo:x.person_type, nome:x.name, fantasia:x.trade_name||'', documento:x.tax_id||'',
+  responsavel:x.contact_name||'', telefone:x.phone||'', whatsapp:x.whatsapp||'', endereco:x.address||'', obs:x.notes||'',
+  googlePlaceId:x.google_place_id||null, latitude:x.latitude==null?null:Number(x.latitude), longitude:x.longitude==null?null:Number(x.longitude),
+  mapsUrl:x.maps_url||null,
+});
+export const toClient = (x, companyId) => ({
+  company_id:companyId, person_type:x.tipo||'PF', name:x.nome?.trim(), trade_name:x.fantasia||null, tax_id:x.documento||null,
+  contact_name:x.responsavel||null, phone:x.telefone||null, whatsapp:x.whatsapp||null, address:x.endereco||null, notes:x.obs||null,
+  google_place_id:x.googlePlaceId||null, latitude:x.latitude==null||x.latitude===''?null:Number(x.latitude),
+  longitude:x.longitude==null||x.longitude===''?null:Number(x.longitude), maps_url:x.mapsUrl||null,
+});
 export const fromService = (x) => ({ id:x.id, empresaId:x.company_id, nome:x.name, categoria:x.category||'', descricao:x.description||'', unidade:x.unit, preco:n(x.price), custo:n(x.cost), ativo:x.active, garantiaDias:x.warranty_days||0, retornoDias:x.followup_days||0 });
 const toService = (x, companyId) => ({ company_id:companyId, name:x.nome?.trim(), category:x.categoria||null, description:x.descricao||null, unit:x.unidade||'unidade', price:n(x.preco), cost:n(x.custo), active:x.ativo!==false, warranty_days:Number(x.garantiaDias||0), followup_days:Number(x.retornoDias||0) });
-export const fromProduct = (x) => ({ id:x.id, empresaId:x.company_id, nome:x.name, marca:x.brand||'', modelo:x.model||'', descricao:x.description||'', unidade:x.unit, custo:n(x.cost), preco:n(x.price), garantiaMeses:x.warranty_months||0, ativo:x.active, fornecedor:'' });
-const toProduct = (x, companyId) => ({ company_id:companyId, name:x.nome?.trim(), brand:x.marca||null, model:x.modelo||null, description:x.descricao||null, unit:x.unidade||'unidade', cost:n(x.custo), price:n(x.preco), warranty_months:Number(x.garantiaMeses||0), active:x.ativo!==false });
+export const fromProduct = (x) => ({
+  id:x.id, empresaId:x.company_id, nome:x.name, marca:x.brand||'', modelo:x.model||'', descricao:x.description||'', unidade:x.unit,
+  custo:n(x.cost), preco:n(x.price), garantiaMeses:x.warranty_months||0, ativo:x.active, fornecedor:'',
+  imagemPath:x.image_path||null, vendaHabilitada:x.sale_enabled!==false, controlaEstoque:Boolean(x.track_stock),
+  estoque:n(x.stock_qty), estoqueMinimo:n(x.low_stock_threshold),
+});
+const toProduct = (x, companyId) => ({
+  company_id:companyId, name:x.nome?.trim(), brand:x.marca||null, model:x.modelo||null, description:x.descricao||null,
+  unit:x.unidade||'unidade', cost:n(x.custo), price:n(x.preco), warranty_months:Number(x.garantiaMeses||0), active:x.ativo!==false,
+  ...(Object.prototype.hasOwnProperty.call(x,'imagemPath')?{image_path:x.imagemPath||null}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'vendaHabilitada')?{sale_enabled:x.vendaHabilitada!==false}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'controlaEstoque')?{track_stock:Boolean(x.controlaEstoque)}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'estoque')?{stock_qty:Math.max(0,n(x.estoque))}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'estoqueMinimo')?{low_stock_threshold:Math.max(0,n(x.estoqueMinimo))}:{}),
+});
 
 const fromItem = (x) => ({ id:x.id, tipo:itemKindFromDb[x.kind]||'livre', catalogoId:x.service_id||x.product_id||null, nome:x.name, unidade:x.unit||'unidade', qtd:n(x.quantity)||1, preco:n(x.unit_price), custo:n(x.unit_cost), obs:x.notes||'', adicional:Boolean(x.is_extra), aguardandoValor:Boolean(x.price_pending) });
 const fromMaterial = (x) => ({ id:x.id, produtoId:x.product_id||null, nome:x.name||'Material', qtd:n(x.quantity)||1, custo:n(x.unit_cost), serie:x.serial_number||'' });
@@ -30,7 +53,7 @@ const quoteRow = (x, companyId, userId, number) => ({ company_id:companyId, numb
 const fromWorkOrder = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, orcamentoId:x.quote_id, responsavelId:x.assigned_to, status:woStatusFromDb[x.status]||'aguardando', data:x.scheduled_date||'', concluidaEm:x.completed_at?String(x.completed_at).slice(0,10):'', hora:(x.scheduled_time||'').slice(0,5), local:x.address||'', localServico:x.service_place||'', descricaoLivre:x.request||'', obs:x.pre_notes||'', pendencia:x.pending_note||'', valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit), garantiaId:x.warranty_id, osOrigemId:x.origin_wo_id, relatoProblema:x.problem_report||'', cobrancaId:x.billing_entry_id, pendentePrecificacao:Boolean(x.pending_pricing), itens:(x.work_order_items||[]).map(fromItem), materiais:(x.work_order_materials||[]).map(fromMaterial), checklist:[], historico:[], fotos:[], adicionais:[], custosExtras:n(x.extra_cost), relato:'' });
 const woRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, quote_id:x.orcamentoId||null, assigned_to:x.responsavelId||userId||null, status:woStatusToDb[x.status]||'unscheduled', scheduled_date:x.data||null, scheduled_time:x.hora||null, address:x.local||null, service_place:x.localServico||null, request:x.descricaoLivre||x.solicitacao||null, pre_notes:x.obs||null, pending_note:x.pendencia||null, extra_cost:n(x.custosExtras), needs_return:Boolean(x.precisaRetorno), warranty_id:x.garantiaId||null, origin_wo_id:x.osOrigemId||null, is_warranty_visit:Boolean(x.emGarantia), problem_report:x.relatoProblema||null, created_by:userId||null });
 const fromFinancial = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, tipo:x.kind==='income'?'receita':'despesa', descricao:x.description, valor:n(x.amount), vencimento:x.due_date, pago:x.paid, pagoEm:x.paid_at, forma:x.payment_method||null, categoria:x.category||'', clienteId:x.client_id, origemTipo:x.work_order_id?'os':x.purchase_id?'compra':'manual', origemId:x.work_order_id||x.purchase_id||null });
-const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.client_id, osId:x.work_order_id, tipo:x.kind==='service'?'servico':'produto', servicoId:x.service_id, produtoId:x.product_id, descricao:x.description, local:x.service_place||'', inicio:x.starts_on, ate:x.ends_on, serie:x.serial_number||'' });
+const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.client_id, osId:x.work_order_id, tipo:x.kind==='service'?'servico':'produto', servicoId:x.service_id, produtoId:x.product_id, descricao:x.description, local:x.service_place||'', inicio:x.starts_on, ate:x.ends_on, serie:x.serial_number||'', origem:x.source||'work_order', obs:x.notes||'' });
 const fromPurchase = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, fornecedor:x.supplier_name, data:x.purchase_date, forma:x.payment_method||'', vencimento:x.due_date||'', obs:x.notes||'', lancamentoId:x.entry_id, itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)})) });
 
 const WO_SELECT='*, work_order_items(*), work_order_materials(*)';
