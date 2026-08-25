@@ -8,7 +8,7 @@ export function recursoV2AindaNaoMigrado(error) {
   const code = String(error?.code || '');
   const msg = String(error?.message || '');
   return V2_MISSING_CODES.has(code)
-    || /(inventory_movements|maintenance_contracts|zt_technician_catalog|zt_adjust_product_stock|zt_sell_product_on_work_order|stock_qty|track_stock|low_stock_threshold|sale_enabled|image_path)/i.test(msg)
+    || /(inventory_movements|maintenance_contracts|zt_technician_catalog|zt_adjust_product_stock|zt_sell_product_on_work_order|zt_create_manual_warranty|stock_qty|track_stock|low_stock_threshold|sale_enabled|image_path|warranties\.source)/i.test(msg)
       && /(schema cache|does not exist|not find|could not find|column|function|relation|não existe|não foi encontr)/i.test(msg);
 }
 
@@ -62,7 +62,7 @@ export async function carregarCatalogoTecnicoDB(companyId) {
 export async function carregarOSVendaDB(companyId) {
   const data = check(await supabase
     .from('work_orders')
-    .select('id,company_id,number,status,scheduled_date,scheduled_time,address,service_place,request,assigned_to')
+    .select('id,company_id,number,status,scheduled_date,scheduled_time,address,service_place,request,assigned_to,created_at')
     .eq('company_id',companyId)
     .in('status',['unscheduled','scheduled','in_progress'])
     .order('scheduled_date',{ascending:true,nullsFirst:false})
@@ -87,6 +87,33 @@ export async function ajustarEstoqueDB(companyId, productId, delta, notes='') {
 export async function venderProdutoNaOSDB(workOrderId, productId, quantidade=1, notes='') {
   return check(await supabase.rpc('zt_sell_product_on_work_order',{
     p_wo:workOrderId,p_product:productId,p_quantity:n(quantidade),p_notes:notes||null,
+  }));
+}
+
+export async function carregarOpcoesGarantiaManualDB(companyId) {
+  const [clients,services,products] = await Promise.all([
+    supabase.from('clients').select('id,name,trade_name,address').eq('company_id',companyId).order('name',{ascending:true}),
+    supabase.from('services').select('id,name,category,warranty_days,active').eq('company_id',companyId).eq('active',true).order('name',{ascending:true}),
+    supabase.from('products').select('id,name,brand,model,warranty_months,active').eq('company_id',companyId).eq('active',true).order('name',{ascending:true}),
+  ]);
+  const first=[clients,services,products].find(x=>x.error)?.error; if(first) throw first;
+  return {
+    clientes:(clients.data||[]).map(x=>({id:x.id,nome:x.trade_name||x.name,endereco:x.address||''})),
+    servicos:(services.data||[]).map(x=>({id:x.id,nome:x.name,categoria:x.category||'',garantiaDias:Number(x.warranty_days||0)})),
+    produtos:(products.data||[]).map(x=>({id:x.id,nome:x.name,marca:x.brand||'',modelo:x.model||'',garantiaMeses:Number(x.warranty_months||0)})),
+  };
+}
+
+export async function carregarGarantiasManuaisDB(companyId) {
+  const r = await supabase
+    .from('warranties')
+    .select('id,company_id,client_id,kind,service_id,product_id,description,service_place,starts_on,ends_on,serial_number,source,notes,created_at')
+    .eq('company_id',companyId)
+    .eq('source','manual')
+    .order('created_at',{ascending:false});
+  return (check(r)||[]).map(x=>({
+    id:x.id,clienteId:x.client_id,tipo:x.kind==='product'?'produto':'servico',servicoId:x.service_id||null,produtoId:x.product_id||null,
+    descricao:x.description||'',local:x.service_place||'',inicio:x.starts_on||'',ate:x.ends_on||'',serie:x.serial_number||'',obs:x.notes||'',criadoEm:x.created_at,
   }));
 }
 
