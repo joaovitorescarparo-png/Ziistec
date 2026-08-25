@@ -3,26 +3,27 @@
 -- à produção antes da homologação completa da V2.
 
 -- ---------------------------------------------------------------------------
--- Produtos: foto, estoque e venda por técnico
+-- Produtos: foto, estoque e venda por técnico.
+-- Nomes alinhados com o frontend consolidado existente.
 -- ---------------------------------------------------------------------------
 alter table public.products
   add column if not exists image_path text,
-  add column if not exists stock_on_hand numeric(14,3) not null default 0,
-  add column if not exists minimum_stock numeric(14,3) not null default 0,
+  add column if not exists stock_qty numeric(14,3) not null default 0,
+  add column if not exists low_stock_threshold numeric(14,3) not null default 0,
   add column if not exists track_stock boolean not null default false,
-  add column if not exists allow_technician_sale boolean not null default false,
+  add column if not exists sale_enabled boolean not null default true,
   add column if not exists updated_at timestamptz not null default now();
 
 alter table public.products drop constraint if exists products_stock_nonnegative;
 alter table public.products add constraint products_stock_nonnegative
-  check (stock_on_hand >= 0 and minimum_stock >= 0);
+  check (stock_qty >= 0 and low_stock_threshold >= 0);
 
 alter table public.products drop constraint if exists products_image_path_bounds;
 alter table public.products add constraint products_image_path_bounds
   check (image_path is null or length(image_path) <= 2000);
 
 create index if not exists idx_products_company_active_sale
-  on public.products(company_id, active, allow_technician_sale);
+  on public.products(company_id, active, sale_enabled);
 
 -- ---------------------------------------------------------------------------
 -- Movimentos de estoque: owner enxerga custo; técnico nunca consulta esta tabela.
@@ -78,7 +79,7 @@ create policy p_inventory_owner_delete on public.inventory_movements
   for delete to authenticated using (public.zt_is_owner(company_id));
 
 -- ---------------------------------------------------------------------------
--- Contratos recorrentes: financeiros visíveis somente ao proprietário.
+-- Contratos recorrentes: valores/termos financeiros visíveis somente ao owner.
 -- ---------------------------------------------------------------------------
 create table if not exists public.maintenance_contracts (
   id uuid primary key default gen_random_uuid(),
@@ -204,7 +205,7 @@ returns table(
   price numeric,
   warranty_months integer,
   image_path text,
-  stock_on_hand numeric,
+  stock_qty numeric,
   track_stock boolean
 )
 language sql
@@ -213,11 +214,11 @@ security definer
 set search_path = public, zt_private
 as $$
   select p.id, p.name, p.brand, p.model, p.description, p.unit, p.price,
-         p.warranty_months, p.image_path, p.stock_on_hand, p.track_stock
+         p.warranty_months, p.image_path, p.stock_qty, p.track_stock
     from public.products p
    where p.company_id = p_company
      and p.active = true
-     and p.allow_technician_sale = true
+     and p.sale_enabled = true
      and zt_private.is_member(p_company)
    order by p.name;
 $$;
@@ -236,7 +237,7 @@ returns table(
   price numeric,
   warranty_months integer,
   image_path text,
-  stock_on_hand numeric,
+  stock_qty numeric,
   track_stock boolean
 )
 language sql
