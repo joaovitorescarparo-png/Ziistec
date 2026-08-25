@@ -58,11 +58,13 @@ const fromPurchase = (x) => ({ id:x.id, requestId:x.client_request_id||null, emp
 
 const WO_SELECT='*, work_order_items(*), work_order_materials(*)';
 
-const aplicarCustosPrivados = (rows, itemCosts=[], materialCosts=[]) => {
+const aplicarCustosPrivados = (rows, itemCosts=[], materialCosts=[], workOrderCosts=[]) => {
   const itemMap = new Map((itemCosts||[]).map((x)=>[x.work_order_item_id,n(x.unit_cost)]));
   const materialMap = new Map((materialCosts||[]).map((x)=>[x.work_order_material_id,n(x.unit_cost)]));
+  const workOrderMap = new Map((workOrderCosts||[]).map((x)=>[x.work_order_id,n(x.extra_cost)]));
   return (rows||[]).map((wo)=>({
     ...wo,
+    extra_cost:workOrderMap.get(wo.id)??0,
     work_order_items:(wo.work_order_items||[]).map((i)=>({...i,unit_cost:itemMap.get(i.id)??0})),
     work_order_materials:(wo.work_order_materials||[]).map((m)=>({...m,unit_cost:materialMap.get(m.id)??0})),
   }));
@@ -72,27 +74,38 @@ const ledgerAindaNaoMigrado = (error) => {
   const code = String(error?.code||'');
   const msg = String(error?.message||'');
   return code === 'PGRST205' || code === '42P01'
-    || (/work_order_(item|material)_costs/i.test(msg) && /(schema cache|does not exist|not find|não foi encontr)/i.test(msg));
+    || (/(work_order_(item|material)_costs|work_order_private_costs)/i.test(msg)
+      && /(schema cache|does not exist|not find|could not find|relation|não existe|não foi encontr)/i.test(msg));
+};
+
+const dadosLedgerOuCompat = (result) => {
+  if (!result?.error) return result?.data||[];
+  if (ledgerAindaNaoMigrado(result.error)) return [];
+  throw result.error;
 };
 
 async function carregarCustosPrivados(companyId, workOrderId=null) {
   let itemQuery=supabase.from('work_order_item_costs').select('work_order_item_id,unit_cost').eq('company_id',companyId);
   let materialQuery=supabase.from('work_order_material_costs').select('work_order_material_id,unit_cost').eq('company_id',companyId);
-  if(workOrderId){ itemQuery=itemQuery.eq('work_order_id',workOrderId); materialQuery=materialQuery.eq('work_order_id',workOrderId); }
-  const [itemCosts,materialCosts]=await Promise.all([itemQuery,materialQuery]);
-  const errors=[itemCosts.error,materialCosts.error].filter(Boolean);
-  if(errors.length){
-    if(errors.every(ledgerAindaNaoMigrado)) return { itemCosts:[], materialCosts:[] };
-    throw errors[0];
+  let workOrderQuery=supabase.from('work_order_private_costs').select('work_order_id,extra_cost').eq('company_id',companyId);
+  if(workOrderId){
+    itemQuery=itemQuery.eq('work_order_id',workOrderId);
+    materialQuery=materialQuery.eq('work_order_id',workOrderId);
+    workOrderQuery=workOrderQuery.eq('work_order_id',workOrderId);
   }
-  return { itemCosts:itemCosts.data||[], materialCosts:materialCosts.data||[] };
+  const [itemCosts,materialCosts,workOrderCosts]=await Promise.all([itemQuery,materialQuery,workOrderQuery]);
+  return {
+    itemCosts:dadosLedgerOuCompat(itemCosts),
+    materialCosts:dadosLedgerOuCompat(materialCosts),
+    workOrderCosts:dadosLedgerOuCompat(workOrderCosts),
+  };
 }
 
 async function carregarOSCompletaDB(id) {
   const wo = await supabase.from('work_orders').select(WO_SELECT).eq('id',id).single();
   if (wo.error) throw wo.error;
-  const {itemCosts,materialCosts}=await carregarCustosPrivados(wo.data.company_id,id);
-  return aplicarCustosPrivados([wo.data],itemCosts,materialCosts)[0];
+  const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(wo.data.company_id,id);
+  return aplicarCustosPrivados([wo.data],itemCosts,materialCosts,workOrderCosts)[0];
 }
 
 export async function carregarDadosEmpresa(companyId) {
@@ -107,8 +120,8 @@ export async function carregarDadosEmpresa(companyId) {
     supabase.from('warranties').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
   ]);
   const firstError=reqs.find(r=>r.error)?.error; if(firstError) throw firstError;
-  const {itemCosts,materialCosts}=await carregarCustosPrivados(companyId);
-  const ordens=aplicarCustosPrivados(reqs[4].data,itemCosts,materialCosts).map(fromWorkOrder);
+  const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(companyId);
+  const ordens=aplicarCustosPrivados(reqs[4].data,itemCosts,materialCosts,workOrderCosts).map(fromWorkOrder);
   const orcamentos=reqs[3].data.map(fromQuote).map(q=>({...q,osId:ordens.find(o=>o.orcamentoId===q.id)?.id||null}));
   return { clientes:reqs[0].data.map(fromClient), servicos:reqs[1].data.map(fromService), produtos:reqs[2].data.map(fromProduct), orcamentos, ordens, lancamentos:reqs[5].data.map(fromFinancial), compras:reqs[6].data.map(fromPurchase), garantias:reqs[7].data.map(fromWarranty) };
 }
