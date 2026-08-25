@@ -76,7 +76,7 @@ async function carregarAttachments(woId,companyId){
 export async function carregarDetalheMemoriaOSV2DB(companyId,woId){
   const [woR,itemsR,materialsR,reportsR,attachments]=await Promise.all([
     supabase.from('work_orders').select('id,company_id,number,client_id,assigned_to,status,scheduled_date,scheduled_time,address,service_place,request,pre_notes,pending_note,needs_return,is_warranty_visit,problem_report,completed_at,created_at,updated_at').eq('company_id',companyId).eq('id',woId).single(),
-    supabase.from('work_order_items').select('id,work_order_id,kind,service_id,product_id,name,unit,quantity,unit_price,notes,is_extra,price_pending').eq('company_id',companyId).eq('work_order_id',woId).order('created_at',{ascending:true}),
+    supabase.from('work_order_items').select('id,work_order_id,kind,service_id,product_id,name,unit,quantity,unit_price,notes,is_extra,price_pending').eq('company_id',companyId).eq('work_order_id',woId),
     supabase.from('work_order_materials').select('id,work_order_id,product_id,name,quantity,serial_number,created_at').eq('company_id',companyId).eq('work_order_id',woId).order('created_at',{ascending:true}),
     supabase.from('work_order_reports').select('id,work_order_id,entry_type,body,author_id,created_at').eq('company_id',companyId).eq('work_order_id',woId).order('created_at',{ascending:true}),
     carregarAttachments(woId,companyId),
