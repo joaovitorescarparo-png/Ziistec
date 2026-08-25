@@ -10,11 +10,11 @@ alter table public.financial_entries
 alter table public.work_orders drop constraint if exists work_orders_maintenance_contract_fk;
 alter table public.work_orders add constraint work_orders_maintenance_contract_fk
   foreign key (maintenance_contract_id,company_id)
-  references public.maintenance_contracts(id,company_id) on delete set null;
+  references public.maintenance_contracts(id,company_id);
 alter table public.financial_entries drop constraint if exists financial_entries_maintenance_contract_fk;
 alter table public.financial_entries add constraint financial_entries_maintenance_contract_fk
   foreign key (maintenance_contract_id,company_id)
-  references public.maintenance_contracts(id,company_id) on delete set null;
+  references public.maintenance_contracts(id,company_id);
 
 create unique index if not exists ux_work_orders_contract_cycle
   on public.work_orders(company_id,maintenance_contract_id,contract_cycle)
@@ -90,8 +90,8 @@ begin
     ) returning id into v_entry;
   end if;
 
-  v_next_service := v_service_on + make_interval(months => v_contract.interval_months);
-  v_next_billing := v_due_on + make_interval(months => v_contract.interval_months);
+  v_next_service := (v_service_on + make_interval(months => v_contract.interval_months))::date;
+  v_next_billing := (v_due_on + make_interval(months => v_contract.interval_months))::date;
   update public.maintenance_contracts
      set next_service_on=v_next_service,
          next_billing_on=v_next_billing,
