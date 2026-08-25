@@ -3,6 +3,53 @@ import { supabase, mensagemErro } from './supabase';
 const check = (r) => { if (r?.error) throw r.error; return r?.data; };
 const n = (v) => Number(v || 0);
 
+const V2_MISSING_CODES = new Set(['PGRST202', 'PGRST204', 'PGRST205', '42P01', '42703', '42883']);
+export function recursoV2AindaNaoMigrado(error) {
+  const code = String(error?.code || '');
+  const msg = String(error?.message || '');
+  return V2_MISSING_CODES.has(code)
+    || /(inventory_movements|maintenance_contracts|zt_technician_catalog|zt_adjust_product_stock|zt_sell_product_on_work_order|stock_qty|track_stock|low_stock_threshold|sale_enabled|image_path)/i.test(msg)
+      && /(schema cache|does not exist|not find|could not find|column|function|relation|não existe|não foi encontr)/i.test(msg);
+}
+
+const fromOwnerProduct = (p) => ({
+  id:p.id,
+  empresaId:p.company_id,
+  nome:p.name,
+  marca:p.brand||'',
+  modelo:p.model||'',
+  descricao:p.description||'',
+  unidade:p.unit||'unidade',
+  custo:n(p.cost),
+  preco:n(p.price),
+  garantiaMeses:Number(p.warranty_months||0),
+  ativo:p.active!==false,
+  imagemPath:p.image_path||null,
+  vendaHabilitada:p.sale_enabled!==false,
+  controlaEstoque:Boolean(p.track_stock),
+  estoque:n(p.stock_qty),
+  estoqueMinimo:n(p.low_stock_threshold),
+});
+
+export async function carregarProdutosEstoqueDB(companyId) {
+  const r = await supabase
+    .from('products')
+    .select('id,company_id,name,brand,model,description,unit,cost,price,warranty_months,active,image_path,sale_enabled,track_stock,stock_qty,low_stock_threshold')
+    .eq('company_id', companyId)
+    .order('name', { ascending:true });
+  return (check(r) || []).map(fromOwnerProduct);
+}
+
+export async function verificarProdutoV2DisponivelDB(companyId) {
+  try {
+    await carregarProdutosEstoqueDB(companyId);
+    return { disponivel:true, motivo:null };
+  } catch (error) {
+    if (recursoV2AindaNaoMigrado(error)) return { disponivel:false, motivo:'migration_pending' };
+    throw error;
+  }
+}
+
 export async function carregarCatalogoTecnicoDB(companyId) {
   const data = check(await supabase.rpc('zt_technician_catalog', { p_company: companyId }));
   return (data || []).map((p) => ({
