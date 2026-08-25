@@ -64,13 +64,14 @@ async function carregarAttachments(woId,companyId){
     r=await supabase.from('attachments').select('id,company_id,bucket,path,file_name,content_type,size_bytes,category,work_order_id,uploaded_by,created_at').eq('company_id',companyId).eq('work_order_id',woId).order('created_at',{ascending:true});
   }
   const rows=check(r)||[];
-  return {migrated,media:await Promise.all(rows.map(async a=>({
+  const media=await Promise.all(rows.map(async a=>({
     ...a,
     media_kind:a.media_kind||(String(a.content_type||'').startsWith('video/')?'video':'photo'),
     media_stage:a.media_stage||inferStage(a.category),
     caption:a.caption||'',
     url:await signed(a.bucket,a.path),
-  }))};
+  })));
+  return {migrated,media};
 }
 
 export async function carregarDetalheMemoriaOSV2DB(companyId,woId){
