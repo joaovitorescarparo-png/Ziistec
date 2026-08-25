@@ -12,6 +12,32 @@ export async function carregarCatalogoTecnicoDB(companyId) {
   }));
 }
 
+export async function ajustarEstoqueDB(companyId, productId, delta, notes='') {
+  return n(check(await supabase.rpc('zt_adjust_product_stock',{p_company:companyId,p_product:productId,p_delta:n(delta),p_notes:notes||null})));
+}
+
+export async function venderProdutoNaOSDB(workOrderId, productId, quantidade=1, notes='') {
+  return check(await supabase.rpc('zt_sell_product_on_work_order',{
+    p_wo:workOrderId,p_product:productId,p_quantity:n(quantidade),p_notes:notes||null,
+  }));
+}
+
+export async function criarGarantiaManualDB(x, companyId) {
+  return check(await supabase.rpc('zt_create_manual_warranty',{
+    p_company:companyId,
+    p_client:x.clienteId,
+    p_kind:x.tipo==='produto'?'product':'service',
+    p_description:x.descricao?.trim(),
+    p_starts_on:x.inicio,
+    p_ends_on:x.ate,
+    p_service_place:x.local||null,
+    p_service:x.tipo==='servico'?(x.servicoId||null):null,
+    p_product:x.tipo==='produto'?(x.produtoId||null):null,
+    p_serial:x.serie||null,
+    p_notes:x.obs||null,
+  }));
+}
+
 export const fromMaintenanceContract = (x) => ({
   id:x.id, empresaId:x.company_id, clienteId:x.client_id, nome:x.name, status:x.status,
   valor:n(x.amount), periodicidadeMeses:Number(x.interval_months||1), diaCobranca:x.billing_day||null,
