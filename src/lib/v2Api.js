@@ -59,6 +59,27 @@ export async function carregarCatalogoTecnicoDB(companyId) {
   }));
 }
 
+export async function carregarOSVendaDB(companyId) {
+  const data = check(await supabase
+    .from('work_orders')
+    .select('id,company_id,number,status,scheduled_date,scheduled_time,address,service_place,request,assigned_to')
+    .eq('company_id',companyId)
+    .in('status',['unscheduled','scheduled','in_progress'])
+    .order('scheduled_date',{ascending:true,nullsFirst:false})
+    .order('created_at',{ascending:false}));
+  return (data || []).map((x)=>({
+    id:x.id,
+    empresaId:x.company_id,
+    numero:x.number,
+    status:x.status,
+    data:x.scheduled_date||'',
+    hora:(x.scheduled_time||'').slice(0,5),
+    endereco:x.service_place||x.address||'',
+    solicitacao:x.request||'',
+    responsavelId:x.assigned_to||null,
+  }));
+}
+
 export async function ajustarEstoqueDB(companyId, productId, delta, notes='') {
   return n(check(await supabase.rpc('zt_adjust_product_stock',{p_company:companyId,p_product:productId,p_delta:n(delta),p_notes:notes||null})));
 }
