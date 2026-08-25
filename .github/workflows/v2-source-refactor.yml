@@ -1,0 +1,40 @@
+name: V2 source refactor
+
+on:
+  push:
+    branches: [product-v2-review]
+    paths:
+      - scripts/v2-refactor-agenda.mjs
+      - .github/workflows/v2-source-refactor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: product-v2-review
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply one-time source refactor
+        run: node scripts/v2-refactor-agenda.mjs
+      - name: Build validation
+        run: |
+          npm ci
+          npm run build
+      - name: Commit consolidated source change
+        run: |
+          if git diff --quiet -- src/legacy/ZiisTecApp.jsx; then
+            echo "No source changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/legacy/ZiisTecApp.jsx
+          git commit -m "feat: redesign Agenda for Product V2"
+          git push origin HEAD:product-v2-review
