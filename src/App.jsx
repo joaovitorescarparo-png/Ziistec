@@ -10,6 +10,7 @@ const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
 const WorkspaceV2Home = lazy(() => import("./screens/v2/WorkspaceV2Home"));
 const ProductStockV2 = lazy(() => import("./screens/v2/ProductStockV2"));
+const PurchasesV2 = lazy(() => import("./screens/v2/PurchasesV2"));
 const WorkOrderSaleV2 = lazy(() => import("./screens/v2/WorkOrderSaleV2"));
 const ManualWarrantyV2 = lazy(() => import("./screens/v2/ManualWarrantyV2"));
 const MaintenanceContractsV2 = lazy(() => import("./screens/v2/MaintenanceContractsV2"));
@@ -204,6 +205,7 @@ export default function App() {
 
   if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo a nova Stack"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={navegarV2} onClose={() => navegarV2(null)}/></Suspense>);
   if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "compras" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo compras"/>}><PurchasesV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "contratos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo preventivas e contratos"/>}><MaintenanceContractsV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "financeiro" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo financeiro"/>}><FinanceV2 {...workspaceProps}/></Suspense>);
