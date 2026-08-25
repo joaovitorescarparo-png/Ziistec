@@ -27,8 +27,8 @@ create table if not exists public.inventory_movements (
   notes text,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
-  constraint inventory_product_company_fk foreign key (company_id,product_id)
-    references public.products(company_id,id),
+  constraint inventory_product_company_fk foreign key (product_id,company_id)
+    references public.products(id,company_id),
   constraint inventory_notes_len check (notes is null or char_length(notes) <= 1000)
 );
 
@@ -69,8 +69,8 @@ create table if not exists public.maintenance_contracts (
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint maintenance_contract_client_company_fk foreign key (company_id,client_id)
-    references public.clients(company_id,id),
+  constraint maintenance_contract_client_company_fk foreign key (client_id,company_id)
+    references public.clients(id,company_id),
   constraint maintenance_contract_name_len check (char_length(name) between 1 and 300),
   constraint maintenance_contract_coverage_len check (coverage is null or char_length(coverage) <= 5000),
   constraint maintenance_contract_notes_len check (notes is null or char_length(notes) <= 5000),
