@@ -12,6 +12,7 @@ const ProductStockV2 = lazy(() => import("./screens/v2/ProductStockV2"));
 const WorkOrderSaleV2 = lazy(() => import("./screens/v2/WorkOrderSaleV2"));
 const ManualWarrantyV2 = lazy(() => import("./screens/v2/ManualWarrantyV2"));
 const MaintenanceContractsV2 = lazy(() => import("./screens/v2/MaintenanceContractsV2"));
+const FinanceV2 = lazy(() => import("./screens/v2/FinanceV2"));
 
 const PAPEL = { owner: "proprietario", technician: "tecnico" };
 const STATUS_ASSINATURA = {
@@ -95,6 +96,7 @@ function SeletorEmpresa({ sessao }) {
 function AtalhosV2({ owner, onOpen }) {
   return (
     <div className="fixed bottom-5 right-5 z-[9500] flex flex-col items-end gap-2">
+      {owner && <button type="button" onClick={() => onOpen("financeiro")} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-lg shadow-slate-950/10 transition hover:bg-slate-50">Financeiro V2</button>}
       {owner && <button type="button" onClick={() => onOpen("contratos")} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-lg shadow-slate-950/10 transition hover:bg-slate-50">Preventivas / Contratos V2</button>}
       {owner && <button type="button" onClick={() => onOpen("garantias")} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-lg shadow-slate-950/10 transition hover:bg-slate-50">Garantias V2</button>}
       {owner && <button type="button" onClick={() => onOpen("produtos")} className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-xs font-bold text-emerald-800 shadow-lg shadow-slate-950/10 transition hover:bg-emerald-50">Produtos / Estoque V2</button>}
@@ -200,6 +202,7 @@ export default function App() {
   if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "contratos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo preventivas e contratos"/>}><MaintenanceContractsV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "financeiro" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo financeiro"/>}><FinanceV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps}/></Suspense>);
 
   return comConexao(
