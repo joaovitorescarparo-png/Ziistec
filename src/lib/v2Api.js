@@ -69,6 +69,12 @@ export async function excluirContratoDB(id) {
   check(r); return true;
 }
 
+export async function gerarCicloContratoDB(contractId, cycleDate, { serviceOn=null, dueOn=null }={}) {
+  return check(await supabase.rpc('zt_generate_maintenance_contract_cycle',{
+    p_contract:contractId,p_cycle:cycleDate,p_service_on:serviceOn,p_due_on:dueOn,
+  }));
+}
+
 export async function carregarMovimentosEstoqueDB(companyId, productId=null) {
   let q = supabase.from('inventory_movements').select('*').eq('company_id',companyId).order('created_at',{ascending:false});
   if (productId) q = q.eq('product_id',productId);
