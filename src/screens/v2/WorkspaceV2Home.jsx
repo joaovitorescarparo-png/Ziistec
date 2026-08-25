@@ -1,11 +1,12 @@
 import React from 'react';
 import {
   ArrowLeft, Boxes, ChevronRight, CircleDollarSign, ClipboardList, HardHat,
-  LockKeyhole, PackageCheck, ShieldCheck, Sparkles, Wrench,
+  LockKeyhole, PackageCheck, ShieldCheck, ShoppingCart, Sparkles, Wrench,
 } from 'lucide-react';
 
 const MODULES = [
   { id:'produtos', ownerOnly:true, icon:Boxes, title:'Produtos e estoque', description:'Catálogo, custo, preço, margem, estoque mínimo, fotos e movimentações.', badge:'Proprietário' },
+  { id:'compras', ownerOnly:true, icon:ShoppingCart, title:'Compras', description:'Fornecedor, itens, vencimento e entrada automática no estoque sem duplicar retries.', badge:'Estoque' },
   { id:'venda-os', ownerOnly:false, icon:PackageCheck, title:'Venda dentro da OS', description:'Adicionar produto durante o atendimento e baixar o estoque automaticamente.', badge:'Campo' },
   { id:'garantias', ownerOnly:true, icon:ShieldCheck, title:'Garantias', description:'Registrar garantias manuais e acompanhar cobertura por cliente, produto e serviço.', badge:'Pós-venda' },
   { id:'contratos', ownerOnly:true, icon:Wrench, title:'Preventivas e contratos', description:'Contratos recorrentes, próximas visitas, cobrança e geração segura dos ciclos.', badge:'Recorrência' },
