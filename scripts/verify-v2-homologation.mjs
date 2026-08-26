@@ -84,10 +84,12 @@ for (const route of ['produtos','compras','clientes-locais','orcamentos','orcame
 if (app.includes('workspaceV2 === "venda-os" && owner')) fail('src/App.jsx: venda na OS não deve virar owner-only; técnico atribuído precisa do fluxo de campo');
 else ok('Rotas administrativas V2 mantêm owner gate e venda na OS continua disponível ao campo');
 
-// 4) Configurações V2 não pode fingir checkout/pagamento enquanto não houver provedor real.
+// 4) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
 const settings = read('src/screens/v2/SettingsV2.jsx');
-if (/Forma de pagamento|checkout|Pagamento depende do provedor/i.test(settings)) fail('Settings V2 contém ação de pagamento não integrada');
-else ok('Settings V2 não expõe checkout/pagamento fictício');
+const fakePaymentAction = /<Btn[^>]*>[\s\S]{0,180}(?:Forma de pagamento|Checkout)[\s\S]{0,80}<\/Btn>/i.test(settings)
+  || /onClick\s*=\s*\{[^}]{0,220}(?:pagamento|checkout)/i.test(settings);
+if (fakePaymentAction) fail('Settings V2 contém ação clicável de pagamento não integrada');
+else ok('Settings V2 não expõe ação clicável de checkout/pagamento fictício');
 requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions', 'cancelarAssinaturaDB', 'reativarAssinaturaDB']);
 
 // 5) Headers críticos do preview/deploy.
