@@ -1,7 +1,11 @@
+import { randomUUID } from 'node:crypto';
+
+const runtimeSecret = () => randomUUID();
+
 process.env.VERCEL_ENV = 'preview';
 process.env.SUPABASE_URL = 'https://staging-owner-guard-test.supabase.co';
-process.env.SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_owner_guard_test';
-process.env.ANTHROPIC_API_KEY = 'test-key-never-sent';
+process.env.SUPABASE_PUBLISHABLE_KEY = runtimeSecret();
+process.env.ANTHROPIC_API_KEY = runtimeSecret();
 
 const calls = [];
 const originalFetch = globalThis.fetch;
@@ -55,7 +59,7 @@ try {
     headers: {
       'content-type': 'application/json',
       'content-length': '128',
-      authorization: 'Bearer technician-test-token',
+      authorization: `Bearer ${runtimeSecret()}`,
     },
     body: {
       prompt: 'Monte um orçamento de teste.',
