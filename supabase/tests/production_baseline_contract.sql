@@ -102,19 +102,41 @@ begin
     end if;
   end loop;
 
-  -- Índices básicos da listagem de empresas/membresia observados em produção.
-  if to_regclass('public.idx_members_company') is null then
-    raise exception 'BASELINE_INDEX_MISSING idx_members_company';
-  end if;
-  if to_regclass('public.idx_members_user') is null then
-    raise exception 'BASELINE_INDEX_MISSING idx_members_user';
-  end if;
-  if to_regclass('public.company_members_company_id_user_id_key') is null then
-    raise exception 'BASELINE_INDEX_MISSING company_members_company_id_user_id_key';
-  end if;
-  if to_regclass('public.subscriptions_company_id_key') is null then
-    raise exception 'BASELINE_INDEX_MISSING subscriptions_company_id_key';
-  end if;
+  -- Índices básicos da membresia/assinatura observados em produção.
+  for r in
+    select unnest(array[
+      'idx_members_company',
+      'idx_members_user',
+      'company_members_company_id_user_id_key',
+      'subscriptions_company_id_key'
+    ]) as index_name
+  loop
+    if to_regclass('public.' || r.index_name) is null then
+      raise exception 'BASELINE_INDEX_MISSING %', r.index_name;
+    end if;
+  end loop;
+
+  -- Índices de listagem por empresa/data da migration histórica
+  -- 20260818221533 bound_text_inputs_and_optimize_company_lists.
+  for r in
+    select unnest(array[
+      'idx_clients_company_created_desc',
+      'idx_services_company_created_desc',
+      'idx_products_company_created_desc',
+      'idx_quotes_company_created_desc',
+      'idx_work_orders_company_created_desc',
+      'idx_financial_company_created_desc',
+      'idx_purchases_company_created_desc',
+      'idx_warranties_company_created_desc',
+      'idx_attachments_company_created_desc',
+      'idx_wo_reports_company_created_desc',
+      'idx_wo_materials_company_created_desc'
+    ]) as index_name
+  loop
+    if to_regclass('public.' || r.index_name) is null then
+      raise exception 'BASELINE_LIST_INDEX_MISSING %', r.index_name;
+    end if;
+  end loop;
 end
 $$;
 
