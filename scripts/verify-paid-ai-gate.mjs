@@ -1,32 +1,44 @@
+import { randomUUID } from 'node:crypto';
+
+const runtimeSecret = () => randomUUID();
+const parseTarget = (input) => {
+  const parsed = new URL(String(input));
+  return {
+    href: parsed.href,
+    hostname: parsed.hostname,
+    pathname: parsed.pathname,
+  };
+};
+
 process.env.VERCEL_ENV = 'preview';
 process.env.SUPABASE_URL = 'https://staging-paid-ai-test.supabase.co';
-process.env.SUPABASE_PUBLISHABLE_KEY = ['sb', 'publishable', 'paid', 'ai', 'test'].join('_');
-process.env.ANTHROPIC_API_KEY = ['configured', 'but', 'must', 'not', 'be', 'used', Date.now().toString(36)].join('-');
+process.env.SUPABASE_PUBLISHABLE_KEY = runtimeSecret();
+process.env.ANTHROPIC_API_KEY = runtimeSecret();
 delete process.env.ENABLE_PAID_AI;
 
 const calls = [];
 const originalFetch = globalThis.fetch;
 
 globalThis.fetch = async (input) => {
-  const url = String(input);
-  calls.push(url);
+  const target = parseTarget(input);
+  calls.push(target);
 
-  if (url.endsWith('/auth/v1/user')) {
+  if (target.pathname === '/auth/v1/user') {
     return new Response(JSON.stringify({ id: '11111111-1111-4111-8111-111111111111' }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });
   }
-  if (url.endsWith('/rest/v1/rpc/zt_is_owner')) {
+  if (target.pathname === '/rest/v1/rpc/zt_is_owner') {
     return new Response('true', { status: 200, headers: { 'content-type': 'application/json' } });
   }
-  if (url.includes('/rest/v1/rpc/zt_consume_ai_quota')) {
+  if (target.pathname === '/rest/v1/rpc/zt_consume_ai_quota') {
     throw new Error('REGRESSION: paid AI gate allowed quota consumption');
   }
-  if (url.includes('api.anthropic.com')) {
+  if (target.hostname === 'api.anthropic.com') {
     throw new Error('REGRESSION: paid AI gate allowed provider call');
   }
-  throw new Error(`Unexpected fetch in paid AI gate test: ${url}`);
+  throw new Error(`Unexpected fetch in paid AI gate test: ${target.href}`);
 };
 
 function makeResponse() {
@@ -48,7 +60,7 @@ async function runGenericAi() {
     headers: {
       'content-type': 'application/json',
       'content-length': '128',
-      authorization: `Bearer ${['owner', 'test', Date.now().toString(36)].join('-')}`,
+      authorization: `Bearer ${runtimeSecret()}`,
     },
     body: {
       prompt: 'Teste sem custo.',
@@ -67,10 +79,10 @@ try {
   if (!String(res.payload?.error || '').includes('IA paga temporariamente desativada')) {
     failures.push('mensagem da trava de custo não foi retornada');
   }
-  if (!calls.some((url) => url.endsWith('/auth/v1/user'))) failures.push('sessão não foi validada');
-  if (!calls.some((url) => url.endsWith('/rest/v1/rpc/zt_is_owner'))) failures.push('owner guard não foi validado');
-  if (calls.some((url) => url.includes('/rest/v1/rpc/zt_consume_ai_quota'))) failures.push('quota foi consumida com IA paga desligada');
-  if (calls.some((url) => url.includes('api.anthropic.com'))) failures.push('Anthropic foi chamada com IA paga desligada');
+  if (!calls.some((call) => call.pathname === '/auth/v1/user')) failures.push('sessão não foi validada');
+  if (!calls.some((call) => call.pathname === '/rest/v1/rpc/zt_is_owner')) failures.push('owner guard não foi validado');
+  if (calls.some((call) => call.pathname === '/rest/v1/rpc/zt_consume_ai_quota')) failures.push('quota foi consumida com IA paga desligada');
+  if (calls.some((call) => call.hostname === 'api.anthropic.com')) failures.push('Anthropic foi chamada com IA paga desligada');
 
   if (failures.length) {
     console.error('\nPAID AI GATE CHECK: FAIL\n');
