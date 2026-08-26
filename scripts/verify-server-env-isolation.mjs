@@ -44,6 +44,17 @@ for (const rel of endpoints) {
   ok(!text.includes(PROD_SUPABASE_URL), `${rel}: URL de produção voltou a ser hard-coded fora do resolver central.`);
 }
 
+const genericAi = fs.readFileSync(path.join(root, 'api/ai.js'), 'utf8');
+const ownerIndex = genericAi.indexOf('/rest/v1/rpc/zt_is_owner');
+const quotaIndex = genericAi.indexOf('/rest/v1/rpc/zt_consume_ai_quota');
+const anthropicIndex = genericAi.indexOf('https://api.anthropic.com/v1/messages');
+ok(ownerIndex >= 0, 'api/ai.js: owner guard ausente.');
+ok(quotaIndex >= 0, 'api/ai.js: quota RPC ausente.');
+ok(anthropicIndex >= 0, 'api/ai.js: chamada Anthropic ausente.');
+ok(ownerIndex >= 0 && quotaIndex >= 0 && ownerIndex < quotaIndex, 'api/ai.js: owner guard precisa ocorrer antes do consumo de quota.');
+ok(ownerIndex >= 0 && anthropicIndex >= 0 && ownerIndex < anthropicIndex, 'api/ai.js: owner guard precisa ocorrer antes da chamada ao provedor de IA.');
+ok(genericAi.includes('Somente o proprietário pode usar a interpretação comercial com IA.'), 'api/ai.js: resposta explícita de owner-only ausente.');
+
 if (failures.length) {
   console.error('\nSERVER ENV ISOLATION CHECK: FAIL\n');
   failures.forEach((failure, index) => console.error(`${index + 1}. ${failure}`));
@@ -55,3 +66,4 @@ console.log('✓ Preview sem staging falha fechado');
 console.log('✓ Preview não aceita Supabase de produção nem por env explícita');
 console.log('✓ Produção mantém fallback público controlado');
 console.log('✓ AI, Finance AI e PDF têm body limit + timeout + isolamento compartilhado');
+console.log('✓ IA comercial valida owner antes de consumir quota ou chamar o provedor');
