@@ -10,6 +10,11 @@ const jsonHeaders = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY_BYTES = 32 * 1024;
 
+function parseOwnerValue(text) {
+  try { return JSON.parse(text) === true; }
+  catch { return String(text || '').trim() === 'true'; }
+}
+
 export default async function handler(req, res) {
   Object.entries(jsonHeaders).forEach(([k, v]) => res.setHeader(k, v));
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
@@ -44,17 +49,33 @@ export default async function handler(req, res) {
   if (!prompt || prompt.length > 10000) return res.status(400).json({ error: 'Solicitação de IA inválida.' });
   if (!UUID_RE.test(companyId)) return res.status(400).json({ error: 'Empresa ativa inválida.' });
 
+  const rpcHeaders = {
+    Authorization: auth,
+    apikey: SUPABASE_PUBLISHABLE_KEY,
+    'content-type': 'application/json',
+  };
+
+  // A interpretação comercial de orçamento é owner-only. O botão escondido na UI não é a barreira:
+  // a própria API valida o papel antes de consumir quota ou chamar o provedor de IA.
+  const owner = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_is_owner`, {
+    method: 'POST',
+    headers: rpcHeaders,
+    body: JSON.stringify({ target: companyId }),
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!owner?.ok || !parseOwnerValue(await owner.text())) {
+    return res.status(owner ? 403 : 502).json({
+      error: owner ? 'Somente o proprietário pode usar a interpretação comercial com IA.' : 'Não foi possível validar a permissão agora.',
+    });
+  }
+
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return res.status(503).json({ error: 'IA ainda não configurada no servidor.' });
 
-  // O banco não confia no companyId do navegador: valida membership ativa, assinatura e limites.
+  // A quota continua vinculada ao tenant e à assinatura, mas só é consumida após o owner guard.
   const quota = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_ai_quota`, {
     method: 'POST',
-    headers: {
-      Authorization: auth,
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      'content-type': 'application/json',
-    },
+    headers: rpcHeaders,
     body: JSON.stringify({ p_company: companyId }),
     signal: AbortSignal.timeout(8000),
   }).catch(() => null);
