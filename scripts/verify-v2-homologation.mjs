@@ -58,6 +58,10 @@ requireText('supabase/tests/v2_post_migration_contract.sql', [
   'p_document_usage_events_no_client_access',
   "id='zt-work-orders'",
   'search_path=""',
+  'v_allowed_definer_signatures',
+  'pg_get_function_identity_arguments',
+  'V2_CONTRACT_UNREVIEWED_SECURITY_DEFINER',
+  'V2_CONTRACT_COMPLETE_WORK_ORDER_MUST_BE_SERVICE_ONLY',
 ]);
 
 // 3) Invariantes de segurança dos endpoints públicos/serverless.
