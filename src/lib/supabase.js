@@ -1,15 +1,47 @@
 import { createClient } from "@supabase/supabase-js";
 
 /*
-  Preferimos variáveis de ambiente. Como o Vercel conectado nesta fase não
-  permite gravá-las pelo conector, usamos como fallback SOMENTE dados públicos
-  do Supabase: URL do projeto e publishable key. A service_role/secret key
-  jamais entra no frontend. A autorização real continua sendo feita pela RLS.
-*/
-const url = import.meta.env.VITE_SUPABASE_URL || "https://diztevlpbcfqleizswxr.supabase.co";
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
+  Separação de ambientes:
+  - Preview/staging deve receber VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY próprias.
+  - Se uma delas vier sem a outra, falhamos fechado e NÃO misturamos credenciais.
+  - O fallback público do projeto principal só é permitido nos hosts oficiais da main.
+  - Localhost e qualquer *.vercel.app de PR ficam sem banco até receberem env própria.
 
-export const configurado = Boolean(url && anonKey && !url.includes("SEU-PROJETO"));
+  A service_role/secret key jamais entra no frontend. A autorização real continua
+  sendo feita pela RLS do Supabase.
+*/
+const PROD_HOSTS = new Set([
+  "ziistec.vercel.app",
+  "ziistec-js-connect.vercel.app",
+  "ziistec-git-main-js-connect.vercel.app",
+]);
+
+const PROD_URL = "https://diztevlpbcfqleizswxr.supabase.co";
+const PROD_PUBLISHABLE_KEY = "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
+
+const host = typeof window !== "undefined" ? window.location.hostname : "";
+const envUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim();
+const envKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+const temEnvUrl = Boolean(envUrl);
+const temEnvKey = Boolean(envKey);
+const envCompleto = temEnvUrl && temEnvKey;
+const envIncompleto = temEnvUrl !== temEnvKey;
+const usarFallbackProducao = !temEnvUrl && !temEnvKey && PROD_HOSTS.has(host);
+
+const url = envCompleto ? envUrl : usarFallbackProducao ? PROD_URL : "";
+const anonKey = envCompleto ? envKey : usarFallbackProducao ? PROD_PUBLISHABLE_KEY : "";
+
+export const ambienteSupabase = envCompleto
+  ? "env"
+  : usarFallbackProducao
+    ? "production-fallback"
+    : envIncompleto
+      ? "invalid-env"
+      : "unconfigured";
+
+export const configurado = Boolean(
+  !envIncompleto && url && anonKey && !url.includes("SEU-PROJETO")
+);
 
 export const supabase = configurado
   ? createClient(url, anonKey, {
