@@ -120,6 +120,7 @@ const workspaceInicial = () => {
 export default function App() {
   const s = useSessao();
   const [workspaceV2, setWorkspaceV2] = useState(workspaceInicial);
+  const [quoteSeed, setQuoteSeed] = useState("");
 
   const navegarV2 = (valor) => {
     setWorkspaceV2(valor || null);
@@ -128,6 +129,16 @@ export default function App() {
     if (valor) url.searchParams.set("v2", valor);
     else url.searchParams.delete("v2");
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const abrirWorkspaceV2 = (valor) => {
+    if (valor === "orcamento-ia") setQuoteSeed("");
+    navegarV2(valor);
+  };
+
+  const abrirOrcamentoDaGarantia = (seed) => {
+    setQuoteSeed(String(seed || "").slice(0, 12000));
+    navegarV2("orcamento-ia");
   };
 
   const contexto = useMemo(() => {
@@ -207,13 +218,13 @@ export default function App() {
   const companyName = contexto.empresa.fantasia || contexto.empresa.nome;
   const workspaceProps = { companyId:s.empresaId, companyName, userId:s.perfil.id, onClose:() => navegarV2("home") };
 
-  if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo a nova Stack"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={navegarV2} onClose={() => navegarV2(null)}/></Suspense>);
+  if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo a nova Stack"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={abrirWorkspaceV2} onClose={() => navegarV2(null)}/></Suspense>);
   if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "compras" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo compras"/>}><PurchasesV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "clientes-locais" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo clientes e locais"/>}><ClientLocationsV2 {...workspaceProps}/></Suspense>);
-  if (workspaceV2 === "orcamentos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo gestão de orçamentos"/>}><QuotesManagementV2 {...workspaceProps} onNew={() => navegarV2("orcamento-ia")}/></Suspense>);
-  if (workspaceV2 === "orcamento-ia" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo orçamento com IA"/>}><QuoteAIV2 {...workspaceProps} onClose={() => navegarV2("orcamentos")}/></Suspense>);
-  if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "orcamentos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo gestão de orçamentos"/>}><QuotesManagementV2 {...workspaceProps} onNew={() => { setQuoteSeed(""); navegarV2("orcamento-ia"); }}/></Suspense>);
+  if (workspaceV2 === "orcamento-ia" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo orçamento com IA"/>}><QuoteAIV2 {...workspaceProps} initialText={quoteSeed} onClose={() => { setQuoteSeed(""); navegarV2("orcamentos"); }}/></Suspense>);
+  if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps} onQuoteFromWarranty={abrirOrcamentoDaGarantia}/></Suspense>);
   if (workspaceV2 === "contratos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo preventivas e contratos"/>}><MaintenanceContractsV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "financeiro" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo financeiro"/>}><FinanceV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps}/></Suspense>);
