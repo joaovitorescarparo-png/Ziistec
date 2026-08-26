@@ -1,9 +1,11 @@
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://diztevlpbcfqleizswxr.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw';
+import { supabaseServidor } from './_supabaseServerConfig.js';
+
+const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_MONEY = 1e12;
+const MAX_BODY_BYTES = 64 * 1024;
 
 const headers = {
   'Cache-Control': 'no-store',
@@ -21,7 +23,7 @@ function sanitizeSnapshot(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const month = cleanText(raw.month, 7);
   if (!MONTH_RE.test(month)) return null;
-  const m = raw.metrics && typeof raw.metrics === 'object' ? raw.metrics : {};
+  const m = raw.metrics && typeof raw.metrics === 'object' && !Array.isArray(raw.metrics) ? raw.metrics : {};
   const metrics = {
     faturado:finite(m.faturado,0),
     recebido:finite(m.recebido,0),
@@ -72,17 +74,29 @@ export default async function handler(req, res) {
   if (!String(req.headers['content-type'] || '').toLowerCase().includes('application/json')) {
     return res.status(415).json({ error:'Conteúdo inválido.' });
   }
+  const declaredLength = Number(req.headers['content-length'] || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+    return res.status(413).json({ error:'Solicitação grande demais.' });
+  }
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({ error:'Solicitação inválida.' });
+  }
 
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ')) return res.status(401).json({ error:'Sessão necessária.' });
+  if (!supabaseServidor.configurado) {
+    return res.status(503).json({ error:'Ambiente de API sem banco de homologação configurado.' });
+  }
 
   const verify = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers:{ Authorization:auth, apikey:SUPABASE_PUBLISHABLE_KEY },
-  });
-  if (!verify.ok) return res.status(401).json({ error:'Sessão inválida ou expirada.' });
+    signal:AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!verify?.ok) return res.status(401).json({ error:'Sessão inválida ou expirada.' });
 
-  const companyId = String(req.body?.companyId || '').trim();
-  const snapshot = sanitizeSnapshot(req.body?.snapshot);
+  if (typeof req.body.companyId !== 'string') return res.status(400).json({ error:'Empresa ativa inválida.' });
+  const companyId = req.body.companyId.trim();
+  const snapshot = sanitizeSnapshot(req.body.snapshot);
   if (!UUID_RE.test(companyId)) return res.status(400).json({ error:'Empresa ativa inválida.' });
   if (!snapshot) return res.status(400).json({ error:'Resumo financeiro inválido.' });
 
@@ -97,20 +111,22 @@ export default async function handler(req, res) {
     method:'POST',
     headers:commonHeaders,
     body:JSON.stringify({ target:companyId }),
-  });
-  if (!owner.ok || !parseOwnerValue(await owner.text())) {
-    return res.status(403).json({ error:'Somente o proprietário pode gerar a análise financeira.' });
+    signal:AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!owner?.ok || !parseOwnerValue(await owner.text())) {
+    return res.status(owner ? 403 : 502).json({ error:owner ? 'Somente o proprietário pode gerar a análise financeira.' : 'Não foi possível validar a permissão agora.' });
   }
 
   const quota = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_ai_quota`, {
     method:'POST',
     headers:commonHeaders,
     body:JSON.stringify({ p_company:companyId }),
-  });
-  if (!quota.ok) {
-    const detail = await quota.json().catch(() => ({}));
-    return res.status(quota.status === 401 ? 401 : quota.status === 403 ? 403 : 429)
-      .json({ error:detail?.message || 'IA indisponível para esta conta.' });
+    signal:AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!quota?.ok) {
+    const detail = quota ? await quota.json().catch(() => ({})) : {};
+    const status = quota?.status === 401 ? 401 : quota?.status === 403 ? 403 : quota ? 429 : 502;
+    return res.status(status).json({ error:detail?.message || 'IA indisponível para esta conta.' });
   }
 
   const key = process.env.ANTHROPIC_API_KEY;
@@ -138,6 +154,7 @@ DADOS_FINANCEIROS:${JSON.stringify(snapshot)}`;
         max_tokens:850,
         messages:[{ role:'user', content:prompt }],
       }),
+      signal:AbortSignal.timeout(30000),
     });
     if (!upstream.ok) {
       const body = await upstream.text();
@@ -146,7 +163,7 @@ DADOS_FINANCEIROS:${JSON.stringify(snapshot)}`;
     }
     const data = await upstream.json();
     const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
-    return res.status(200).json(parseModelJson(text));
+    return res.status(200).json(parseModelJson(String(text || '').slice(0, 20000)));
   } catch (error) {
     console.error('Finance AI error', error instanceof Error ? error.message : 'unknown');
     return res.status(502).json({ error:'Análise financeira indisponível agora.' });
