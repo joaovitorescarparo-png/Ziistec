@@ -33,12 +33,12 @@ function SummaryCard({label,value,detail,tone='default'}) {
   return <div className="rounded-2xl border border-slate-200 bg-white p-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p><p className={`mt-1 text-lg font-bold ${valueClass}`}>{value}</p>{detail&&<p className="mt-1 text-xs text-slate-500">{detail}</p>}</div>;
 }
 
-export default function QuoteAIV2({companyId,companyName='Sua empresa',userId,onClose}) {
+export default function QuoteAIV2({companyId,companyName='Sua empresa',userId,onClose,initialText=''}) {
   const [loading,setLoading]=useState(true);
   const [interpreting,setInterpreting]=useState(false);
   const [saving,setSaving]=useState(false);
   const [base,setBase]=useState(null);
-  const [text,setText]=useState('');
+  const [text,setText]=useState(()=>String(initialText||'').slice(0,12000));
   const [interim,setInterim]=useState('');
   const [preview,setPreview]=useState(null);
   const [correction,setCorrection]=useState('');
