@@ -15,6 +15,7 @@ const QuoteAIV2 = lazy(() => import("./screens/v2/QuoteAIV2"));
 const QuotesManagementV2 = lazy(() => import("./screens/v2/QuotesManagementV2"));
 const WorkOrderSaleV2 = lazy(() => import("./screens/v2/WorkOrderSaleV2"));
 const WorkOrderMemoryV2 = lazy(() => import("./screens/v2/WorkOrderMemoryV2"));
+const ClientLocationsV2 = lazy(() => import("./screens/v2/ClientLocationsV2"));
 const ManualWarrantyV2 = lazy(() => import("./screens/v2/ManualWarrantyV2"));
 const MaintenanceContractsV2 = lazy(() => import("./screens/v2/MaintenanceContractsV2"));
 const FinanceV2 = lazy(() => import("./screens/v2/FinanceV2"));
@@ -209,6 +210,7 @@ export default function App() {
   if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo a nova Stack"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={navegarV2} onClose={() => navegarV2(null)}/></Suspense>);
   if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "compras" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo compras"/>}><PurchasesV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "clientes-locais" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo clientes e locais"/>}><ClientLocationsV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "orcamentos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo gestão de orçamentos"/>}><QuotesManagementV2 {...workspaceProps} onNew={() => navegarV2("orcamento-ia")}/></Suspense>);
   if (workspaceV2 === "orcamento-ia" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo orçamento com IA"/>}><QuoteAIV2 {...workspaceProps} onClose={() => navegarV2("orcamentos")}/></Suspense>);
   if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps}/></Suspense>);
