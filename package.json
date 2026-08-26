@@ -9,6 +9,7 @@
     "prebuild": "node scripts/reassemble.mjs && node scripts/verify-consolidated-source.mjs",
     "build": "vite build",
     "preview": "vite preview",
+    "verify:v2": "node scripts/verify-v2-homologation.mjs && node scripts/verify-runtime-security.mjs && node scripts/verify-server-env-isolation.mjs && node scripts/verify-ai-owner-guard.mjs && node scripts/verify-paid-ai-gate.mjs && node scripts/verify-workflow-permissions.mjs",
     "security:audit": "npm audit --audit-level=high"
   },
   "dependencies": {

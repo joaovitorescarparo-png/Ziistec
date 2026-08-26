@@ -1,18 +1,36 @@
 import { createClient } from "@supabase/supabase-js";
+import { resolverConfigSupabase } from "./supabaseConfig";
 
 /*
-  Preferimos variáveis de ambiente. Como o Vercel conectado nesta fase não
-  permite gravá-las pelo conector, usamos como fallback SOMENTE dados públicos
-  do Supabase: URL do projeto e publishable key. A service_role/secret key
+  Separação de ambientes:
+  - Produção usa somente o Supabase principal nos hosts oficiais da main.
+  - A branch Product V2 usa somente o Supabase de homologação no alias fixo da PR.
+  - Qualquer outro preview/localhost sem env própria falha fechado.
+  - Se uma env parcial ou um preview tentar apontar para produção, a conexão é recusada.
+
+  As chaves abaixo são publishable e podem existir no bundle. Service role/secret key
   jamais entra no frontend. A autorização real continua sendo feita pela RLS.
 */
-const url = import.meta.env.VITE_SUPABASE_URL || "https://diztevlpbcfqleizswxr.supabase.co";
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
+const PROD_URL = "https://diztevlpbcfqleizswxr.supabase.co";
+const PROD_PUBLISHABLE_KEY = "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
+const STAGING_URL = "https://xadoktssibuuebzzjrhv.supabase.co";
+const STAGING_PUBLISHABLE_KEY = "sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e";
 
-export const configurado = Boolean(url && anonKey && !url.includes("SEU-PROJETO"));
+const runtimeConfig = resolverConfigSupabase({
+  host: typeof window !== "undefined" ? window.location.hostname : "",
+  envUrl: import.meta.env.VITE_SUPABASE_URL,
+  envKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+  prodUrl: PROD_URL,
+  prodKey: PROD_PUBLISHABLE_KEY,
+  stagingUrl: STAGING_URL,
+  stagingKey: STAGING_PUBLISHABLE_KEY,
+});
+
+export const ambienteSupabase = runtimeConfig.origem;
+export const configurado = runtimeConfig.configurado;
 
 export const supabase = configurado
-  ? createClient(url, anonKey, {
+  ? createClient(runtimeConfig.url, runtimeConfig.anonKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
     })
   : null;

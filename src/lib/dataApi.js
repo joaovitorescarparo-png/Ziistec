@@ -10,12 +10,35 @@ const itemKindToDb = { servico:'service', produto:'product', livre:'free' };
 const itemKindFromDb = { service:'servico', product:'produto', free:'livre' };
 const check = (r) => { if (r?.error) throw r.error; return r?.data; };
 
-export const fromClient = (x) => ({ id:x.id, empresaId:x.company_id, tipo:x.person_type, nome:x.name, fantasia:x.trade_name||'', documento:x.tax_id||'', responsavel:x.contact_name||'', telefone:x.phone||'', whatsapp:x.whatsapp||'', endereco:x.address||'', obs:x.notes||'' });
-export const toClient = (x, companyId) => ({ company_id:companyId, person_type:x.tipo||'PF', name:x.nome?.trim(), trade_name:x.fantasia||null, tax_id:x.documento||null, contact_name:x.responsavel||null, phone:x.telefone||null, whatsapp:x.whatsapp||null, address:x.endereco||null, notes:x.obs||null });
+export const fromClient = (x) => ({
+  id:x.id, empresaId:x.company_id, tipo:x.person_type, nome:x.name, fantasia:x.trade_name||'', documento:x.tax_id||'',
+  responsavel:x.contact_name||'', telefone:x.phone||'', whatsapp:x.whatsapp||'', endereco:x.address||'', obs:x.notes||'',
+  googlePlaceId:x.google_place_id||null, latitude:x.latitude==null?null:Number(x.latitude), longitude:x.longitude==null?null:Number(x.longitude),
+  mapsUrl:x.maps_url||null,
+});
+export const toClient = (x, companyId) => ({
+  company_id:companyId, person_type:x.tipo||'PF', name:x.nome?.trim(), trade_name:x.fantasia||null, tax_id:x.documento||null,
+  contact_name:x.responsavel||null, phone:x.telefone||null, whatsapp:x.whatsapp||null, address:x.endereco||null, notes:x.obs||null,
+  google_place_id:x.googlePlaceId||null, latitude:x.latitude==null||x.latitude===''?null:Number(x.latitude),
+  longitude:x.longitude==null||x.longitude===''?null:Number(x.longitude), maps_url:x.mapsUrl||null,
+});
 export const fromService = (x) => ({ id:x.id, empresaId:x.company_id, nome:x.name, categoria:x.category||'', descricao:x.description||'', unidade:x.unit, preco:n(x.price), custo:n(x.cost), ativo:x.active, garantiaDias:x.warranty_days||0, retornoDias:x.followup_days||0 });
 const toService = (x, companyId) => ({ company_id:companyId, name:x.nome?.trim(), category:x.categoria||null, description:x.descricao||null, unit:x.unidade||'unidade', price:n(x.preco), cost:n(x.custo), active:x.ativo!==false, warranty_days:Number(x.garantiaDias||0), followup_days:Number(x.retornoDias||0) });
-export const fromProduct = (x) => ({ id:x.id, empresaId:x.company_id, nome:x.name, marca:x.brand||'', modelo:x.model||'', descricao:x.description||'', unidade:x.unit, custo:n(x.cost), preco:n(x.price), garantiaMeses:x.warranty_months||0, ativo:x.active, fornecedor:'' });
-const toProduct = (x, companyId) => ({ company_id:companyId, name:x.nome?.trim(), brand:x.marca||null, model:x.modelo||null, description:x.descricao||null, unit:x.unidade||'unidade', cost:n(x.custo), price:n(x.preco), warranty_months:Number(x.garantiaMeses||0), active:x.ativo!==false });
+export const fromProduct = (x) => ({
+  id:x.id, empresaId:x.company_id, nome:x.name, marca:x.brand||'', modelo:x.model||'', descricao:x.description||'', unidade:x.unit,
+  custo:n(x.cost), preco:n(x.price), garantiaMeses:x.warranty_months||0, ativo:x.active, fornecedor:'',
+  imagemPath:x.image_path||null, vendaHabilitada:x.sale_enabled!==false, controlaEstoque:Boolean(x.track_stock),
+  estoque:n(x.stock_qty), estoqueMinimo:n(x.low_stock_threshold),
+});
+const toProduct = (x, companyId) => ({
+  company_id:companyId, name:x.nome?.trim(), brand:x.marca||null, model:x.modelo||null, description:x.descricao||null,
+  unit:x.unidade||'unidade', cost:n(x.custo), price:n(x.preco), warranty_months:Number(x.garantiaMeses||0), active:x.ativo!==false,
+  ...(Object.prototype.hasOwnProperty.call(x,'imagemPath')?{image_path:x.imagemPath||null}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'vendaHabilitada')?{sale_enabled:x.vendaHabilitada!==false}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'controlaEstoque')?{track_stock:Boolean(x.controlaEstoque)}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'estoque')?{stock_qty:Math.max(0,n(x.estoque))}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'estoqueMinimo')?{low_stock_threshold:Math.max(0,n(x.estoqueMinimo))}:{}),
+});
 
 const fromItem = (x) => ({ id:x.id, tipo:itemKindFromDb[x.kind]||'livre', catalogoId:x.service_id||x.product_id||null, nome:x.name, unidade:x.unit||'unidade', qtd:n(x.quantity)||1, preco:n(x.unit_price), custo:n(x.unit_cost), obs:x.notes||'', adicional:Boolean(x.is_extra), aguardandoValor:Boolean(x.price_pending) });
 const fromMaterial = (x) => ({ id:x.id, produtoId:x.product_id||null, nome:x.name||'Material', qtd:n(x.quantity)||1, custo:n(x.unit_cost), serie:x.serial_number||'' });
@@ -30,10 +53,60 @@ const quoteRow = (x, companyId, userId, number) => ({ company_id:companyId, numb
 const fromWorkOrder = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, orcamentoId:x.quote_id, responsavelId:x.assigned_to, status:woStatusFromDb[x.status]||'aguardando', data:x.scheduled_date||'', concluidaEm:x.completed_at?String(x.completed_at).slice(0,10):'', hora:(x.scheduled_time||'').slice(0,5), local:x.address||'', localServico:x.service_place||'', descricaoLivre:x.request||'', obs:x.pre_notes||'', pendencia:x.pending_note||'', valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit), garantiaId:x.warranty_id, osOrigemId:x.origin_wo_id, relatoProblema:x.problem_report||'', cobrancaId:x.billing_entry_id, pendentePrecificacao:Boolean(x.pending_pricing), itens:(x.work_order_items||[]).map(fromItem), materiais:(x.work_order_materials||[]).map(fromMaterial), checklist:[], historico:[], fotos:[], adicionais:[], custosExtras:n(x.extra_cost), relato:'' });
 const woRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, quote_id:x.orcamentoId||null, assigned_to:x.responsavelId||userId||null, status:woStatusToDb[x.status]||'unscheduled', scheduled_date:x.data||null, scheduled_time:x.hora||null, address:x.local||null, service_place:x.localServico||null, request:x.descricaoLivre||x.solicitacao||null, pre_notes:x.obs||null, pending_note:x.pendencia||null, extra_cost:n(x.custosExtras), needs_return:Boolean(x.precisaRetorno), warranty_id:x.garantiaId||null, origin_wo_id:x.osOrigemId||null, is_warranty_visit:Boolean(x.emGarantia), problem_report:x.relatoProblema||null, created_by:userId||null });
 const fromFinancial = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, tipo:x.kind==='income'?'receita':'despesa', descricao:x.description, valor:n(x.amount), vencimento:x.due_date, pago:x.paid, pagoEm:x.paid_at, forma:x.payment_method||null, categoria:x.category||'', clienteId:x.client_id, origemTipo:x.work_order_id?'os':x.purchase_id?'compra':'manual', origemId:x.work_order_id||x.purchase_id||null });
-const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.client_id, osId:x.work_order_id, tipo:x.kind==='service'?'servico':'produto', servicoId:x.service_id, produtoId:x.product_id, descricao:x.description, local:x.service_place||'', inicio:x.starts_on, ate:x.ends_on, serie:x.serial_number||'' });
+const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.client_id, osId:x.work_order_id, tipo:x.kind==='service'?'servico':'produto', servicoId:x.service_id, produtoId:x.product_id, descricao:x.description, local:x.service_place||'', inicio:x.starts_on, ate:x.ends_on, serie:x.serial_number||'', origem:x.source||'work_order', obs:x.notes||'' });
 const fromPurchase = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, fornecedor:x.supplier_name, data:x.purchase_date, forma:x.payment_method||'', vencimento:x.due_date||'', obs:x.notes||'', lancamentoId:x.entry_id, itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)})) });
 
 const WO_SELECT='*, work_order_items(*), work_order_materials(*)';
+
+const aplicarCustosPrivados = (rows, itemCosts=[], materialCosts=[], workOrderCosts=[]) => {
+  const itemMap = new Map((itemCosts||[]).map((x)=>[x.work_order_item_id,n(x.unit_cost)]));
+  const materialMap = new Map((materialCosts||[]).map((x)=>[x.work_order_material_id,n(x.unit_cost)]));
+  const workOrderMap = new Map((workOrderCosts||[]).map((x)=>[x.work_order_id,n(x.extra_cost)]));
+  return (rows||[]).map((wo)=>({
+    ...wo,
+    extra_cost:workOrderMap.get(wo.id)??0,
+    work_order_items:(wo.work_order_items||[]).map((i)=>({...i,unit_cost:itemMap.get(i.id)??0})),
+    work_order_materials:(wo.work_order_materials||[]).map((m)=>({...m,unit_cost:materialMap.get(m.id)??0})),
+  }));
+};
+
+const ledgerAindaNaoMigrado = (error) => {
+  const code = String(error?.code||'');
+  const msg = String(error?.message||'');
+  return code === 'PGRST205' || code === '42P01'
+    || (/(work_order_(item|material)_costs|work_order_private_costs)/i.test(msg)
+      && /(schema cache|does not exist|not find|could not find|relation|não existe|não foi encontr)/i.test(msg));
+};
+
+const dadosLedgerOuCompat = (result) => {
+  if (!result?.error) return result?.data||[];
+  if (ledgerAindaNaoMigrado(result.error)) return [];
+  throw result.error;
+};
+
+async function carregarCustosPrivados(companyId, workOrderId=null) {
+  let itemQuery=supabase.from('work_order_item_costs').select('work_order_item_id,unit_cost').eq('company_id',companyId);
+  let materialQuery=supabase.from('work_order_material_costs').select('work_order_material_id,unit_cost').eq('company_id',companyId);
+  let workOrderQuery=supabase.from('work_order_private_costs').select('work_order_id,extra_cost').eq('company_id',companyId);
+  if(workOrderId){
+    itemQuery=itemQuery.eq('work_order_id',workOrderId);
+    materialQuery=materialQuery.eq('work_order_id',workOrderId);
+    workOrderQuery=workOrderQuery.eq('work_order_id',workOrderId);
+  }
+  const [itemCosts,materialCosts,workOrderCosts]=await Promise.all([itemQuery,materialQuery,workOrderQuery]);
+  return {
+    itemCosts:dadosLedgerOuCompat(itemCosts),
+    materialCosts:dadosLedgerOuCompat(materialCosts),
+    workOrderCosts:dadosLedgerOuCompat(workOrderCosts),
+  };
+}
+
+async function carregarOSCompletaDB(id) {
+  const wo = await supabase.from('work_orders').select(WO_SELECT).eq('id',id).single();
+  if (wo.error) throw wo.error;
+  const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(wo.data.company_id,id);
+  return aplicarCustosPrivados([wo.data],itemCosts,materialCosts,workOrderCosts)[0];
+}
 
 export async function carregarDadosEmpresa(companyId) {
   const reqs = await Promise.all([
@@ -47,7 +120,8 @@ export async function carregarDadosEmpresa(companyId) {
     supabase.from('warranties').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
   ]);
   const firstError=reqs.find(r=>r.error)?.error; if(firstError) throw firstError;
-  const ordens=reqs[4].data.map(fromWorkOrder);
+  const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(companyId);
+  const ordens=aplicarCustosPrivados(reqs[4].data,itemCosts,materialCosts,workOrderCosts).map(fromWorkOrder);
   const orcamentos=reqs[3].data.map(fromQuote).map(q=>({...q,osId:ordens.find(o=>o.orcamentoId===q.id)?.id||null}));
   return { clientes:reqs[0].data.map(fromClient), servicos:reqs[1].data.map(fromService), produtos:reqs[2].data.map(fromProduct), orcamentos, ordens, lancamentos:reqs[5].data.map(fromFinancial), compras:reqs[6].data.map(fromPurchase), garantias:reqs[7].data.map(fromWarranty) };
 }
@@ -72,17 +146,20 @@ export async function salvarOSDB(x, companyId, userId){
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_work_order_idempotent',{p_company:companyId,p_wo:x.id||null,p_request:req,p_row:row,p_items:items}));
   const id=check(response);
-  const full=check(await supabase.from('work_orders').select(WO_SELECT).eq('id',id).single());
-  return fromWorkOrder(full);
+  return fromWorkOrder(await carregarOSCompletaDB(id));
 }
 
-export async function atualizarOSDB(id, patch){ const r=await supabase.from('work_orders').update(patch).eq('id',id).select(WO_SELECT).single(); return fromWorkOrder(check(r)); }
+export async function atualizarOSDB(id, patch){
+  const r=await supabase.from('work_orders').update(patch).eq('id',id).select('id').single();
+  check(r);
+  return fromWorkOrder(await carregarOSCompletaDB(id));
+}
 export async function finalizarOSDB(id, extras={}){
   const r=await supabase.rpc('zt_finalize_work_order_atomic',{
     p_wo:id,
     p_report:extras.relato||extras.relatorio||null,
     p_pending:extras.pendencia||null,
-    p_extra_cost:n(extras.custosExtras),
+    p_extra_cost:Object.prototype.hasOwnProperty.call(extras,'custosExtras') ? n(extras.custosExtras) : null,
     p_due_days:7,
     p_materials:extras.materiaisDB||[],
     p_additions:extras.adicionaisDB||[],

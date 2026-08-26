@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useSessao } from "./lib/useSessao";
-import { supabase, mensagemErro, configurado } from "./lib/supabase";
+import { supabase, mensagemErro, configurado, ambienteSupabase } from "./lib/supabase";
 import Login from "./screens/Login";
 import NovaSenha from "./screens/NovaSenha";
 import Onboarding from "./screens/Onboarding";
@@ -8,6 +8,18 @@ import Carregando from "./screens/Carregando";
 
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
+const WorkspaceV2Home = lazy(() => import("./screens/v2/WorkspaceV2Home"));
+const ProductStockV2 = lazy(() => import("./screens/v2/ProductStockV2"));
+const PurchasesV2 = lazy(() => import("./screens/v2/PurchasesV2"));
+const QuoteAIV2 = lazy(() => import("./screens/v2/QuoteAIV2"));
+const QuotesManagementV2 = lazy(() => import("./screens/v2/QuotesManagementV2"));
+const WorkOrderSaleV2 = lazy(() => import("./screens/v2/WorkOrderSaleV2"));
+const WorkOrderMemoryV2 = lazy(() => import("./screens/v2/WorkOrderMemoryV2"));
+const ClientLocationsV2 = lazy(() => import("./screens/v2/ClientLocationsV2"));
+const ManualWarrantyV2 = lazy(() => import("./screens/v2/ManualWarrantyV2"));
+const MaintenanceContractsV2 = lazy(() => import("./screens/v2/MaintenanceContractsV2"));
+const FinanceV2 = lazy(() => import("./screens/v2/FinanceV2"));
+const SettingsV2 = lazy(() => import("./screens/v2/SettingsV2"));
 
 const PAPEL = { owner: "proprietario", technician: "tecnico" };
 const STATUS_ASSINATURA = {
@@ -67,6 +79,30 @@ function EstadoConexao() {
   );
 }
 
+function AmbienteSemBanco({ motivo }) {
+  const parcial = motivo === "invalid-env";
+  return (
+    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-5 font-sans">
+      <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-slate-900/80 p-7 shadow-2xl shadow-black/30">
+        <div className="inline-flex rounded-full border border-emerald-700/60 bg-emerald-950/50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+          Ambiente protegido
+        </div>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight">ZiisTec V2 sem banco de homologação</h1>
+        <p className="mt-3 text-sm leading-relaxed text-slate-300">
+          Este preview está isolado e não pode usar o Supabase de produção como fallback.
+          {parcial ? " A configuração de homologação está incompleta." : " O banco de homologação ainda não foi conectado."}
+        </p>
+        <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300">
+          <strong className="text-white">Produção protegida:</strong> nenhuma sessão ou dado real é carregado por este preview enquanto o ambiente separado não estiver configurado.
+        </div>
+        <p className="mt-5 text-xs leading-relaxed text-slate-500">
+          Para habilitar a homologação, o preview precisa receber VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY do Supabase de staging.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function SeletorEmpresa({ sessao }) {
   if (sessao.membresias.length < 2) return null;
   return (
@@ -88,8 +124,47 @@ function SeletorEmpresa({ sessao }) {
   );
 }
 
+function AtalhoV2({ onOpen }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen("home")}
+      className="fixed bottom-5 right-5 z-[9500] rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-800"
+      title="Abrir o ZiisTec V2"
+    >
+      Abrir ZiisTec V2
+    </button>
+  );
+}
+
+const workspaceInicial = () => {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("v2") || null;
+};
+
 export default function App() {
   const s = useSessao();
+  const [workspaceV2, setWorkspaceV2] = useState(workspaceInicial);
+  const [quoteSeed, setQuoteSeed] = useState("");
+
+  const navegarV2 = (valor) => {
+    setWorkspaceV2(valor || null);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (valor) url.searchParams.set("v2", valor);
+    else url.searchParams.delete("v2");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const abrirWorkspaceV2 = (valor) => {
+    if (valor === "orcamento-ia") setQuoteSeed("");
+    navegarV2(valor);
+  };
+
+  const abrirOrcamentoDaGarantia = (seed) => {
+    setQuoteSeed(String(seed || "").slice(0, 12000));
+    navegarV2("orcamento-ia");
+  };
 
   const contexto = useMemo(() => {
     if (!s.empresa || !s.membresiaAtual || !s.perfil) return null;
@@ -130,7 +205,7 @@ export default function App() {
 
   const comConexao = (conteudo) => <><EstadoConexao />{conteudo}</>;
 
-  if (!configurado) return comConexao(<Login />);
+  if (!configurado) return comConexao(<AmbienteSemBanco motivo={ambienteSupabase} />);
   if (s.carregando) return comConexao(<Carregando texto="Abrindo o ZiisTec" />);
   if (s.recuperandoSenha && s.sessaoAuth) return comConexao(<NovaSenha aoConcluir={s.finalizarRecuperacaoSenha} />);
   if (!s.sessaoAuth) return comConexao(<Login />);
@@ -164,12 +239,30 @@ export default function App() {
 
   if (!contexto || s.trocandoEmpresa) return comConexao(<Carregando texto={s.trocandoEmpresa ? "Trocando de empresa" : "Carregando sua empresa"} />);
 
+  const owner = s.membresiaAtual?.role === "owner";
+  const companyName = contexto.empresa.fantasia || contexto.empresa.nome;
+  const workspaceProps = { companyId:s.empresaId, companyName, userId:s.perfil.id, onClose:() => navegarV2("home") };
+
+  if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo o ZiisTec V2"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={abrirWorkspaceV2} onClose={() => navegarV2(null)}/></Suspense>);
+  if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "compras" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo compras"/>}><PurchasesV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "clientes-locais" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo clientes e locais"/>}><ClientLocationsV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "orcamentos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo gestão de orçamentos"/>}><QuotesManagementV2 {...workspaceProps} onNew={() => { setQuoteSeed(""); navegarV2("orcamento-ia"); }}/></Suspense>);
+  if (workspaceV2 === "orcamento-ia" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo orçamento com IA"/>}><QuoteAIV2 {...workspaceProps} initialText={quoteSeed} onClose={() => { setQuoteSeed(""); navegarV2("orcamentos"); }}/></Suspense>);
+  if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps} onQuoteFromWarranty={abrirOrcamentoDaGarantia}/></Suspense>);
+  if (workspaceV2 === "contratos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo preventivas e contratos"/>}><MaintenanceContractsV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "financeiro" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo financeiro"/>}><FinanceV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "configuracoes" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo configurações"/>}><SettingsV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "memoria-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo memória técnica"/>}><WorkOrderMemoryV2 {...workspaceProps} owner={owner}/></Suspense>);
+
   return comConexao(
     <>
       <SeletorEmpresa sessao={s} />
       <Suspense fallback={<Carregando texto="Carregando seu ambiente" />}>
         <ZiisTecApp key={contexto.chave} contexto={contexto} />
       </Suspense>
+      <AtalhoV2 onOpen={navegarV2} />
     </>
   );
 }

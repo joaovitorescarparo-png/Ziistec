@@ -9,6 +9,36 @@ export async function resolverLogoEmpresaDB(path){
   return signed('zt-branding',path);
 }
 
+export async function resolverImagemProdutoDB(path){
+  if(!path) return null;
+  return signed('zt-branding',path);
+}
+
+export async function salvarImagemProdutoDB(productId,file,companyId,oldPath=null){
+  if(!(file instanceof File)) throw new Error('Selecione uma imagem do produto.');
+  if(!['image/jpeg','image/png','image/webp'].includes(file.type)) throw new Error('Use JPG, PNG ou WEBP.');
+  if(file.size>2*1024*1024) throw new Error('A foto do produto deve ter no máximo 2 MB.');
+  if(!productId||!companyId) throw new Error('Produto ou empresa inválidos.');
+
+  const ext=(safe(file.name).split('.').pop()||'jpg').toLowerCase();
+  const path=`${companyId}/products/${productId}/${crypto.randomUUID()}.${ext}`;
+  const up=await supabase.storage.from('zt-branding').upload(path,file,{contentType:file.type,upsert:false});
+  if(up.error) throw up.error;
+
+  const row=await supabase.from('products').update({image_path:path}).eq('id',productId).eq('company_id',companyId).select('id,image_path').single();
+  if(row.error){await supabase.storage.from('zt-branding').remove([path]);throw row.error;}
+
+  if(oldPath&&oldPath!==path) await supabase.storage.from('zt-branding').remove([oldPath]);
+  return {path,url:await signed('zt-branding',path)};
+}
+
+export async function removerImagemProdutoDB(productId,companyId,path){
+  if(path){const r=await supabase.storage.from('zt-branding').remove([path]);if(r.error) throw r.error;}
+  const row=await supabase.from('products').update({image_path:null}).eq('id',productId).eq('company_id',companyId);
+  if(row.error) throw row.error;
+  return true;
+}
+
 export async function persistirFotosOSDB(osId,fotos,companyId,userId){
   for(const f of (fotos||[]).filter(x=>x?.arquivo instanceof File)){
     const path=`${companyId}/work-orders/${osId}/${crypto.randomUUID()}-${safe(f.arquivo.name)}`;
