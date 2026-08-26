@@ -80,9 +80,7 @@ const prodUrl = 'https://prod-ref.supabase.co';
 const prodKey = 'sb_publishable_prod_test';
 const stagingUrl = 'https://staging-ref.supabase.co';
 const stagingKey = 'sb_publishable_staging_test';
-const mainConfig = resolverConfigSupabase({
-  host: PROD_SUPABASE_HOSTS[0], prodUrl, prodKey,
-});
+const mainConfig = resolverConfigSupabase({ host: PROD_SUPABASE_HOSTS[0], prodUrl, prodKey });
 if (!mainConfig.configurado || mainConfig.origem !== 'production-fallback' || mainConfig.url !== prodUrl) {
   fail('Supabase env isolation: host oficial da main perdeu fallback controlado');
 } else ok('Host oficial da main mantém fallback público controlado');
@@ -96,54 +94,35 @@ if (previewConfig.configurado || previewConfig.origem !== 'unconfigured' || prev
 
 const stagingConfig = resolverConfigSupabase({
   host: 'ziistec-git-product-v2-review-js-connect.vercel.app',
-  envUrl: stagingUrl,
-  envKey: stagingKey,
-  prodUrl,
-  prodKey,
+  envUrl: stagingUrl, envKey: stagingKey, prodUrl, prodKey,
 });
 if (!stagingConfig.configurado || stagingConfig.origem !== 'env' || stagingConfig.url !== stagingUrl || stagingConfig.anonKey !== stagingKey) {
   fail('Supabase env isolation: preview com env própria não ficou isolado no staging');
 } else ok('Preview com env própria usa somente o Supabase de staging');
 
 const partialConfig = resolverConfigSupabase({
-  host: PROD_SUPABASE_HOSTS[0],
-  envUrl: stagingUrl,
-  prodUrl,
-  prodKey,
+  host: PROD_SUPABASE_HOSTS[0], envUrl: stagingUrl, prodUrl, prodKey,
 });
 if (partialConfig.configurado || partialConfig.origem !== 'invalid-env' || partialConfig.url || partialConfig.anonKey) {
   fail('Supabase env isolation: configuração parcial misturou staging com produção');
 } else ok('Env parcial falha fechado e nunca mistura credenciais entre ambientes');
 
 requireText('src/lib/supabase.js', [
-  'resolverConfigSupabase',
-  'VITE_SUPABASE_URL',
-  'VITE_SUPABASE_ANON_KEY',
-  'PROD_PUBLISHABLE_KEY',
+  'resolverConfigSupabase', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'PROD_PUBLISHABLE_KEY',
 ]);
 
 // 5) Invariantes de segurança dos endpoints públicos/serverless.
 requireText('api/ai.js', [
-  "req.method !== 'POST'",
-  "auth.startsWith('Bearer ')",
-  '/auth/v1/user',
-  '/rest/v1/rpc/zt_consume_ai_quota',
-  'process.env.ANTHROPIC_API_KEY',
+  "req.method !== 'POST'", "auth.startsWith('Bearer ')", '/auth/v1/user',
+  '/rest/v1/rpc/zt_consume_ai_quota', 'process.env.ANTHROPIC_API_KEY',
 ]);
 requireText('api/finance-ai.js', [
-  "req.method !== 'POST'",
-  "auth.startsWith('Bearer ')",
-  '/auth/v1/user',
-  '/rest/v1/rpc/zt_is_owner',
-  '/rest/v1/rpc/zt_consume_ai_quota',
-  'sanitizeSnapshot',
+  "req.method !== 'POST'", "auth.startsWith('Bearer ')", '/auth/v1/user',
+  '/rest/v1/rpc/zt_is_owner', '/rest/v1/rpc/zt_consume_ai_quota', 'sanitizeSnapshot',
 ]);
 const pdfApi = requireText('api/quote-pdf.js', [
-  "req.method!=='POST'",
-  "auth.startsWith('Bearer ')",
-  '/auth/v1/user',
-  '/rest/v1/rpc/zt_is_owner',
-  '/rest/v1/rpc/zt_consume_quote_pdf_quota',
+  "req.method!=='POST'", "auth.startsWith('Bearer ')", '/auth/v1/user',
+  '/rest/v1/rpc/zt_is_owner', '/rest/v1/rpc/zt_consume_quote_pdf_quota',
   'select=id,product_id,name,unit,quantity,unit_price,notes,position',
 ]);
 if (/quote_items[^'\n]*unit_cost/i.test(pdfApi)) fail('api/quote-pdf.js: custo interno apareceu na consulta de quote_items do PDF do cliente');
@@ -165,13 +144,27 @@ if (app.includes('if (!configurado) return comConexao(<Login />);')) {
   fail('src/App.jsx: preview sem banco voltou a parecer login normal');
 } else ok('Preview sem banco mostra estado protegido e não um login enganoso');
 
+// O legado ainda contém seeds históricos, mas o fluxo real só pode montá-lo após contexto real existir.
+for (const marker of [
+  'if (!contexto || s.trocandoEmpresa) return',
+  '<ZiisTecApp key={contexto.chave} contexto={contexto} />',
+]) {
+  if (!app.includes(marker)) fail(`src/App.jsx: portão de contexto real do legado ausente: ${marker}`);
+}
+if (/<ZiisTecApp\s*\/>/.test(app) || /<ZiisTecApp[^>]*contexto=\{null\}/.test(app)) {
+  fail('src/App.jsx: legado pode ser montado sem contexto real');
+} else ok('Legado só é montado pela aplicação real com contexto Supabase explícito');
+
+// Branding oficial da revisão.
+const workspaceHome = read('src/screens/v2/WorkspaceV2Home.jsx');
+if (!workspaceHome.includes('ZiisTec V2')) fail('Workspace V2 perdeu o nome oficial ZiisTec V2');
+if (workspaceHome.includes('ZiisTec Stack V2')) fail('Workspace V2 reintroduziu o nome antigo ZiisTec Stack V2');
+else ok('Branding da revisão permanece ZiisTec V2');
+
 // 7) Sessão deve depender de membresia ativa e revalidar acesso quando o app volta ao foco.
 requireText('src/lib/useSessao.js', [
-  '.eq("status", "active")',
-  'ultimaRevalidacao',
-  'window.addEventListener("focus"',
-  'document.addEventListener("visibilitychange"',
-  'Seu acesso ativo a esta empresa não está mais disponível.',
+  '.eq("status", "active")', 'ultimaRevalidacao', 'window.addEventListener("focus"',
+  'document.addEventListener("visibilitychange"', 'Seu acesso ativo a esta empresa não está mais disponível.',
 ]);
 
 // 8) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
@@ -182,26 +175,23 @@ if (fakePaymentAction) fail('Settings V2 contém ação clicável de pagamento n
 else ok('Settings V2 não expõe ação clicável de checkout/pagamento fictício');
 requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions', 'cancelarAssinaturaDB', 'reativarAssinaturaDB']);
 
-// 9) Runbooks reais de homologação e provisionamento precisam acompanhar o código.
+// 9) Runbooks e política de custo precisam acompanhar o código.
 requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
-  'Cross-tenant',
-  'Orçamento aprovado → OS',
-  'Memória técnica da OS',
-  'Financeiro V2 + IA',
-  'Mobile/tablet',
-  'Regra de merge',
+  'Cross-tenant', 'Orçamento aprovado → OS', 'Memória técnica da OS', 'Financeiro V2 + IA', 'Mobile/tablet', 'Regra de merge',
 ]);
 requireText('docs/V2_STAGING_PROVISIONING.md', [
   'Nunca usar o Supabase de produção em Preview/Staging',
-  '0050_product_v2_core_catalog_contracts.sql',
-  '0061_work_order_technical_memory_media.sql',
-  'V2_POST_MIGRATION_CONTRACT_OK',
-  'V2_ACCESS_REVOCATION_OK',
-  'V2_SUBSCRIPTION_REACTIVATION_OK',
-  'VITE_SUPABASE_URL',
-  'VITE_SUPABASE_ANON_KEY',
-  'owner-v2-test',
-  'tech-v2-test',
+  'adiada', '5 ou mais clientes pagantes',
+  '0050_product_v2_core_catalog_contracts.sql', '0061_work_order_technical_memory_media.sql',
+  'V2_POST_MIGRATION_CONTRACT_OK', 'V2_ACCESS_REVOCATION_OK', 'V2_SUBSCRIPTION_REACTIVATION_OK',
+  'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'owner-v2-test', 'tech-v2-test',
+]);
+requireText('docs/NO_COST_DEVELOPMENT_POLICY.md', [
+  'mais de 4 clientes pagantes',
+  'Não criar sem autorização explícita',
+  'Supabase development branch paga',
+  'BEGIN ... ROLLBACK',
+  '5 ou mais clientes pagantes',
 ]);
 
 // 10) Headers críticos do preview/deploy.
