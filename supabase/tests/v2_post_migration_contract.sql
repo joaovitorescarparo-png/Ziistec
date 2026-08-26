@@ -1,4 +1,4 @@
--- ZiisTec Stack V2 — contrato pós-migration para HOMOLOGAÇÃO.
+-- ZiisTec V2 — contrato pós-migration para HOMOLOGAÇÃO.
 --
 -- Uso: executar SOMENTE depois de aplicar 0050→0061 em banco de homologação.
 -- Este arquivo não cria/edita dados de negócio. Ele apenas lê catálogos do PostgreSQL
@@ -46,7 +46,7 @@ DECLARE
     'zt_sell_product_on_work_order(p_wo uuid, p_product uuid, p_quantity numeric, p_notes text)',
     'zt_create_manual_warranty(p_company uuid, p_client uuid, p_kind text, p_description text, p_starts_on date, p_ends_on date, p_service_place text, p_service uuid, p_product uuid, p_serial text, p_notes text)',
     'zt_generate_maintenance_contract_cycle(p_contract uuid, p_cycle date, p_service_on date, p_due_on date)',
-    'zt_create_work_order_from_quote(p_quote uuid, p_assigned_to uuid, p_scheduled_date date, p_scheduled_time time)'
+    'zt_create_work_order_from_quote(p_quote uuid, p_assigned_to uuid, p_scheduled_date date, p_scheduled_time time without time zone)'
   ];
 BEGIN
   -- Tabelas/ledgers que definem o isolamento financeiro e os módulos V2.
