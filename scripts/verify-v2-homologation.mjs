@@ -64,7 +64,17 @@ requireText('supabase/tests/v2_post_migration_contract.sql', [
   'V2_CONTRACT_COMPLETE_WORK_ORDER_MUST_BE_SERVICE_ONLY',
 ]);
 
-// 3) Invariantes de segurança dos endpoints públicos/serverless.
+// 3) Smoke SQL de revogação/assinatura deve continuar reproduzível e rollback-only.
+requireText('supabase/tests/v2_access_subscription_rollback_smoke.sql', [
+  'V2_ACCESS_REVOCATION_OK',
+  'active_member=true and active_wo=true and disabled_member=false and disabled_wo=false',
+  'V2_SUBSCRIPTION_REACTIVATION_OK',
+  'can_write_after_cancel=false',
+  'can_write_after_reactivate=true',
+  'rollback;',
+]);
+
+// 4) Invariantes de segurança dos endpoints públicos/serverless.
 requireText('api/ai.js', [
   "req.method !== 'POST'",
   "auth.startsWith('Bearer ')",
@@ -91,7 +101,7 @@ const pdfApi = requireText('api/quote-pdf.js', [
 if (/quote_items[^'\n]*unit_cost/i.test(pdfApi)) fail('api/quote-pdf.js: custo interno apareceu na consulta de quote_items do PDF do cliente');
 else ok('PDF comercial não consulta unit_cost de quote_items');
 
-// 4) Rotas sensíveis continuam owner-only na borda da UI (RLS permanece a autoridade real).
+// 5) Rotas sensíveis continuam owner-only na borda da UI (RLS permanece a autoridade real).
 const app = read('src/App.jsx');
 for (const route of ['produtos','compras','clientes-locais','orcamentos','orcamento-ia','garantias','contratos','financeiro','configuracoes']) {
   const marker = `workspaceV2 === "${route}" && owner`;
@@ -100,7 +110,7 @@ for (const route of ['produtos','compras','clientes-locais','orcamentos','orcame
 if (app.includes('workspaceV2 === "venda-os" && owner')) fail('src/App.jsx: venda na OS não deve virar owner-only; técnico atribuído precisa do fluxo de campo');
 else ok('Rotas administrativas V2 mantêm owner gate e venda na OS continua disponível ao campo');
 
-// 5) Sessão deve depender de membresia ativa e revalidar acesso quando o app volta ao foco.
+// 6) Sessão deve depender de membresia ativa e revalidar acesso quando o app volta ao foco.
 requireText('src/lib/useSessao.js', [
   '.eq("status", "active")',
   'ultimaRevalidacao',
@@ -109,7 +119,7 @@ requireText('src/lib/useSessao.js', [
   'Seu acesso ativo a esta empresa não está mais disponível.',
 ]);
 
-// 6) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
+// 7) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
 const settings = read('src/screens/v2/SettingsV2.jsx');
 const fakePaymentAction = /<Btn[^>]*>[\s\S]{0,180}(?:Forma de pagamento|Checkout)[\s\S]{0,80}<\/Btn>/i.test(settings)
   || /onClick\s*=\s*\{[^}]{0,220}(?:pagamento|checkout)/i.test(settings);
@@ -117,7 +127,7 @@ if (fakePaymentAction) fail('Settings V2 contém ação clicável de pagamento n
 else ok('Settings V2 não expõe ação clicável de checkout/pagamento fictício');
 requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions', 'cancelarAssinaturaDB', 'reativarAssinaturaDB']);
 
-// 7) Runbook real owner/technician precisa continuar versionado junto com o código.
+// 8) Runbook real owner/technician precisa continuar versionado junto com o código.
 requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
   'Cross-tenant',
   'Orçamento aprovado → OS',
@@ -127,14 +137,14 @@ requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
   'Regra de merge',
 ]);
 
-// 8) Headers críticos do preview/deploy.
+// 9) Headers críticos do preview/deploy.
 const vercel = read('vercel.json');
 for (const marker of ["geolocation=(self)", 'payment=()', "frame-ancestors 'none'", "object-src 'none'"]) {
   if (!vercel.includes(marker)) fail(`vercel.json: header de segurança ausente: ${marker}`);
 }
 if (vercel) ok('Headers de geolocation/frames/object/payment preservados');
 
-// 9) Caça a segredos privilegiados de formato reconhecível em arquivos versionados de runtime.
+// 10) Caça a segredos privilegiados de formato reconhecível em arquivos versionados de runtime.
 const scanRoots = ['api', 'src', 'scripts'];
 const allowedExt = new Set(['.js','.jsx','.mjs','.ts','.tsx','.json']);
 const secretPatterns = [
