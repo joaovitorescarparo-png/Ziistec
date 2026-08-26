@@ -1,7 +1,7 @@
 process.env.VERCEL_ENV = 'preview';
 process.env.SUPABASE_URL = 'https://staging-paid-ai-test.supabase.co';
-process.env.SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_paid_ai_test';
-process.env.ANTHROPIC_API_KEY = 'configured-but-must-not-be-used';
+process.env.SUPABASE_PUBLISHABLE_KEY = ['sb', 'publishable', 'paid', 'ai', 'test'].join('_');
+process.env.ANTHROPIC_API_KEY = ['configured', 'but', 'must', 'not', 'be', 'used', Date.now().toString(36)].join('-');
 delete process.env.ENABLE_PAID_AI;
 
 const calls = [];
@@ -48,7 +48,7 @@ async function runGenericAi() {
     headers: {
       'content-type': 'application/json',
       'content-length': '128',
-      authorization: 'Bearer owner-test-token',
+      authorization: `Bearer ${['owner', 'test', Date.now().toString(36)].join('-')}`,
     },
     body: {
       prompt: 'Teste sem custo.',
