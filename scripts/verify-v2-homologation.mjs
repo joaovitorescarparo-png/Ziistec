@@ -65,13 +65,24 @@ requireText('supabase/tests/v2_post_migration_contract.sql', [
   'V2_CONTRACT_COMPLETE_WORK_ORDER_MUST_BE_SERVICE_ONLY',
 ]);
 
-// 3) Smoke SQL de revogação/assinatura deve continuar reproduzível e rollback-only.
+// 3) Smokes SQL de segurança devem continuar reproduzíveis e rollback-only.
 requireText('supabase/tests/v2_access_subscription_rollback_smoke.sql', [
   'V2_ACCESS_REVOCATION_OK',
   'active_member=true and active_wo=true and disabled_member=false and disabled_wo=false',
   'V2_SUBSCRIPTION_REACTIVATION_OK',
   'can_write_after_cancel=false',
   'can_write_after_reactivate=true',
+  'rollback;',
+]);
+requireText('supabase/tests/v2_technician_sale_rollback_smoke.sql', [
+  'V2_TECHNICIAN_SALE_COST_ISOLATION_OK',
+  'zt_sell_product_on_work_order',
+  'unassigned_blocked=true',
+  'tech_public_unit_cost=0',
+  'tech_private_cost_visible=false',
+  'stock_after=3',
+  'movement_delta=-2',
+  'owner_private_cost=30',
   'rollback;',
 ]);
 
