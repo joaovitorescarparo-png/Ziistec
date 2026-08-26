@@ -1,4 +1,5 @@
 import { supabaseServidor } from './_supabaseServerConfig.js';
+import { paidAiAtivo } from './_paidFeatures.js';
 
 const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 
@@ -69,10 +70,15 @@ export default async function handler(req, res) {
     });
   }
 
+  // Fail-closed de custo: mesmo com chave configurada, não chama provedor pago sem liberação explícita.
+  if (!paidAiAtivo) {
+    return res.status(503).json({ error: 'IA paga temporariamente desativada nesta fase do ZiisTec.' });
+  }
+
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return res.status(503).json({ error: 'IA ainda não configurada no servidor.' });
 
-  // A quota continua vinculada ao tenant e à assinatura, mas só é consumida após o owner guard.
+  // A quota continua vinculada ao tenant e à assinatura, mas só é consumida após owner + cost gates.
   const quota = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_ai_quota`, {
     method: 'POST',
     headers: rpcHeaders,
