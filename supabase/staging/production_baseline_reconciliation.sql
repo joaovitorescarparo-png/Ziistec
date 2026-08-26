@@ -6,13 +6,15 @@
 --
 -- NÃO aplicar em produção. NÃO é uma migration V2. NÃO contém dados reais.
 -- Deve ser executado depois do baseline versionado até 0049 e antes de 0050→0061.
+-- Fonte histórica confirmada: supabase_migrations.schema_migrations
+-- version=20260818221533, name=bound_text_inputs_and_optimize_company_lists.
 
 begin;
 
 -- A migration histórica `bound_text_inputs_and_optimize_company_lists` está
--- registrada no histórico real do Supabase, mas seus limites de texto não
--- aparecem nos arquivos atuais do repositório. Estes CHECKs foram extraídos
--- do catálogo de produção em 2026-08-26 e são adicionados de forma idempotente.
+-- registrada no histórico real do Supabase. Os CHECKs abaixo foram extraídos
+-- do SQL histórico e do catálogo de produção em 2026-08-26 e são adicionados
+-- de forma idempotente para o staging limpo.
 
 do $$
 begin
@@ -176,5 +178,30 @@ begin
   end if;
 end
 $$;
+
+-- Índices que faziam parte da mesma migration histórica e estão presentes hoje
+-- em produção. create index if not exists torna a reconciliação idempotente.
+create index if not exists idx_clients_company_created_desc
+  on public.clients(company_id, created_at desc);
+create index if not exists idx_services_company_created_desc
+  on public.services(company_id, created_at desc);
+create index if not exists idx_products_company_created_desc
+  on public.products(company_id, created_at desc);
+create index if not exists idx_quotes_company_created_desc
+  on public.quotes(company_id, created_at desc);
+create index if not exists idx_work_orders_company_created_desc
+  on public.work_orders(company_id, created_at desc);
+create index if not exists idx_financial_company_created_desc
+  on public.financial_entries(company_id, created_at desc);
+create index if not exists idx_purchases_company_created_desc
+  on public.purchases(company_id, created_at desc);
+create index if not exists idx_warranties_company_created_desc
+  on public.warranties(company_id, created_at desc);
+create index if not exists idx_attachments_company_created_desc
+  on public.attachments(company_id, created_at desc);
+create index if not exists idx_wo_reports_company_created_desc
+  on public.work_order_reports(company_id, created_at asc);
+create index if not exists idx_wo_materials_company_created_desc
+  on public.work_order_materials(company_id, created_at asc);
 
 commit;
