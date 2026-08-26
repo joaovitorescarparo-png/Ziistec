@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 const runtimeSecret = () => randomUUID();
+const parseTarget = (input) => {
+  const parsed = new URL(String(input));
+  return {
+    href: parsed.href,
+    hostname: parsed.hostname,
+    pathname: parsed.pathname,
+  };
+};
 
 process.env.VERCEL_ENV = 'preview';
 process.env.SUPABASE_URL = 'https://staging-owner-guard-test.supabase.co';
@@ -11,17 +19,17 @@ const calls = [];
 const originalFetch = globalThis.fetch;
 
 globalThis.fetch = async (input) => {
-  const url = String(input);
-  calls.push(url);
+  const target = parseTarget(input);
+  calls.push(target);
 
-  if (url.endsWith('/auth/v1/user')) {
+  if (target.pathname === '/auth/v1/user') {
     return new Response(JSON.stringify({ id: '11111111-1111-4111-8111-111111111111' }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });
   }
 
-  if (url.endsWith('/rest/v1/rpc/zt_is_owner')) {
+  if (target.pathname === '/rest/v1/rpc/zt_is_owner') {
     // Simula usuário autenticado/membro técnico: sessão válida, mas não proprietário.
     return new Response('false', {
       status: 200,
@@ -29,15 +37,15 @@ globalThis.fetch = async (input) => {
     });
   }
 
-  if (url.includes('/rest/v1/rpc/zt_consume_ai_quota')) {
+  if (target.pathname === '/rest/v1/rpc/zt_consume_ai_quota') {
     throw new Error('REGRESSION: technician reached AI quota');
   }
 
-  if (url.includes('api.anthropic.com')) {
+  if (target.hostname === 'api.anthropic.com') {
     throw new Error('REGRESSION: technician reached Anthropic');
   }
 
-  throw new Error(`Unexpected fetch in owner guard test: ${url}`);
+  throw new Error(`Unexpected fetch in owner guard test: ${target.href}`);
 };
 
 function makeResponse() {
@@ -75,10 +83,10 @@ try {
   if (!String(res.payload?.error || '').includes('Somente o proprietário')) {
     failures.push('resposta não deixou claro que a IA comercial é owner-only');
   }
-  if (!calls.some((url) => url.endsWith('/auth/v1/user'))) failures.push('sessão não foi validada');
-  if (!calls.some((url) => url.endsWith('/rest/v1/rpc/zt_is_owner'))) failures.push('owner guard não foi chamado');
-  if (calls.some((url) => url.includes('/rest/v1/rpc/zt_consume_ai_quota'))) failures.push('técnico consumiu quota de IA');
-  if (calls.some((url) => url.includes('api.anthropic.com'))) failures.push('técnico alcançou o provedor de IA');
+  if (!calls.some((call) => call.pathname === '/auth/v1/user')) failures.push('sessão não foi validada');
+  if (!calls.some((call) => call.pathname === '/rest/v1/rpc/zt_is_owner')) failures.push('owner guard não foi chamado');
+  if (calls.some((call) => call.pathname === '/rest/v1/rpc/zt_consume_ai_quota')) failures.push('técnico consumiu quota de IA');
+  if (calls.some((call) => call.hostname === 'api.anthropic.com')) failures.push('técnico alcançou o provedor de IA');
 
   if (failures.length) {
     console.error('\nAI OWNER GUARD CHECK: FAIL\n');
