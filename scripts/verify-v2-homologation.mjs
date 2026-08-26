@@ -48,7 +48,19 @@ for (let n = 50; n <= 61; n += 1) {
 }
 if (!failures.some(x => x.includes('Migration V2') || x.includes('Prefixo 00'))) ok('Migrations 0050→0061 presentes, únicas e em sequência');
 
-// 2) Invariantes de segurança dos endpoints públicos/serverless.
+// 2) Contrato SQL pós-migration precisa acompanhar a stack e cobrir os invariantes críticos.
+requireText('supabase/tests/v2_post_migration_contract.sql', [
+  'V2_POST_MIGRATION_CONTRACT_OK',
+  "to_regclass('public.work_order_item_costs')",
+  "to_regclass('public.work_order_material_costs')",
+  "to_regclass('public.work_order_private_costs')",
+  "to_regclass('public.uq_work_orders_one_per_quote')",
+  'p_document_usage_events_no_client_access',
+  "id='zt-work-orders'",
+  'search_path=""',
+]);
+
+// 3) Invariantes de segurança dos endpoints públicos/serverless.
 requireText('api/ai.js', [
   "req.method !== 'POST'",
   "auth.startsWith('Bearer ')",
@@ -75,7 +87,7 @@ const pdfApi = requireText('api/quote-pdf.js', [
 if (/quote_items[^'\n]*unit_cost/i.test(pdfApi)) fail('api/quote-pdf.js: custo interno apareceu na consulta de quote_items do PDF do cliente');
 else ok('PDF comercial não consulta unit_cost de quote_items');
 
-// 3) Rotas sensíveis continuam owner-only na borda da UI (RLS permanece a autoridade real).
+// 4) Rotas sensíveis continuam owner-only na borda da UI (RLS permanece a autoridade real).
 const app = read('src/App.jsx');
 for (const route of ['produtos','compras','clientes-locais','orcamentos','orcamento-ia','garantias','contratos','financeiro','configuracoes']) {
   const marker = `workspaceV2 === "${route}" && owner`;
@@ -84,7 +96,7 @@ for (const route of ['produtos','compras','clientes-locais','orcamentos','orcame
 if (app.includes('workspaceV2 === "venda-os" && owner')) fail('src/App.jsx: venda na OS não deve virar owner-only; técnico atribuído precisa do fluxo de campo');
 else ok('Rotas administrativas V2 mantêm owner gate e venda na OS continua disponível ao campo');
 
-// 4) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
+// 5) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
 const settings = read('src/screens/v2/SettingsV2.jsx');
 const fakePaymentAction = /<Btn[^>]*>[\s\S]{0,180}(?:Forma de pagamento|Checkout)[\s\S]{0,80}<\/Btn>/i.test(settings)
   || /onClick\s*=\s*\{[^}]{0,220}(?:pagamento|checkout)/i.test(settings);
@@ -92,14 +104,24 @@ if (fakePaymentAction) fail('Settings V2 contém ação clicável de pagamento n
 else ok('Settings V2 não expõe ação clicável de checkout/pagamento fictício');
 requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions', 'cancelarAssinaturaDB', 'reativarAssinaturaDB']);
 
-// 5) Headers críticos do preview/deploy.
+// 6) Runbook real owner/technician precisa continuar versionado junto com o código.
+requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
+  'Cross-tenant',
+  'Orçamento aprovado → OS',
+  'Memória técnica da OS',
+  'Financeiro V2 + IA',
+  'Mobile/tablet',
+  'Regra de merge',
+]);
+
+// 7) Headers críticos do preview/deploy.
 const vercel = read('vercel.json');
 for (const marker of ["geolocation=(self)", 'payment=()', "frame-ancestors 'none'", "object-src 'none'"]) {
   if (!vercel.includes(marker)) fail(`vercel.json: header de segurança ausente: ${marker}`);
 }
 if (vercel) ok('Headers de geolocation/frames/object/payment preservados');
 
-// 6) Caça a segredos privilegiados de formato reconhecível em arquivos versionados de runtime.
+// 8) Caça a segredos privilegiados de formato reconhecível em arquivos versionados de runtime.
 const scanRoots = ['api', 'src', 'scripts'];
 const allowedExt = new Set(['.js','.jsx','.mjs','.ts','.tsx','.json']);
 const secretPatterns = [
