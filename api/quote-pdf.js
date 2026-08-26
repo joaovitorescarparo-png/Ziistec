@@ -1,14 +1,15 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { supabaseServidor } from './_supabaseServerConfig.js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://diztevlpbcfqleizswxr.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw';
+const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_BODY_BYTES=8*1024;
 const commonHeaders={'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin'};
 const clean=(v='')=>String(v??'').replace(/[\u2018\u2019]/g,"'").replace(/[\u201C\u201D]/g,'"').replace(/[\u2022]/g,'-').replace(/[\u2013\u2014]/g,'-').replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g,'?');
 const money=(n)=>`R$ ${Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const dateBR=(s)=>s?String(s).split('-').reverse().join('/'):'-';
 const safeFile=(s)=>clean(s).replace(/[^A-Za-z0-9._-]+/g,'-').replace(/-+/g,'-').slice(0,80)||'orcamento';
-async function sbFetch(path,auth,init={}){const headers={apikey:SUPABASE_PUBLISHABLE_KEY,Authorization:auth,...(init.headers||{})};const r=await fetch(`${SUPABASE_URL}${path}`,{...init,headers});if(!r.ok){const detail=await r.text().catch(()=>'');const e=new Error(detail||`Supabase ${r.status}`);e.status=r.status;throw e;}return r;}
+async function sbFetch(path,auth,init={}){const headers={apikey:SUPABASE_PUBLISHABLE_KEY,Authorization:auth,...(init.headers||{})};const r=await fetch(`${SUPABASE_URL}${path}`,{...init,headers,signal:init.signal||AbortSignal.timeout(8000)});if(!r.ok){const detail=await r.text().catch(()=>'');const e=new Error(detail||`Supabase ${r.status}`);e.status=r.status;throw e;}return r;}
 async function sbJson(path,auth){return(await sbFetch(path,auth)).json();}
 function wrapText(text,font,size,maxWidth){const paragraphs=clean(text).split(/\r?\n/),out=[];for(const p of paragraphs){const words=p.split(/\s+/).filter(Boolean);let line='';if(!words.length){out.push('');continue;}for(const w of words){const test=line?`${line} ${w}`:w;if(font.widthOfTextAtSize(test,size)<=maxWidth)line=test;else{if(line)out.push(line);line=w;}}if(line)out.push(line);}return out;}
 
@@ -40,16 +41,20 @@ export default async function handler(req,res){
   Object.entries(commonHeaders).forEach(([k,v])=>res.setHeader(k,v));
   if(req.method!=='POST')return res.status(405).json({error:'Método não permitido.'});
   if(!String(req.headers['content-type']||'').toLowerCase().includes('application/json'))return res.status(415).json({error:'Conteúdo inválido.'});
+  const declaredLength=Number(req.headers['content-length']||0);if(Number.isFinite(declaredLength)&&declaredLength>MAX_BODY_BYTES)return res.status(413).json({error:'Solicitação grande demais.'});
+  if(!req.body||typeof req.body!=='object'||Array.isArray(req.body))return res.status(400).json({error:'Solicitação inválida.'});
   const auth=req.headers.authorization||'';if(!auth.startsWith('Bearer '))return res.status(401).json({error:'Sessão necessária.'});
-  const quoteId=String(req.body?.quoteId||''),companyId=String(req.body?.companyId||'');
+  if(!supabaseServidor.configurado)return res.status(503).json({error:'Ambiente de API sem banco de homologação configurado.'});
+  if(typeof req.body.quoteId!=='string'||typeof req.body.companyId!=='string')return res.status(400).json({error:'Orçamento ou empresa inválidos.'});
+  const quoteId=req.body.quoteId.trim(),companyId=req.body.companyId.trim();
   if(!UUID_RE.test(quoteId)||!UUID_RE.test(companyId))return res.status(400).json({error:'Orçamento ou empresa inválidos.'});
   try{
     await sbFetch('/auth/v1/user',auth);
     const ownerResp=await sbFetch('/rest/v1/rpc/zt_is_owner',auth,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({target:companyId})});
     if(await ownerResp.json()!==true)return res.status(403).json({error:'Somente o proprietário pode gerar este PDF.'});
 
-    const quota=await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_quote_pdf_quota`,{method:'POST',headers:{Authorization:auth,apikey:SUPABASE_PUBLISHABLE_KEY,'content-type':'application/json'},body:JSON.stringify({p_company:companyId})});
-    if(!quota.ok){const detail=await quota.json().catch(()=>({}));const msg=detail?.message||'Limite de geração de PDF atingido.';return res.status(quota.status===401?401:quota.status===403?403:429).json({error:msg});}
+    const quota=await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_quote_pdf_quota`,{method:'POST',headers:{Authorization:auth,apikey:SUPABASE_PUBLISHABLE_KEY,'content-type':'application/json'},body:JSON.stringify({p_company:companyId}),signal:AbortSignal.timeout(8000)}).catch(()=>null);
+    if(!quota?.ok){const detail=quota?await quota.json().catch(()=>({})):{};const msg=detail?.message||'Limite de geração de PDF atingido.';const status=quota?.status===401?401:quota?.status===403?403:quota?429:502;return res.status(status).json({error:msg});}
 
     const[companies,quotes,items]=await Promise.all([
       sbJson(`/rest/v1/companies?id=eq.${companyId}&select=id,name,trade_name,tax_id,phone,whatsapp,email,address,logo_path,owner_name`,auth),
