@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownRight, ArrowLeft, ArrowUpRight, Banknote, CalendarDays, ChevronLeft,
-  ChevronRight, CircleDollarSign, Clock3, Loader2, RefreshCcw, ShieldCheck,
+  ChevronRight, CircleDollarSign, Clock3, Loader2, RefreshCcw, ShieldCheck, Sparkles,
   TrendingUp, TriangleAlert, Wallet, X,
 } from 'lucide-react';
 import { carregarFinanceiroV2DB } from '../../lib/financeV2Api';
+import { gerarResumoFinanceiroV2IA, montarSnapshotFinanceiroV2 } from '../../lib/financeAiV2Api';
 import { mensagemErro } from '../../lib/supabase';
 
 const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -24,9 +25,13 @@ export default function FinanceV2({companyId,companyName='Sua empresa',onClose})
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
   const [data,setData]=useState({clientes:[],ordens:[],lancamentos:[],custosProntos:false});
+  const [ai,setAi]=useState(null);
+  const [aiLoading,setAiLoading]=useState(false);
+  const [aiError,setAiError]=useState('');
 
-  const load=async()=>{setLoading(true);setError('');try{setData(await carregarFinanceiroV2DB(companyId));}catch(e){setError(mensagemErro(e));}finally{setLoading(false);}};
+  const load=async()=>{setLoading(true);setError('');try{setData(await carregarFinanceiroV2DB(companyId));setAi(null);setAiError('');}catch(e){setError(mensagemErro(e));}finally{setLoading(false);}};
   useEffect(()=>{load();},[companyId]);
+  useEffect(()=>{setAi(null);setAiError('');},[month,companyId]);
 
   const clientMap=useMemo(()=>new Map(data.clientes.map(c=>[c.id,c.nome])),[data.clientes]);
   const metrics=useMemo(()=>{
@@ -54,6 +59,15 @@ export default function FinanceV2({companyId,companyName='Sua empresa',onClose})
 
   const recent=useMemo(()=>data.lancamentos.filter(x=>noMes(x.vencimento,month)).sort((a,b)=>String(b.vencimento).localeCompare(String(a.vencimento))).slice(0,12),[data.lancamentos,month]);
 
+  const gerarAnalise=async()=>{
+    setAiLoading(true);setAiError('');
+    try{
+      const snapshot=montarSnapshotFinanceiroV2({month,metrics,osProfit,custosProntos:data.custosProntos});
+      setAi(await gerarResumoFinanceiroV2IA(companyId,snapshot));
+    }catch(e){setAiError(mensagemErro(e));}
+    finally{setAiLoading(false);}
+  };
+
   return <div className="min-h-screen bg-slate-50 text-slate-900">
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6"><div className="flex min-w-0 items-center gap-3"><button onClick={onClose} className="rounded-xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50"><ArrowLeft size={19}/></button><div><div className="flex items-center gap-2"><h1 className="text-base font-bold">Financeiro</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">V2</span></div><p className="text-xs text-slate-500">{companyName}</p></div></div><Btn onClick={load} disabled={loading}><RefreshCcw size={16}/><span className="hidden sm:inline">Atualizar</span></Btn></div></header>
 
@@ -67,6 +81,12 @@ export default function FinanceV2({companyId,companyName='Sua empresa',onClose})
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Kpi icon={CircleDollarSign} label="Faturado" value={brl(metrics.faturado)} detail="receitas com vencimento no mês"/><Kpi icon={ArrowDownRight} label="Recebido" value={brl(metrics.recebido)} detail="entrada efetiva no mês" tone="good"/><Kpi icon={Clock3} label="A receber" value={brl(metrics.receber)} detail="ainda em aberto neste mês"/><Kpi icon={ArrowUpRight} label="Despesas" value={brl(metrics.despesaCompetencia)} detail={`${brl(metrics.despesaPaga)} já pago`} tone={metrics.despesaCompetencia>0?'bad':'normal'}/></section>
 
         <section className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4"><Kpi icon={Wallet} label="Resultado de caixa" value={brl(metrics.caixa)} detail="recebido menos despesas pagas" tone={metrics.caixa>=0?'good':'bad'}/><Kpi icon={TriangleAlert} label="Clientes vencidos" value={brl(metrics.vencidoReceber)} detail="total em atraso até hoje" tone={metrics.vencidoReceber>0?'bad':'normal'}/><Kpi icon={Banknote} label="Contas vencidas" value={brl(metrics.vencidoPagar)} detail="despesas em atraso" tone={metrics.vencidoPagar>0?'bad':'normal'}/><Kpi icon={TrendingUp} label="Origem OS" value={brl(metrics.origem.os||0)} detail="receita do mês ligada a ordens"/></section>
+
+        <section className="mt-5 rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-emerald-50/40 p-5 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="max-w-3xl"><div className="flex items-center gap-2 text-violet-700"><Sparkles size={18}/><p className="text-xs font-bold uppercase tracking-[.14em]">Leitura financeira com IA</p></div><p className="mt-2 text-sm font-bold text-slate-900">Interpretação assistida dos números que já estão no ZiisTec.</p><p className="mt-1 text-xs leading-relaxed text-slate-500">O servidor envia somente agregados financeiros e OS anonimizadas. Não envia nome de cliente, telefone, endereço nem descrição livre. A análise não roda sozinha: você escolhe quando consumir a quota.</p></div><Btn variant="primary" onClick={gerarAnalise} disabled={aiLoading}>{aiLoading?<><Loader2 className="animate-spin" size={16}/>Analisando...</>:<><Sparkles size={16}/>{ai?'Gerar novamente':'Gerar análise'}</>}</Btn></div>
+          {aiError&&<div className="mt-4 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800"><TriangleAlert className="mt-0.5 shrink-0" size={15}/><span>{aiError}</span></div>}
+          {!ai&&!aiError?<div className="mt-5 rounded-2xl border border-dashed border-violet-200 bg-white/60 p-5 text-sm text-slate-500">A IA ainda não analisou {mesNome(month)}. Os KPIs acima continuam sendo a fonte exata dos valores.</div>:ai&&<div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_.9fr]"><div className="rounded-2xl border border-white bg-white/80 p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Resumo</p><p className="mt-2 text-sm leading-relaxed text-slate-700">{ai.resumo}</p><p className="mt-3 text-[10px] text-slate-400">Confiança declarada pela análise: {ai.confianca==='alta'?'alta':'média'}.</p></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">{ai.alertas.length>0&&<div className="rounded-2xl border border-amber-100 bg-amber-50/80 p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Pontos de atenção</p><ul className="mt-2 space-y-2 text-xs leading-relaxed text-amber-950">{ai.alertas.map((x,i)=><li key={`${i}-${x}`} className="flex gap-2"><span>•</span><span>{x}</span></li>)}</ul></div>}{ai.acoes.length>0&&<div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Próximas ações</p><ul className="mt-2 space-y-2 text-xs leading-relaxed text-emerald-950">{ai.acoes.map((x,i)=><li key={`${i}-${x}`} className="flex gap-2"><span>•</span><span>{x}</span></li>)}</ul></div>}</div></div>}
+        </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[0.75fr_1.25fr]">
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-bold uppercase tracking-wide text-slate-400">Projeção de caixa</p><div className="mt-4 space-y-3">{[[7,metrics.proj7],[30,metrics.proj30],[60,metrics.proj60]].map(([days,val])=><div key={days} className="flex items-center justify-between rounded-2xl bg-slate-50 p-4"><div className="flex items-center gap-3"><div className="rounded-xl bg-white p-2 text-slate-500"><CalendarDays size={17}/></div><div><p className="text-sm font-bold">Próximos {days} dias</p><p className="text-[11px] text-slate-500">recebíveis menos pagamentos em aberto</p></div></div><strong className={`text-sm ${val>=0?'text-emerald-700':'text-rose-700'}`}>{brl(val)}</strong></div>)}</div><div className="mt-5 border-t border-slate-100 pt-4"><p className="text-xs font-bold uppercase tracking-wide text-slate-400">Receita por origem</p><div className="mt-3 space-y-2 text-sm"><div className="flex justify-between"><span className="text-slate-500">Ordens de serviço</span><strong>{brl(metrics.origem.os||0)}</strong></div><div className="flex justify-between"><span className="text-slate-500">Manual / outros</span><strong>{brl(metrics.origem.manual||0)}</strong></div></div></div></section>
