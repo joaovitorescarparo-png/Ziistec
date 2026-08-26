@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useSessao } from "./lib/useSessao";
-import { supabase, mensagemErro, configurado } from "./lib/supabase";
+import { supabase, mensagemErro, configurado, ambienteSupabase } from "./lib/supabase";
 import Login from "./screens/Login";
 import NovaSenha from "./screens/NovaSenha";
 import Onboarding from "./screens/Onboarding";
@@ -79,6 +79,30 @@ function EstadoConexao() {
   );
 }
 
+function AmbienteSemBanco({ motivo }) {
+  const parcial = motivo === "invalid-env";
+  return (
+    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-5 font-sans">
+      <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-slate-900/80 p-7 shadow-2xl shadow-black/30">
+        <div className="inline-flex rounded-full border border-emerald-700/60 bg-emerald-950/50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+          Ambiente protegido
+        </div>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight">ZiisTec V2 sem banco de homologação</h1>
+        <p className="mt-3 text-sm leading-relaxed text-slate-300">
+          Este preview está isolado e não pode usar o Supabase de produção como fallback.
+          {parcial ? " A configuração de homologação está incompleta." : " O banco de homologação ainda não foi conectado."}
+        </p>
+        <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300">
+          <strong className="text-white">Produção protegida:</strong> nenhuma sessão ou dado real é carregado por este preview enquanto o ambiente separado não estiver configurado.
+        </div>
+        <p className="mt-5 text-xs leading-relaxed text-slate-500">
+          Para habilitar a homologação, o preview precisa receber VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY do Supabase de staging.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function SeletorEmpresa({ sessao }) {
   if (sessao.membresias.length < 2) return null;
   return (
@@ -106,9 +130,9 @@ function AtalhoV2({ onOpen }) {
       type="button"
       onClick={() => onOpen("home")}
       className="fixed bottom-5 right-5 z-[9500] rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-800"
-      title="Abrir a nova Stack V2"
+      title="Abrir o ZiisTec V2"
     >
-      Abrir Stack V2
+      Abrir ZiisTec V2
     </button>
   );
 }
@@ -181,7 +205,7 @@ export default function App() {
 
   const comConexao = (conteudo) => <><EstadoConexao />{conteudo}</>;
 
-  if (!configurado) return comConexao(<Login />);
+  if (!configurado) return comConexao(<AmbienteSemBanco motivo={ambienteSupabase} />);
   if (s.carregando) return comConexao(<Carregando texto="Abrindo o ZiisTec" />);
   if (s.recuperandoSenha && s.sessaoAuth) return comConexao(<NovaSenha aoConcluir={s.finalizarRecuperacaoSenha} />);
   if (!s.sessaoAuth) return comConexao(<Login />);
@@ -219,7 +243,7 @@ export default function App() {
   const companyName = contexto.empresa.fantasia || contexto.empresa.nome;
   const workspaceProps = { companyId:s.empresaId, companyName, userId:s.perfil.id, onClose:() => navegarV2("home") };
 
-  if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo a nova Stack"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={abrirWorkspaceV2} onClose={() => navegarV2(null)}/></Suspense>);
+  if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo o ZiisTec V2"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={abrirWorkspaceV2} onClose={() => navegarV2(null)}/></Suspense>);
   if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "compras" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo compras"/>}><PurchasesV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "clientes-locais" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo clientes e locais"/>}><ClientLocationsV2 {...workspaceProps}/></Suspense>);
