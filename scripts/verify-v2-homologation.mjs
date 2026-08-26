@@ -49,7 +49,31 @@ for (let n = 50; n <= 61; n += 1) {
 }
 if (!failures.some(x => x.includes('Migration V2') || x.includes('Prefixo 00'))) ok('Migrations 0050→0061 presentes, únicas e em sequência');
 
-// 2) Contrato SQL pós-migration precisa acompanhar a stack e cobrir os invariantes críticos.
+// 2) Baseline limpo de staging precisa reproduzir os invariantes atuais de produção.
+requireText('supabase/staging/production_baseline_reconciliation.sql', [
+  'STAGING ONLY',
+  'bound_text_inputs_and_optimize_company_lists',
+  'profiles_text_bounds',
+  'companies_text_bounds',
+  'clients_text_bounds',
+  'products_text_bounds',
+  'work_orders_text_bounds',
+  'financial_text_bounds',
+  'warranties_text_bounds',
+  'NÃO aplicar em produção',
+]);
+requireText('supabase/tests/production_baseline_contract.sql', [
+  'PRODUCTION_BASELINE_CONTRACT_OK',
+  'BASELINE_CONSTRAINT_MISSING',
+  'BASELINE_CLIENT_LOCATION_COLUMNS_MISSING',
+  'clients_latitude_range',
+  'clients_longitude_range',
+  'idx_members_company',
+  'idx_members_user',
+  'subscriptions_company_id_key',
+]);
+
+// 3) Contrato SQL pós-migration precisa acompanhar a stack e cobrir os invariantes críticos.
 requireText('supabase/tests/v2_post_migration_contract.sql', [
   'V2_POST_MIGRATION_CONTRACT_OK',
   "to_regclass('public.work_order_item_costs')",
@@ -65,7 +89,7 @@ requireText('supabase/tests/v2_post_migration_contract.sql', [
   'V2_CONTRACT_COMPLETE_WORK_ORDER_MUST_BE_SERVICE_ONLY',
 ]);
 
-// 3) Smokes SQL de segurança devem continuar reproduzíveis e rollback-only.
+// 4) Smokes SQL de segurança devem continuar reproduzíveis e rollback-only.
 requireText('supabase/tests/v2_access_subscription_rollback_smoke.sql', [
   'V2_ACCESS_REVOCATION_OK',
   'active_member=true and active_wo=true and disabled_member=false and disabled_wo=false',
@@ -86,7 +110,7 @@ requireText('supabase/tests/v2_technician_sale_rollback_smoke.sql', [
   'rollback;',
 ]);
 
-// 4) Preview/staging jamais pode cair silenciosamente no Supabase de produção.
+// 5) Preview/staging jamais pode cair silenciosamente no Supabase de produção.
 const prodUrl = 'https://prod-ref.supabase.co';
 const prodKey = 'sb_publishable_prod_test';
 const stagingUrl = 'https://staging-ref.supabase.co';
@@ -122,7 +146,7 @@ requireText('src/lib/supabase.js', [
   'resolverConfigSupabase', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'PROD_PUBLISHABLE_KEY',
 ]);
 
-// 5) Invariantes de segurança dos endpoints públicos/serverless.
+// 6) Invariantes de segurança dos endpoints públicos/serverless.
 requireText('api/ai.js', [
   "req.method !== 'POST'", "auth.startsWith('Bearer ')", '/auth/v1/user',
   '/rest/v1/rpc/zt_consume_ai_quota', 'process.env.ANTHROPIC_API_KEY',
@@ -139,7 +163,7 @@ const pdfApi = requireText('api/quote-pdf.js', [
 if (/quote_items[^'\n]*unit_cost/i.test(pdfApi)) fail('api/quote-pdf.js: custo interno apareceu na consulta de quote_items do PDF do cliente');
 else ok('PDF comercial não consulta unit_cost de quote_items');
 
-// 6) Rotas sensíveis continuam owner-only na borda da UI (RLS permanece a autoridade real).
+// 7) Rotas sensíveis continuam owner-only na borda da UI (RLS permanece a autoridade real).
 const app = read('src/App.jsx');
 for (const route of ['produtos','compras','clientes-locais','orcamentos','orcamento-ia','garantias','contratos','financeiro','configuracoes']) {
   const marker = `workspaceV2 === "${route}" && owner`;
@@ -172,13 +196,13 @@ if (!workspaceHome.includes('ZiisTec V2')) fail('Workspace V2 perdeu o nome ofic
 if (workspaceHome.includes('ZiisTec Stack V2')) fail('Workspace V2 reintroduziu o nome antigo ZiisTec Stack V2');
 else ok('Branding da revisão permanece ZiisTec V2');
 
-// 7) Sessão deve depender de membresia ativa e revalidar acesso quando o app volta ao foco.
+// 8) Sessão deve depender de membresia ativa e revalidar acesso quando o app volta ao foco.
 requireText('src/lib/useSessao.js', [
   '.eq("status", "active")', 'ultimaRevalidacao', 'window.addEventListener("focus"',
   'document.addEventListener("visibilitychange"', 'Seu acesso ativo a esta empresa não está mais disponível.',
 ]);
 
-// 8) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
+// 9) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
 const settings = read('src/screens/v2/SettingsV2.jsx');
 const fakePaymentAction = /<Btn[^>]*>[\s\S]{0,180}(?:Forma de pagamento|Checkout)[\s\S]{0,80}<\/Btn>/i.test(settings)
   || /onClick\s*=\s*\{[^}]{0,220}(?:pagamento|checkout)/i.test(settings);
@@ -186,7 +210,7 @@ if (fakePaymentAction) fail('Settings V2 contém ação clicável de pagamento n
 else ok('Settings V2 não expõe ação clicável de checkout/pagamento fictício');
 requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions', 'cancelarAssinaturaDB', 'reativarAssinaturaDB']);
 
-// 9) Runbooks e política de custo precisam acompanhar o código.
+// 10) Runbooks e política de custo precisam acompanhar o código.
 requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
   'Cross-tenant', 'Orçamento aprovado → OS', 'Memória técnica da OS', 'Financeiro V2 + IA', 'Mobile/tablet', 'Regra de merge',
 ]);
@@ -205,14 +229,14 @@ requireText('docs/NO_COST_DEVELOPMENT_POLICY.md', [
   '5 ou mais clientes pagantes',
 ]);
 
-// 10) Headers críticos do preview/deploy.
+// 11) Headers críticos do preview/deploy.
 const vercel = read('vercel.json');
 for (const marker of ["geolocation=(self)", 'payment=()', "frame-ancestors 'none'", "object-src 'none'"]) {
   if (!vercel.includes(marker)) fail(`vercel.json: header de segurança ausente: ${marker}`);
 }
 if (vercel) ok('Headers de geolocation/frames/object/payment preservados');
 
-// 11) Caça a segredos privilegiados de formato reconhecível em arquivos versionados de runtime.
+// 12) Caça a segredos privilegiados de formato reconhecível em arquivos versionados de runtime.
 const scanRoots = ['api', 'src', 'scripts'];
 const allowedExt = new Set(['.js','.jsx','.mjs','.ts','.tsx','.json']);
 const secretPatterns = [
