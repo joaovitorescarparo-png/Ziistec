@@ -3,16 +3,18 @@ import { resolverConfigSupabase } from "./supabaseConfig";
 
 /*
   Separação de ambientes:
-  - Preview/staging deve receber VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY próprias.
-  - Se uma delas vier sem a outra, falhamos fechado e NÃO misturamos credenciais.
-  - O fallback público do projeto principal só é permitido nos hosts oficiais da main.
-  - Localhost e qualquer *.vercel.app de PR ficam sem banco até receberem env própria.
+  - Produção usa somente o Supabase principal nos hosts oficiais da main.
+  - A branch Product V2 usa somente o Supabase de homologação no alias fixo da PR.
+  - Qualquer outro preview/localhost sem env própria falha fechado.
+  - Se uma env parcial ou um preview tentar apontar para produção, a conexão é recusada.
 
-  A service_role/secret key jamais entra no frontend. A autorização real continua
-  sendo feita pela RLS do Supabase.
+  As chaves abaixo são publishable e podem existir no bundle. Service role/secret key
+  jamais entra no frontend. A autorização real continua sendo feita pela RLS.
 */
 const PROD_URL = "https://diztevlpbcfqleizswxr.supabase.co";
 const PROD_PUBLISHABLE_KEY = "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
+const STAGING_URL = "https://xadoktssibuuebzzjrhv.supabase.co";
+const STAGING_PUBLISHABLE_KEY = "sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e";
 
 const runtimeConfig = resolverConfigSupabase({
   host: typeof window !== "undefined" ? window.location.hostname : "",
@@ -20,6 +22,8 @@ const runtimeConfig = resolverConfigSupabase({
   envKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
   prodUrl: PROD_URL,
   prodKey: PROD_PUBLISHABLE_KEY,
+  stagingUrl: STAGING_URL,
+  stagingKey: STAGING_PUBLISHABLE_KEY,
 });
 
 export const ambienteSupabase = runtimeConfig.origem;
