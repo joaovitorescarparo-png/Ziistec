@@ -45,15 +45,27 @@ for (const rel of endpoints) {
 }
 
 const genericAi = fs.readFileSync(path.join(root, 'api/ai.js'), 'utf8');
-const ownerIndex = genericAi.indexOf('/rest/v1/rpc/zt_is_owner');
-const quotaIndex = genericAi.indexOf('/rest/v1/rpc/zt_consume_ai_quota');
-const anthropicIndex = genericAi.indexOf('https://api.anthropic.com/v1/messages');
-ok(ownerIndex >= 0, 'api/ai.js: owner guard ausente.');
-ok(quotaIndex >= 0, 'api/ai.js: quota RPC ausente.');
-ok(anthropicIndex >= 0, 'api/ai.js: chamada Anthropic ausente.');
-ok(ownerIndex >= 0 && quotaIndex >= 0 && ownerIndex < quotaIndex, 'api/ai.js: owner guard precisa ocorrer antes do consumo de quota.');
-ok(ownerIndex >= 0 && anthropicIndex >= 0 && ownerIndex < anthropicIndex, 'api/ai.js: owner guard precisa ocorrer antes da chamada ao provedor de IA.');
+const genericOwnerIndex = genericAi.indexOf('/rest/v1/rpc/zt_is_owner');
+const genericPaidGateIndex = genericAi.indexOf('if (!paidAiAtivo)');
+const genericQuotaIndex = genericAi.indexOf('/rest/v1/rpc/zt_consume_ai_quota');
+const genericAnthropicIndex = genericAi.indexOf('https://api.anthropic.com/v1/messages');
+ok(genericOwnerIndex >= 0, 'api/ai.js: owner guard ausente.');
+ok(genericPaidGateIndex >= 0, 'api/ai.js: paid AI gate ausente.');
+ok(genericQuotaIndex >= 0, 'api/ai.js: quota RPC ausente.');
+ok(genericAnthropicIndex >= 0, 'api/ai.js: chamada Anthropic ausente.');
+ok(genericOwnerIndex >= 0 && genericQuotaIndex >= 0 && genericOwnerIndex < genericQuotaIndex, 'api/ai.js: owner guard precisa ocorrer antes do consumo de quota.');
+ok(genericPaidGateIndex >= 0 && genericQuotaIndex >= 0 && genericPaidGateIndex < genericQuotaIndex, 'api/ai.js: paid AI gate precisa ocorrer antes do consumo de quota.');
+ok(genericPaidGateIndex >= 0 && genericAnthropicIndex >= 0 && genericPaidGateIndex < genericAnthropicIndex, 'api/ai.js: paid AI gate precisa ocorrer antes da chamada ao provedor.');
 ok(genericAi.includes('Somente o proprietário pode usar a interpretação comercial com IA.'), 'api/ai.js: resposta explícita de owner-only ausente.');
+
+const financeAi = fs.readFileSync(path.join(root, 'api/finance-ai.js'), 'utf8');
+const financePaidGateIndex = financeAi.indexOf('if (!paidAiAtivo)');
+const financeQuotaIndex = financeAi.indexOf('/rest/v1/rpc/zt_consume_ai_quota');
+const financeAnthropicIndex = financeAi.indexOf('https://api.anthropic.com/v1/messages');
+ok(financeAi.includes("from './_paidFeatures.js'"), 'api/finance-ai.js: helper de feature paga ausente.');
+ok(financePaidGateIndex >= 0, 'api/finance-ai.js: paid AI gate ausente.');
+ok(financePaidGateIndex >= 0 && financeQuotaIndex >= 0 && financePaidGateIndex < financeQuotaIndex, 'api/finance-ai.js: paid AI gate precisa ocorrer antes da quota.');
+ok(financePaidGateIndex >= 0 && financeAnthropicIndex >= 0 && financePaidGateIndex < financeAnthropicIndex, 'api/finance-ai.js: paid AI gate precisa ocorrer antes da Anthropic.');
 
 if (failures.length) {
   console.error('\nSERVER ENV ISOLATION CHECK: FAIL\n');
@@ -67,3 +79,4 @@ console.log('✓ Preview não aceita Supabase de produção nem por env explíci
 console.log('✓ Produção mantém fallback público controlado');
 console.log('✓ AI, Finance AI e PDF têm body limit + timeout + isolamento compartilhado');
 console.log('✓ IA comercial valida owner antes de consumir quota ou chamar o provedor');
+console.log('✓ IA paga permanece fail-closed antes de quota/provedor em Orçamento e Financeiro');
