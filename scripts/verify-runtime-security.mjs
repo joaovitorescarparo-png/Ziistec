@@ -41,9 +41,10 @@ for (const full of runtimeRoots.flatMap((dir) => walk(path.join(root, dir)))) {
   }
 
   // Chaves administrativas/secretas jamais pertencem ao bundle do navegador.
+  // A palavra "service_role" em comentário é permitida; referência executável a env/variável privilegiada, não.
   if (rel.startsWith(`src${path.sep}`)) {
     const frontendPrivileged = [
-      ['service role no frontend', /(?:SUPABASE_)?SERVICE[_-]?ROLE/i],
+      ['variável service role no frontend', /(?:import\.meta\.env|process\.env)[^\n;]{0,120}SERVICE[_-]?ROLE/i],
       ['Supabase secret key no frontend', /sb_secret_[A-Za-z0-9_-]{8,}/],
       ['chave privada no frontend', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
     ];
