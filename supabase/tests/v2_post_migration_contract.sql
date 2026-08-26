@@ -56,9 +56,6 @@ BEGIN
   IF to_regclass('public.maintenance_contracts') IS NULL THEN
     v_missing := array_append(v_missing, 'public.maintenance_contracts');
   END IF;
-  IF to_regclass('public.maintenance_contract_cycles') IS NULL THEN
-    v_missing := array_append(v_missing, 'public.maintenance_contract_cycles');
-  END IF;
   IF to_regclass('public.work_order_item_costs') IS NULL THEN
     v_missing := array_append(v_missing, 'public.work_order_item_costs');
   END IF;
@@ -80,6 +77,39 @@ BEGIN
     AND column_name IN ('image_path','sale_enabled','track_stock','stock_qty','low_stock_threshold');
   IF v_count <> 5 THEN
     RAISE EXCEPTION 'V2_CONTRACT_PRODUCTS_COLUMNS: esperado 5, encontrado %', v_count;
+  END IF;
+
+  -- Ciclos de contrato recorrente são representados diretamente nos documentos
+  -- gerados (OS + financeiro), com unicidade por contrato/ciclo; não existe tabela
+  -- separada maintenance_contract_cycles na implementação canônica da 0052.
+  SELECT count(*) INTO v_count
+  FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='work_orders'
+    AND column_name IN ('maintenance_contract_id','contract_cycle');
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'V2_CONTRACT_WORK_ORDER_CYCLE_COLUMNS: esperado 2, encontrado %', v_count;
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='financial_entries'
+    AND column_name IN ('maintenance_contract_id','contract_cycle');
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'V2_CONTRACT_FINANCIAL_CYCLE_COLUMNS: esperado 2, encontrado %', v_count;
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM pg_index i
+  JOIN pg_class idx ON idx.oid=i.indexrelid
+  JOIN pg_class tbl ON tbl.oid=i.indrelid
+  JOIN pg_namespace ns ON ns.oid=tbl.relnamespace
+  WHERE ns.nspname='public'
+    AND i.indisunique
+    AND pg_get_expr(i.indpred, i.indrelid) IS NOT NULL
+    AND ((tbl.relname='work_orders' AND idx.relname='ux_work_orders_contract_cycle')
+      OR (tbl.relname='financial_entries' AND idx.relname='ux_financial_contract_cycle'));
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'V2_CONTRACT_CYCLE_UNIQUE_INDEXES: esperado 2, encontrado %', v_count;
   END IF;
 
   -- Colunas de localização do cliente (0049) usadas pela Stack V2.
@@ -247,6 +277,15 @@ SELECT
   'V2_POST_MIGRATION_CONTRACT_OK' AS result,
   to_regclass('public.inventory_movements') IS NOT NULL AS inventory_ok,
   to_regclass('public.maintenance_contracts') IS NOT NULL AS contracts_ok,
+  EXISTS (
+    SELECT 1
+    FROM pg_index i
+    JOIN pg_class idx ON idx.oid=i.indexrelid
+    WHERE idx.relname IN ('ux_work_orders_contract_cycle','ux_financial_contract_cycle')
+      AND i.indisunique
+    GROUP BY i.indisunique
+    HAVING count(*)=2
+  ) AS contract_cycles_ok,
   to_regclass('public.work_order_item_costs') IS NOT NULL AS item_cost_ledger_ok,
   to_regclass('public.work_order_material_costs') IS NOT NULL AS material_cost_ledger_ok,
   to_regclass('public.work_order_private_costs') IS NOT NULL AS extra_cost_ledger_ok,
