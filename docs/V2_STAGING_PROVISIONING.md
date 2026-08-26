@@ -13,15 +13,30 @@
 
 O frontend já falha fechado: previews sem `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` não usam o fallback de produção. O fallback público só existe nos hosts oficiais da `main`.
 
-## 1. Pré-condições
+## Política atual de custo
+
+A branch paga de homologação está **adiada** enquanto o ZiisTec não tiver mais de 4 clientes pagantes.
+
+Até existir **5 ou mais clientes pagantes**, ou autorização explícita do proprietário para um custo específico, a homologação usa somente:
+
+- CI/Verify/CodeQL já existentes;
+- Preview Vercel já conectado;
+- leitura, advisors e logs do Supabase atual;
+- testes SQL controlados com `BEGIN ... ROLLBACK`;
+- contratos estáticos e testes versionados no repositório.
+
+Nenhuma branch paga deve ser criada apenas para acelerar desenvolvimento. A política completa está em `docs/NO_COST_DEVELOPMENT_POLICY.md`.
+
+## 1. Pré-condições para a futura branch paga
 
 Antes de criar a branch:
 
 1. PR #9 continua `OPEN` + `DRAFT`.
 2. `main` continua sem as migrations V2.
 3. `Verify` e `CodeQL` do HEAD estão verdes.
-4. Usuário confirma explicitamente o custo da branch Supabase.
-5. Criar branch **sem dados de produção**.
+4. O ZiisTec já tem pelo menos 5 clientes pagantes **ou** o proprietário autorizou explicitamente esse custo específico.
+5. O custo atual da branch foi consultado e aceito antes da criação.
+6. Criar branch **sem dados de produção**.
 
 Branch sugerida: `v2-homologation`.
 
