@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   ArrowLeft, Boxes, ChevronRight, CircleDollarSign, ClipboardList, FileText, HardHat,
-  LockKeyhole, MapPin, PackageCheck, ShieldCheck, ShoppingCart, Sparkles, Wrench,
+  LockKeyhole, MapPin, PackageCheck, Settings, ShieldCheck, ShoppingCart, Sparkles, Wrench,
 } from 'lucide-react';
 
 const MODULES = [
@@ -15,6 +15,7 @@ const MODULES = [
   { id:'garantias', ownerOnly:true, icon:ShieldCheck, title:'Garantias', description:'Registrar garantias manuais e acompanhar cobertura por cliente, produto e serviço.', badge:'Pós-venda' },
   { id:'contratos', ownerOnly:true, icon:Wrench, title:'Preventivas e contratos', description:'Contratos recorrentes, próximas visitas, cobrança e geração segura dos ciclos.', badge:'Recorrência' },
   { id:'financeiro', ownerOnly:true, icon:CircleDollarSign, title:'Financeiro', description:'Faturado, recebido, atrasos, projeção de caixa e rentabilidade real por OS.', badge:'Proprietário' },
+  { id:'configuracoes', ownerOnly:true, icon:Settings, title:'Configurações', description:'Dados da empresa, padrões de orçamento, logo e assinatura com ações reais do servidor.', badge:'Proprietário' },
 ];
 
 export default function WorkspaceV2Home({ companyName='Sua empresa', owner=false, onOpen, onClose }) {
