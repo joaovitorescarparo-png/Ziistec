@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { resolverConfigSupabase } from "./supabaseConfig";
 
 /*
   Separação de ambientes:
@@ -10,41 +11,22 @@ import { createClient } from "@supabase/supabase-js";
   A service_role/secret key jamais entra no frontend. A autorização real continua
   sendo feita pela RLS do Supabase.
 */
-const PROD_HOSTS = new Set([
-  "ziistec.vercel.app",
-  "ziistec-js-connect.vercel.app",
-  "ziistec-git-main-js-connect.vercel.app",
-]);
-
 const PROD_URL = "https://diztevlpbcfqleizswxr.supabase.co";
 const PROD_PUBLISHABLE_KEY = "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
 
-const host = typeof window !== "undefined" ? window.location.hostname : "";
-const envUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim();
-const envKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
-const temEnvUrl = Boolean(envUrl);
-const temEnvKey = Boolean(envKey);
-const envCompleto = temEnvUrl && temEnvKey;
-const envIncompleto = temEnvUrl !== temEnvKey;
-const usarFallbackProducao = !temEnvUrl && !temEnvKey && PROD_HOSTS.has(host);
+const runtimeConfig = resolverConfigSupabase({
+  host: typeof window !== "undefined" ? window.location.hostname : "",
+  envUrl: import.meta.env.VITE_SUPABASE_URL,
+  envKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+  prodUrl: PROD_URL,
+  prodKey: PROD_PUBLISHABLE_KEY,
+});
 
-const url = envCompleto ? envUrl : usarFallbackProducao ? PROD_URL : "";
-const anonKey = envCompleto ? envKey : usarFallbackProducao ? PROD_PUBLISHABLE_KEY : "";
-
-export const ambienteSupabase = envCompleto
-  ? "env"
-  : usarFallbackProducao
-    ? "production-fallback"
-    : envIncompleto
-      ? "invalid-env"
-      : "unconfigured";
-
-export const configurado = Boolean(
-  !envIncompleto && url && anonKey && !url.includes("SEU-PROJETO")
-);
+export const ambienteSupabase = runtimeConfig.origem;
+export const configurado = runtimeConfig.configurado;
 
 export const supabase = configurado
-  ? createClient(url, anonKey, {
+  ? createClient(runtimeConfig.url, runtimeConfig.anonKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
     })
   : null;
