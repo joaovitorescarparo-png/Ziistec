@@ -158,6 +158,13 @@ for (const route of ['produtos','compras','clientes-locais','orcamentos','orcame
 if (app.includes('workspaceV2 === "venda-os" && owner')) fail('src/App.jsx: venda na OS não deve virar owner-only; técnico atribuído precisa do fluxo de campo');
 else ok('Rotas administrativas V2 mantêm owner gate e venda na OS continua disponível ao campo');
 
+for (const marker of ['AmbienteSemBanco', 'ZiisTec V2 sem banco de homologação', 'Produção protegida:', 'ambienteSupabase']) {
+  if (!app.includes(marker)) fail(`src/App.jsx: UX de preview isolado perdeu marcador: ${marker}`);
+}
+if (app.includes('if (!configurado) return comConexao(<Login />);')) {
+  fail('src/App.jsx: preview sem banco voltou a parecer login normal');
+} else ok('Preview sem banco mostra estado protegido e não um login enganoso');
+
 // 7) Sessão deve depender de membresia ativa e revalidar acesso quando o app volta ao foco.
 requireText('src/lib/useSessao.js', [
   '.eq("status", "active")',
@@ -175,7 +182,7 @@ if (fakePaymentAction) fail('Settings V2 contém ação clicável de pagamento n
 else ok('Settings V2 não expõe ação clicável de checkout/pagamento fictício');
 requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions', 'cancelarAssinaturaDB', 'reativarAssinaturaDB']);
 
-// 9) Runbook real owner/technician precisa continuar versionado junto com o código.
+// 9) Runbooks reais de homologação e provisionamento precisam acompanhar o código.
 requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
   'Cross-tenant',
   'Orçamento aprovado → OS',
@@ -183,6 +190,18 @@ requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
   'Financeiro V2 + IA',
   'Mobile/tablet',
   'Regra de merge',
+]);
+requireText('docs/V2_STAGING_PROVISIONING.md', [
+  'Nunca usar o Supabase de produção em Preview/Staging',
+  '0050_product_v2_core_catalog_contracts.sql',
+  '0061_work_order_technical_memory_media.sql',
+  'V2_POST_MIGRATION_CONTRACT_OK',
+  'V2_ACCESS_REVOCATION_OK',
+  'V2_SUBSCRIPTION_REACTIVATION_OK',
+  'VITE_SUPABASE_URL',
+  'VITE_SUPABASE_ANON_KEY',
+  'owner-v2-test',
+  'tech-v2-test',
 ]);
 
 // 10) Headers críticos do preview/deploy.
