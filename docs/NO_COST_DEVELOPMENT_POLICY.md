@@ -27,6 +27,18 @@ Enquanto o ZiisTec não tiver **mais de 4 clientes pagantes**, o desenvolvimento
 6. Testes estáticos e de contrato versionados em `supabase/tests` e `scripts`.
 7. Não copiar dados reais de clientes para ambientes de teste.
 
+## IA paga: desligada por padrão
+
+Os endpoints de Orçamento com IA e Financeiro com IA usam um **cost gate fail-closed** no servidor.
+
+- A presença de `ANTHROPIC_API_KEY` sozinha **não autoriza consumo**.
+- A IA paga só pode chamar o provedor quando `ENABLE_PAID_AI=true` estiver configurada explicitamente no servidor.
+- Com a flag ausente ou diferente de `true`, o servidor responde `503` antes de consumir quota e antes de chamar a Anthropic.
+- O Orçamento com IA também valida `owner` antes da trava de custo; um técnico autenticado recebe `403` e não consome quota.
+- O CI executa testes mockados que provam esses comportamentos sem rede e sem gerar custo.
+
+Quando a política de custo for revista, a ativação dessa flag deve ser uma decisão explícita e separada; não deve acontecer automaticamente só porque uma chave de provedor existe.
+
 ## Quando rever esta política
 
 A política pode ser revista quando houver **5 ou mais clientes pagantes** ou quando o proprietário autorizar explicitamente um custo específico antes da criação do recurso.
