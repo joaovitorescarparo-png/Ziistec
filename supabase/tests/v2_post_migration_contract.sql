@@ -12,41 +12,41 @@ DECLARE
   v_search_path text;
   v_unreviewed_definers text[];
   v_definers_without_path text[];
-  v_allowed_definers text[] := ARRAY[
-    -- Helpers/RPCs já existentes e revisados antes da V2.
-    'zt_accept_invites',
-    'zt_cancel_subscription',
-    'zt_client_visible',
-    'zt_compartilha_empresa',
-    'zt_consume_ai_quota',
-    'zt_consume_quote_pdf_quota',
-    'zt_create_company',
-    'zt_finalize_work_order_atomic',
-    'zt_is_member',
-    'zt_is_owner',
-    'zt_is_platform_admin',
-    'zt_platform_set_subscription_status',
-    'zt_reactivate_subscription',
-    'zt_refresh_subscription_status',
-    'zt_resolve_work_order_pricing',
-    'zt_save_manual_financial_entry',
-    'zt_save_purchase_idempotent',
-    'zt_save_quote_idempotent',
-    'zt_save_work_order_idempotent',
-    'zt_set_financial_paid',
-    'zt_set_followup_status',
-    'zt_subscription_can_write',
-    'zt_update_team_member',
-    'zt_wo_is_mine',
-    'zt_wo_is_owned',
-    'zt_wo_open',
+  v_allowed_definer_signatures text[] := ARRAY[
+    -- Superfície pública autenticada já existente e revisada antes da V2.
+    'zt_accept_invites()',
+    'zt_cancel_subscription(p_company uuid)',
+    'zt_client_visible(c_id uuid, comp uuid)',
+    'zt_compartilha_empresa(outro uuid)',
+    'zt_consume_ai_quota(p_company uuid)',
+    'zt_consume_quote_pdf_quota(p_company uuid)',
+    'zt_create_company(p_name text, p_activity text, p_has_team boolean, p_owner_name text, p_phone text)',
+    'zt_finalize_work_order_atomic(p_wo uuid, p_report text, p_pending text, p_extra_cost numeric, p_due_days integer, p_materials jsonb, p_additions jsonb)',
+    'zt_is_member(target uuid)',
+    'zt_is_owner(target uuid)',
+    'zt_is_platform_admin()',
+    'zt_platform_set_subscription_status(p_company uuid, p_status zt_sub_status)',
+    'zt_reactivate_subscription(p_company uuid)',
+    'zt_refresh_subscription_status(p_company uuid)',
+    'zt_resolve_work_order_pricing(p_wo uuid, p_prices jsonb, p_due_days integer)',
+    'zt_save_manual_financial_entry(p_company uuid, p_entry uuid, p_request uuid, p_row jsonb)',
+    'zt_save_purchase_idempotent(p_company uuid, p_purchase uuid, p_request uuid, p_row jsonb, p_items jsonb)',
+    'zt_save_quote_idempotent(p_company uuid, p_quote uuid, p_request uuid, p_row jsonb, p_items jsonb)',
+    'zt_save_work_order_idempotent(p_company uuid, p_wo uuid, p_request uuid, p_row jsonb, p_items jsonb)',
+    'zt_set_financial_paid(p_entry uuid, p_paid boolean, p_method text)',
+    'zt_set_followup_status(p_followup uuid, p_status text)',
+    'zt_subscription_can_write(target uuid)',
+    'zt_update_team_member(p_company uuid, p_user uuid, p_name text, p_phone text, p_job_title text)',
+    'zt_wo_is_mine(w_id uuid)',
+    'zt_wo_is_owned(w_id uuid)',
+    'zt_wo_open(w_id uuid)',
     -- RPCs públicas adicionadas/revisadas na stack Product V2.
-    'zt_technician_catalog',
-    'zt_adjust_product_stock',
-    'zt_sell_product_on_work_order',
-    'zt_create_manual_warranty',
-    'zt_generate_maintenance_contract_cycle',
-    'zt_create_work_order_from_quote'
+    'zt_technician_catalog(p_company uuid)',
+    'zt_adjust_product_stock(p_company uuid, p_product uuid, p_delta numeric, p_notes text)',
+    'zt_sell_product_on_work_order(p_wo uuid, p_product uuid, p_quantity numeric, p_notes text)',
+    'zt_create_manual_warranty(p_company uuid, p_client uuid, p_kind text, p_description text, p_starts_on date, p_ends_on date, p_service_place text, p_service uuid, p_product uuid, p_serial text, p_notes text)',
+    'zt_generate_maintenance_contract_cycle(p_contract uuid, p_cycle date, p_service_on date, p_due_on date)',
+    'zt_create_work_order_from_quote(p_quote uuid, p_assigned_to uuid, p_scheduled_date date, p_scheduled_time time)'
   ];
 BEGIN
   -- Tabelas/ledgers que definem o isolamento financeiro e os módulos V2.
@@ -139,15 +139,19 @@ BEGIN
     RAISE EXCEPTION 'V2_CONTRACT_QUOTE_TO_WO_SEARCH_PATH: %', coalesce(v_search_path,'NULL');
   END IF;
 
-  -- Superfície SECURITY DEFINER autenticada: qualquer função pública nova exige revisão explícita.
-  SELECT array_agg(format('%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid)) ORDER BY p.proname)
+  -- Superfície SECURITY DEFINER autenticada: assinatura EXATA. Um overload inesperado
+  -- sob nome já conhecido também falha e exige revisão explícita.
+  SELECT array_agg(sig ORDER BY sig)
     INTO v_unreviewed_definers
-  FROM pg_proc p
-  JOIN pg_namespace n ON n.oid=p.pronamespace
-  WHERE n.nspname='public'
-    AND p.prosecdef
-    AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
-    AND NOT (p.proname = ANY(v_allowed_definers));
+  FROM (
+    SELECT format('%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid)) AS sig
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.prosecdef
+      AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+  ) reviewed
+  WHERE NOT (sig = ANY(v_allowed_definer_signatures));
 
   IF cardinality(v_unreviewed_definers) > 0 THEN
     RAISE EXCEPTION 'V2_CONTRACT_UNREVIEWED_SECURITY_DEFINER: %', array_to_string(v_unreviewed_definers, ', ');
@@ -168,6 +172,19 @@ BEGIN
 
   IF cardinality(v_definers_without_path) > 0 THEN
     RAISE EXCEPTION 'V2_CONTRACT_SECURITY_DEFINER_WITHOUT_SEARCH_PATH: %', array_to_string(v_definers_without_path, ', ');
+  END IF;
+
+  -- Wrapper legado zt_complete_work_order é deliberadamente service-only.
+  -- Se voltar a ficar executável por authenticated, a superfície aumenta sem revisão.
+  SELECT count(*) INTO v_count
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid=p.pronamespace
+  WHERE n.nspname='public'
+    AND p.proname='zt_complete_work_order'
+    AND pg_get_function_identity_arguments(p.oid)='p_wo uuid, p_report text, p_pending text, p_extra_cost numeric, p_due_days integer'
+    AND has_function_privilege('authenticated', p.oid, 'EXECUTE');
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'V2_CONTRACT_COMPLETE_WORK_ORDER_MUST_BE_SERVICE_ONLY';
   END IF;
 
   -- Ledger de quota/documentos deve negar acesso direto a anon/authenticated (0056).
@@ -249,6 +266,13 @@ SELECT
         WHERE cfg LIKE 'search_path=%'
       )
   ) AS security_definer_search_path_ok,
+  NOT EXISTS (
+    SELECT 1
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.proname='zt_complete_work_order'
+      AND has_function_privilege('authenticated',p.oid,'EXECUTE')
+  ) AS legacy_complete_service_only_ok,
   EXISTS (
     SELECT 1 FROM storage.buckets
     WHERE id='zt-work-orders' AND public=false AND file_size_limit=31457280
