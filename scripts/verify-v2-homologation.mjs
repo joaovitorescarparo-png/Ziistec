@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { PROD_SUPABASE_HOSTS, resolverConfigSupabase } from '../src/lib/supabaseConfig.js';
 
 const root = process.cwd();
 const failures = [];
@@ -74,7 +75,54 @@ requireText('supabase/tests/v2_access_subscription_rollback_smoke.sql', [
   'rollback;',
 ]);
 
-// 4) Invariantes de segurança dos endpoints públicos/serverless.
+// 4) Preview/staging jamais pode cair silenciosamente no Supabase de produção.
+const prodUrl = 'https://prod-ref.supabase.co';
+const prodKey = 'sb_publishable_prod_test';
+const stagingUrl = 'https://staging-ref.supabase.co';
+const stagingKey = 'sb_publishable_staging_test';
+const mainConfig = resolverConfigSupabase({
+  host: PROD_SUPABASE_HOSTS[0], prodUrl, prodKey,
+});
+if (!mainConfig.configurado || mainConfig.origem !== 'production-fallback' || mainConfig.url !== prodUrl) {
+  fail('Supabase env isolation: host oficial da main perdeu fallback controlado');
+} else ok('Host oficial da main mantém fallback público controlado');
+
+const previewConfig = resolverConfigSupabase({
+  host: 'ziistec-git-product-v2-review-js-connect.vercel.app', prodUrl, prodKey,
+});
+if (previewConfig.configurado || previewConfig.origem !== 'unconfigured' || previewConfig.url || previewConfig.anonKey) {
+  fail('Supabase env isolation: preview sem env tentou usar credencial de produção');
+} else ok('Preview sem env falha fechado e não recebe Supabase de produção');
+
+const stagingConfig = resolverConfigSupabase({
+  host: 'ziistec-git-product-v2-review-js-connect.vercel.app',
+  envUrl: stagingUrl,
+  envKey: stagingKey,
+  prodUrl,
+  prodKey,
+});
+if (!stagingConfig.configurado || stagingConfig.origem !== 'env' || stagingConfig.url !== stagingUrl || stagingConfig.anonKey !== stagingKey) {
+  fail('Supabase env isolation: preview com env própria não ficou isolado no staging');
+} else ok('Preview com env própria usa somente o Supabase de staging');
+
+const partialConfig = resolverConfigSupabase({
+  host: PROD_SUPABASE_HOSTS[0],
+  envUrl: stagingUrl,
+  prodUrl,
+  prodKey,
+});
+if (partialConfig.configurado || partialConfig.origem !== 'invalid-env' || partialConfig.url || partialConfig.anonKey) {
+  fail('Supabase env isolation: configuração parcial misturou staging com produção');
+} else ok('Env parcial falha fechado e nunca mistura credenciais entre ambientes');
+
+requireText('src/lib/supabase.js', [
+  'resolverConfigSupabase',
+  'VITE_SUPABASE_URL',
+  'VITE_SUPABASE_ANON_KEY',
+  'PROD_PUBLISHABLE_KEY',
+]);
+
+// 5) Invariantes de segurança dos endpoints públicos/serverless.
 requireText('api/ai.js', [
   "req.method !== 'POST'",
   "auth.startsWith('Bearer ')",
@@ -101,7 +149,7 @@ const pdfApi = requireText('api/quote-pdf.js', [
 if (/quote_items[^'\n]*unit_cost/i.test(pdfApi)) fail('api/quote-pdf.js: custo interno apareceu na consulta de quote_items do PDF do cliente');
 else ok('PDF comercial não consulta unit_cost de quote_items');
 
-// 5) Rotas sensíveis continuam owner-only na borda da UI (RLS permanece a autoridade real).
+// 6) Rotas sensíveis continuam owner-only na borda da UI (RLS permanece a autoridade real).
 const app = read('src/App.jsx');
 for (const route of ['produtos','compras','clientes-locais','orcamentos','orcamento-ia','garantias','contratos','financeiro','configuracoes']) {
   const marker = `workspaceV2 === "${route}" && owner`;
@@ -110,7 +158,7 @@ for (const route of ['produtos','compras','clientes-locais','orcamentos','orcame
 if (app.includes('workspaceV2 === "venda-os" && owner')) fail('src/App.jsx: venda na OS não deve virar owner-only; técnico atribuído precisa do fluxo de campo');
 else ok('Rotas administrativas V2 mantêm owner gate e venda na OS continua disponível ao campo');
 
-// 6) Sessão deve depender de membresia ativa e revalidar acesso quando o app volta ao foco.
+// 7) Sessão deve depender de membresia ativa e revalidar acesso quando o app volta ao foco.
 requireText('src/lib/useSessao.js', [
   '.eq("status", "active")',
   'ultimaRevalidacao',
@@ -119,7 +167,7 @@ requireText('src/lib/useSessao.js', [
   'Seu acesso ativo a esta empresa não está mais disponível.',
 ]);
 
-// 7) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
+// 8) Configurações V2 pode explicar que pagamento ainda não existe, mas não pode expor ação clicável falsa.
 const settings = read('src/screens/v2/SettingsV2.jsx');
 const fakePaymentAction = /<Btn[^>]*>[\s\S]{0,180}(?:Forma de pagamento|Checkout)[\s\S]{0,80}<\/Btn>/i.test(settings)
   || /onClick\s*=\s*\{[^}]{0,220}(?:pagamento|checkout)/i.test(settings);
@@ -127,7 +175,7 @@ if (fakePaymentAction) fail('Settings V2 contém ação clicável de pagamento n
 else ok('Settings V2 não expõe ação clicável de checkout/pagamento fictício');
 requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions', 'cancelarAssinaturaDB', 'reativarAssinaturaDB']);
 
-// 8) Runbook real owner/technician precisa continuar versionado junto com o código.
+// 9) Runbook real owner/technician precisa continuar versionado junto com o código.
 requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
   'Cross-tenant',
   'Orçamento aprovado → OS',
@@ -137,14 +185,14 @@ requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
   'Regra de merge',
 ]);
 
-// 9) Headers críticos do preview/deploy.
+// 10) Headers críticos do preview/deploy.
 const vercel = read('vercel.json');
 for (const marker of ["geolocation=(self)", 'payment=()', "frame-ancestors 'none'", "object-src 'none'"]) {
   if (!vercel.includes(marker)) fail(`vercel.json: header de segurança ausente: ${marker}`);
 }
 if (vercel) ok('Headers de geolocation/frames/object/payment preservados');
 
-// 10) Caça a segredos privilegiados de formato reconhecível em arquivos versionados de runtime.
+// 11) Caça a segredos privilegiados de formato reconhecível em arquivos versionados de runtime.
 const scanRoots = ['api', 'src', 'scripts'];
 const allowedExt = new Set(['.js','.jsx','.mjs','.ts','.tsx','.json']);
 const secretPatterns = [
