@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PROD_SUPABASE_URL, resolverSupabaseServidor } from '../api/_supabaseServerConfig.js';
+import { PROD_SUPABASE_URL, STAGING_BRANCH, STAGING_SUPABASE_URL, resolverSupabaseServidor } from '../api/_supabaseServerConfig.js';
 
 const root = process.cwd();
 const failures = [];
@@ -9,11 +9,15 @@ const ok = (condition, message) => { if (!condition) failures.push(message); };
 const prod = resolverSupabaseServidor({ VERCEL_ENV: 'production' });
 ok(prod.configurado && prod.origem === 'production-fallback' && prod.url === PROD_SUPABASE_URL, 'Production perdeu fallback público controlado.');
 
-const previewEmpty = resolverSupabaseServidor({ VERCEL_ENV: 'preview' });
-ok(!previewEmpty.configurado && previewEmpty.origem === 'unconfigured' && !previewEmpty.url, 'Preview sem env não falhou fechado.');
+const previewEmpty = resolverSupabaseServidor({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'outra-branch' });
+ok(!previewEmpty.configurado && previewEmpty.origem === 'unconfigured' && !previewEmpty.url, 'Preview fora da homologação não falhou fechado.');
+
+const previewV2 = resolverSupabaseServidor({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: STAGING_BRANCH });
+ok(previewV2.configurado && previewV2.origem === 'staging-fallback' && previewV2.url === STAGING_SUPABASE_URL, 'Product V2 preview não recebeu o staging isolado.');
 
 const previewProd = resolverSupabaseServidor({
   VERCEL_ENV: 'preview',
+  VERCEL_GIT_COMMIT_REF: STAGING_BRANCH,
   SUPABASE_URL: PROD_SUPABASE_URL,
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_prod_test',
 });
@@ -21,13 +25,15 @@ ok(!previewProd.configurado && previewProd.origem === 'production-blocked-in-pre
 
 const previewStage = resolverSupabaseServidor({
   VERCEL_ENV: 'preview',
+  VERCEL_GIT_COMMIT_REF: STAGING_BRANCH,
   SUPABASE_URL: 'https://staging-test.supabase.co/',
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_staging_test',
 });
-ok(previewStage.configurado && previewStage.origem === 'env' && previewStage.url === 'https://staging-test.supabase.co', 'Preview com staging próprio não foi aceito corretamente.');
+ok(previewStage.configurado && previewStage.origem === 'env' && previewStage.url === 'https://staging-test.supabase.co', 'Preview com staging próprio por env não foi aceito corretamente.');
 
 const partial = resolverSupabaseServidor({
   VERCEL_ENV: 'preview',
+  VERCEL_GIT_COMMIT_REF: STAGING_BRANCH,
   SUPABASE_URL: 'https://staging-test.supabase.co',
 });
 ok(!partial.configurado && partial.origem === 'invalid-env', 'Env parcial do serverless não falhou fechado.');
@@ -74,7 +80,8 @@ if (failures.length) {
 }
 
 console.log('\nSERVER ENV ISOLATION CHECK: OK');
-console.log('✓ Preview sem staging falha fechado');
+console.log('✓ Product V2 preview usa somente o staging isolado');
+console.log('✓ Outros previews sem staging falham fechado');
 console.log('✓ Preview não aceita Supabase de produção nem por env explícita');
 console.log('✓ Produção mantém fallback público controlado');
 console.log('✓ AI, Finance AI e PDF têm body limit + timeout + isolamento compartilhado');
