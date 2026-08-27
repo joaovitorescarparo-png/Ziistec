@@ -1,6 +1,7 @@
 name: Apply Reviewed Claude Patch
 
 # Temporary controller: remove after the reviewed patch is integrated.
+# Triggered after restoring the exact reviewed Base64 chunks.
 on:
   push:
     branches: [tmp-ignore]
