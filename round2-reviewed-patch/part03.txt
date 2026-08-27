@@ -1,0 +1,291 @@
+endencia : "" }); onClose(); }}>
++                        Salvar sem concluir
++                      </Btn>
++                    : <Btn icon={Check} onClick={() => onFinalizar(extras)}>
++                        {resultado === "retorno" ? "Concluir e marcar retorno" : "Concluir atendimento"}
++                      </Btn>)
+                 : <Btn icon={ArrowRight} disabled={!!atual.bloqueio} onClick={() => setEtapa(etapa + 1)}>Continuar</Btn>}
+             </div>
+           </div>
+@@ -3921,11 +4160,14 @@ function CompraForm({ form, setForm, onSave, produtos }) {
+ }
+ 
+ /* ============================================================== Financeiro */
+-function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId }) {
++function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId, empresa: empresaDados }) {
+   const [mes, setMes] = useState(mesRef(HOJE));
+-  const [aba, setAba] = useState("receber");
++  const [aba, setAba] = useState("visao");
+   const [form, setForm] = useState(null);
+   const [baixando, setBaixando] = useState(null);
++  const [recibo, setRecibo] = useState(null);
++  const [janela, setJanela] = useState(30);
++  const [filtro, setFiltro] = useState({ status: "todos", origem: "todas", clienteId: "", busca: "" });
+ 
+   /* regra única de período: pago conta no mês do pagamento; em aberto conta no mês do vencimento */
+   const noMes = (l) => mesRef(l.pago ? l.pagoEm : l.vencimento) === mes;
+@@ -3942,12 +4184,17 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
+   const futuroReceber = soma(lancamentos.filter((l) => l.tipo === "receita" && !l.pago)) - soma(aReceberMes);
+   const futuroPagar = soma(lancamentos.filter((l) => l.tipo === "despesa" && !l.pago)) - soma(aPagarMes);
+ 
+-  /* fluxo de caixa 30 dias: atraso fica separado, previsão olha somente para frente */
++  /* fluxo de caixa: janela escolhida pelo usuário. Atraso fica separado,
++     porque previsão olha só para frente. */
+   const saldoAtual = soma(lancamentos.filter((l) => l.tipo === "receita" && l.pago)) - soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago));
+-  const limite = addDays(HOJE, 30);
+-  const entradas30 = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
+-  const saidas30 = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
+-  const projetado = saldoAtual + soma(entradas30) - soma(saidas30);
++  const limite = addDays(HOJE, janela);
++  const entradasJanela = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
++  const saidasJanela = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
++  const projetado = saldoAtual + soma(entradasJanela) - soma(saidasJanela);
++
++  /* o que exige ação hoje */
++  const receberHoje = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento === HOJE);
++  const pagarHoje = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento === HOJE);
+ 
+   /* margem dos serviços: usa conclusão real e cobrança efetivamente gerada para a OS */
+   const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || HOJE) === mes);
+@@ -3971,6 +4218,17 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
+     setMes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+   };
+ 
++  /* filtros de leitura: status, origem, cliente e busca livre */
++  const aplicarFiltro = (itens) => itens.filter((l) => {
++    if (filtro.status === "vencido" && !(!l.pago && l.vencimento < HOJE)) return false;
++    if (filtro.status === "aberto" && (l.pago || l.vencimento < HOJE)) return false;
++    if (filtro.status === "pago" && !l.pago) return false;
++    if (filtro.origem !== "todas" && (l.origemTipo || "manual") !== filtro.origem) return false;
++    if (filtro.clienteId && l.clienteId !== filtro.clienteId) return false;
++    if (filtro.busca && !semAcento(l.descricao || "").includes(semAcento(filtro.busca))) return false;
++    return true;
++  }).slice();
++
+   const ListaLanc = ({ itens, vazio }) => (
+     <Panel className="divide-y divide-slate-100 overflow-hidden">
+       {itens.length === 0 ? <Empty icon={Wallet} title="Nada neste período" sub={vazio} /> : itens.map((l) => {
+@@ -3984,7 +4242,9 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
+                   <p className="font-medium text-slate-800 truncate">{l.descricao}</p>
+                 </button>
+                 <p className="text-[12px] text-slate-400">
+-                  {l.pago ? `${l.tipo === "receita" ? "Recebido" : "Pago"} em ${dataBR(l.pagoEm)}${l.forma ? ` · ${l.forma}` : ""}` : `Vence ${dataBR(l.vencimento)}`} · {l.categoria}
++                  {l.pago ? `${l.tipo === "receita" ? "Recebido" : "Pago"} em ${dataBR(l.pagoEm)}${l.forma ? ` · ${l.forma}` : ""}` : `Vence ${dataBR(l.vencimento)}`}
++                  {" · "}{ORIGEM_LANC[l.origemTipo] || "Lançamento manual"}
++                  {l.clienteId ? ` · ${clientes.find((c) => c.id === l.clienteId)?.fantasia || clientes.find((c) => c.id === l.clienteId)?.nome || ""}` : ""}
+                 </p>
+               </div>
+               <div className="flex items-center gap-3 shrink-0">
+@@ -3992,6 +4252,20 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
+                 <span className={cx("font-semibold tabular-nums", l.tipo === "receita" ? "text-slate-900" : "text-slate-500")}>
+                   {l.tipo === "despesa" ? "− " : ""}{brl(l.valor)}
+                 </span>
++                {l.tipo === "receita" && !l.pago && (() => {
++                  const c = clientes.find((x) => x.id === l.clienteId);
++                  if (!c?.whatsapp && !c?.telefone) return null;
++                  return (
++                    <Btn size="sm" variant="ghost" icon={Share2} ariaLabel={`Cobrar ${l.descricao} pelo WhatsApp`} title="Cobrar pelo WhatsApp"
++                      onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp || c.telefone)}?text=${encodeURIComponent(`Olá! Sobre ${l.descricao}: valor de ${brl(l.valor)} com vencimento em ${dataBR(l.vencimento)}.`)}`, "_blank")}>
++                      Cobrar
++                    </Btn>
++                  );
++                })()}
++                {l.tipo === "receita" && (
++                  <Btn size="sm" variant="ghost" icon={Receipt} title="Gerar recibo não fiscal"
++                    ariaLabel={`Gerar recibo de ${l.descricao}`} onClick={() => setRecibo(l)}>Recibo</Btn>
++                )}
+                 {l.pago ? (
+                   <Btn size="sm" variant="ghost" onClick={() => pedirConfirmacao({
+                     titulo: "Desfazer baixa?", texto: `O lançamento volta para ${l.tipo === "receita" ? "contas a receber" : "contas a pagar"}.`,
+@@ -4019,6 +4293,27 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
+         <button onClick={() => mudarMes(1)} aria-label="Próximo mês" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700", ring)}><ArrowRight className="w-4 h-4" /></button>
+       </div>
+ 
++      {(receberHoje.length > 0 || pagarHoje.length > 0) && (
++        <Panel className="p-4 sm:p-5 mb-4">
++          <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
++            <div>
++              <p className="text-[12.5px] text-slate-500">Receber hoje</p>
++              <p className="text-[18px] font-semibold text-emerald-700 tabular-nums">{brl(soma(receberHoje))}
++                <span className="text-[12px] font-normal text-slate-400"> · {receberHoje.length} conta{receberHoje.length > 1 ? "s" : ""}</span></p>
++            </div>
++            <div>
++              <p className="text-[12.5px] text-slate-500">Pagar hoje</p>
++              <p className="text-[18px] font-semibold text-slate-900 tabular-nums">{brl(soma(pagarHoje))}
++                <span className="text-[12px] font-normal text-slate-400"> · {pagarHoje.length} conta{pagarHoje.length > 1 ? "s" : ""}</span></p>
++            </div>
++            <div className="flex gap-2 ml-auto">
++              {receberHoje.length > 0 && <Btn size="sm" variant="soft" onClick={() => setAba("receber")}>Ver a receber</Btn>}
++              {pagarHoje.length > 0 && <Btn size="sm" variant="soft" onClick={() => setAba("pagar")}>Ver a pagar</Btn>}
++            </div>
++          </div>
++        </Panel>
++      )}
++
+       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-4">
+         <Panel className="p-4 sm:p-5"><p className="text-[12.5px] text-slate-500">Recebido no mês</p>
+           <p className="text-[20px] font-semibold text-emerald-700 mt-1 tabular-nums">{brl(soma(recebidoMes))}</p></Panel>
+@@ -4042,43 +4337,69 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
+       </p>
+ 
+       <Tabs valor={aba} onChange={setAba} className="mb-5"
+-        opcoes={[{ id: "receber", label: "A receber" }, { id: "recebido", label: "Recebido" }, { id: "pagar", label: "A pagar" },
+-          { id: "pago", label: "Pago" }, { id: "fluxo", label: "Fluxo de caixa" }, { id: "resultado", label: "Meu resultado" }]} />
+-
+-      {aba === "receber" && (<><Rotulo>A receber neste mês</Rotulo>
+-        <ListaLanc itens={aReceberMes.slice().sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Conclua uma ordem de serviço para gerar a cobrança automaticamente." /></>)}
+-      {aba === "recebido" && (<><Rotulo>Recebido neste mês</Rotulo><ListaLanc itens={recebidoMes} vazio="Nenhum recebimento registrado neste mês." /></>)}
+-      {aba === "pagar" && (<><Rotulo>A pagar neste mês</Rotulo>
+-        <ListaLanc itens={aPagarMes.slice().sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Registre uma compra para gerar a conta a pagar automaticamente." /></>)}
+-      {aba === "pago" && (<><Rotulo>Pago neste mês</Rotulo><ListaLanc itens={pagoMes} vazio="Nenhum pagamento registrado neste mês." /></>)}
++        opcoes={[{ id: "visao", label: "Visão geral" }, { id: "receber", label: "A receber" },
++          { id: "pagar", label: "A pagar" }, { id: "documentos", label: "Documentos" }]} />
++
++      {aba === "receber" && (<>
++        <FiltrosLancamento filtro={filtro} setFiltro={setFiltro} clientes={clientes} tipo="receita" />
++        <Rotulo>A receber neste mês</Rotulo>
++        <ListaLanc itens={aplicarFiltro(aReceberMes).sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Conclua uma ordem de serviço para gerar a cobrança automaticamente." />
++        <div className="mt-7"><Rotulo>Já recebido neste mês</Rotulo>
++          <ListaLanc itens={aplicarFiltro(recebidoMes)} vazio="Nenhum recebimento registrado neste mês." /></div>
++      </>)}
++
++      {aba === "pagar" && (<>
++        <FiltrosLancamento filtro={filtro} setFiltro={setFiltro} clientes={clientes} tipo="despesa" />
++        <Rotulo>A pagar neste mês</Rotulo>
++        <ListaLanc itens={aplicarFiltro(aPagarMes).sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Registre uma compra para gerar a conta a pagar automaticamente." />
++        <div className="mt-7"><Rotulo>Já pago neste mês</Rotulo>
++          <ListaLanc itens={aplicarFiltro(pagoMes)} vazio="Nenhum pagamento registrado neste mês." /></div>
++      </>)}
++
++      {aba === "documentos" && (
++        <DocumentosFinanceiro
++          compras={compras} lancamentos={lancamentos} clientes={clientes} ordens={ordens}
++          abrirCompra={abrirCompra} onRecibo={(l) => setRecibo(l)} />
++      )}
+ 
+-      {aba === "fluxo" && (
++      {aba === "visao" && (
+         <>
+-          <Rotulo>Previsão dos próximos 30 dias</Rotulo>
++          <Rotulo acao={
++            <div className="flex gap-1.5">
++              {[7, 30, 60].map((d) => (
++                <button key={d} type="button" onClick={() => setJanela(d)} aria-pressed={janela === d}
++                  className={cx("px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors", ring,
++                    janela === d ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600")}>
++                  {d} dias
++                </button>
++              ))}
++            </div>
++          }>Previsão dos próximos {janela} dias</Rotulo>
+           <Panel className="p-5 sm:p-6">
+             <div className="space-y-4 text-[15px]">
+               <div className="flex justify-between"><span className="text-slate-500">Saldo registrado</span><span className="font-medium tabular-nums">{brl(saldoAtual)}</span></div>
+-              <div className="flex justify-between"><span className="text-slate-500">Entradas previstas</span><span className="font-medium text-emerald-700 tabular-nums">+ {brl(soma(entradas30))}</span></div>
+-              <div className="flex justify-between"><span className="text-slate-500">Saídas previstas</span><span className="font-medium text-rose-700 tabular-nums">− {brl(soma(saidas30))}</span></div>
++              <div className="flex justify-between"><span className="text-slate-500">Entradas previstas</span><span className="font-medium text-emerald-700 tabular-nums">+ {brl(soma(entradasJanela))}</span></div>
++              <div className="flex justify-between"><span className="text-slate-500">Saídas previstas</span><span className="font-medium text-rose-700 tabular-nums">− {brl(soma(saidasJanela))}</span></div>
+               <div className="flex justify-between items-baseline pt-4 border-t border-slate-200">
+                 <span className="font-medium text-slate-700">Saldo projetado</span>
+                 <span className={cx("text-2xl font-semibold tabular-nums", projetado >= 0 ? "text-slate-900" : "text-rose-700")}>{brl(projetado)}</span>
+               </div>
+             </div>
+             <p className="text-[12.5px] text-slate-400 mt-4 leading-relaxed">
+-              {projetado >= 0 ? "Se todos os recebimentos entrarem no prazo, o mês fecha positivo." : "Atenção: pelas datas atuais, o caixa fica negativo. Antecipe recebimentos ou renegocie vencimentos."}
+-              {" "}Saldo registrado considera apenas movimentações que passaram pelo ZiisTec; contas vencidas ficam fora da previsão dos próximos 30 dias.
++              {projetado >= 0 ? "Se todos os recebimentos entrarem no prazo, o período fecha positivo." : "Atenção: pelas datas atuais, o caixa fica negativo. Antecipe recebimentos ou renegocie vencimentos."}
++              {" "}Saldo registrado considera apenas movimentações que passaram pelo ZiisTec; contas vencidas ficam fora da previsão dos próximos {janela} dias.
+             </p>
+           </Panel>
+           <div className="grid sm:grid-cols-2 gap-6 mt-6">
+-            <div><Rotulo>Entradas previstas</Rotulo><ListaLanc itens={entradas30} vazio="Nenhuma entrada prevista." /></div>
+-            <div><Rotulo>Saídas previstas</Rotulo><ListaLanc itens={saidas30} vazio="Nenhuma saída prevista." /></div>
++            <div><Rotulo>Entradas previstas</Rotulo><ListaLanc itens={entradasJanela} vazio="Nenhuma entrada prevista." /></div>
++            <div><Rotulo>Saídas previstas</Rotulo><ListaLanc itens={saidasJanela} vazio="Nenhuma saída prevista." /></div>
+           </div>
+         </>
+       )}
+ 
+-      {aba === "resultado" && (
++      {aba === "visao" && (
+         <>
++          <div className="mt-8" />
+           <Rotulo>Meu resultado em {nomeMes(mes).toLowerCase()}</Rotulo>
+           <Panel className="p-5 sm:p-6">
+             <div className="space-y-4 text-[15px]">
+@@ -4124,6 +4445,10 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
+         </>
+       )}
+ 
++      <ReciboModal
++        lanc={recibo} onClose={() => setRecibo(null)}
++        empresa={empresaDados} clientes={clientes} ordens={ordens} aviso={aviso} />
++
+       {/* baixa com forma de pagamento */}
+       {baixando && (
+         <Modal open onClose={() => setBaixando(null)} title={baixando.tipo === "receita" ? "Registrar recebimento" : "Registrar pagamento"} sub={`${baixando.descricao} · ${brl(baixando.valor)}`}>
+@@ -4185,6 +4510,214 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
+   );
+ }
+ 
++const ORIGEM_LANC = { os: "Ordem de serviço", compra: "Compra", contrato: "Contrato", orcamento: "Orçamento", manual: "Lançamento manual" };
++
++/* Filtros de leitura do financeiro. Não alteram dado nenhum: só recortam a
++   lista que a RLS já entregou para o proprietário. */
++function FiltrosLancamento({ filtro, setFiltro, clientes, tipo }) {
++  const set = (k, v) => setFiltro((f) => ({ ...f, [k]: v }));
++  const origens = tipo === "receita"
++    ? [["todas", "Todas as origens"], ["os", "Ordem de serviço"], ["contrato", "Contrato"], ["manual", "Manual"]]
++    : [["todas", "Todas as origens"], ["compra", "Compra"], ["manual", "Manual"]];
++  return (
++    <Panel className="p-4 mb-5">
++      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
++        <SearchBox value={filtro.busca} onChange={(v) => set("busca", v)} placeholder="Buscar na descrição" />
++        <Select value={filtro.status} onChange={(e) => set("status", e.target.value)} aria-label="Situação">
++          <option value="todos">Qualquer situação</option>
++          <option value="aberto">Em dia</option>
++          <option value="vencido">Vencido</option>
++          <option value="pago">{tipo === "receita" ? "Recebido" : "Pago"}</option>
++        </Select>
++        <Select value={filtro.origem} onChange={(e) => set("origem", e.target.value)} aria-label="Origem">
++          {origens.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
++        </Select>
++        {tipo === "receita" ? (
++          <Select value={filtro.clienteId} onChange={(e) => set("clienteId", e.target.value)} aria-label="Cliente">
++            <option value="">Todos os clientes</option>
++            {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
++          </Select>
++        ) : <div className="hidden lg:block" />}
++      </div>
++    </Panel>
++  );
++}
++
++/* Documentos do financeiro: reúne o que já existe — boletos/notas anexados às
++   compras (bucket privado, URL assinada) e recibos que podem ser gerados sob
++   demanda a partir das contas a receber. Nada novo é persistido em banco. */
++function DocumentosFinanceiro({ compras, lancamentos, clientes, ordens, abrirCompra, onRecibo }) {
++  const [busca, setBusca] = useState("");
++  const t = semAcento(busca);
++
++  const anexos = (compras || []).flatMap((c) => (c.anexos || []).map((a) => ({ ...a, compra: c })))
++    .filter((a) => semAcento(`${a.nome} ${a.compra.fornecedor} ${a.compra.numero}`).includes(t));
++
++  const receitas = (lancamentos || []).filter((l) => l.tipo === "receita")
++    .filter((l) => semAcento(l.descricao || "").includes(t))
++    .sort((a, b) => String(b.pagoEm || b.vencimento).localeCompare(String(a.pagoEm || a.vencimento)))
++    .slice(0, 40);
++
++  return (
++    <>
++      <div className="mb-5 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder="Buscar por fornecedor, cliente ou documento" /></div>
++
++      <Rotulo>Boletos e notas de compras</Rotulo>
++      <Panel className="divide-y divide-slate-100 overflow-hidden">
++        {anexos.length === 0 ? (
++          <Empty icon={Paperclip} title="Nenhum documento anexado" sub="Anexe o boleto ou a nota ao registrar uma compra e ele aparece aqui." />
++        ) : anexos.map((a) => (
++          <Linha key={a.id}>
++            <div className="flex items-center justify-between gap-3">
++              <div className="min-w-0 flex items-center gap-2.5">
++                <Paperclip className="w-4 h-4 text-slate-400 shrink-0" aria-hidden="true" 
