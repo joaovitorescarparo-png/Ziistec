@@ -1,0 +1,93 @@
+clienteSugerido
+-      ? clientes.filter((c) => semAcento(c.fantasia || c.nome).includes(semAcento(bruto.clienteSugerido.split(" ")[0] || ""))) : [];
+-    return { bruto, itens, clienteId: cl?.id || null, clienteSugerido: bruto.clienteSugerido, parecidos,
+-      desconto: Number(bruto.desconto) || 0, acrescimo: Number(bruto.acrescimo) || 0,
+-      validadeDias: bruto.validadeDias || empresa.validadePadrao,
+-      condicao: bruto.condicao || empresa.condicaoPadrao, obs: bruto.obs || "",
+-      localServico: bruto.localServico || "", avisos: bruto.avisos || [] };
+-  };
+-
+-  const total = previa ? Math.max(0, previa.itens.reduce((t, i) => t + i.qtd * (i.preco || 0), 0) - previa.desconto + previa.acrescimo) : 0;
+-  const faltaPreco = previa?.itens.some((i) => i.preco == null);
+-
+-  const confirmar = () => {
+-    onConfirmar({
+-      clienteId: previa.clienteId, itens: previa.itens.filter((i) => i.preco != null).map(({ precoDito, semCatalogo, ...i }) => i),
+-      desconto: previa.desconto, acrescimo: previa.acrescimo,
+-      validade: addDays(HOJE, previa.validadeDias), condicao: previa.condicao, obs: previa.obs,
+-      localServico: previa.localServico, data: HOJE, status: "rascunho",
+-    });
+-  };
+-
+-  return (
+-    <>
+-      <Modal open onClose={onClose} wide title="Orçamento por voz"
+-        sub={previa ? "Confira antes de criar. Nada é salvo sem a sua confirmação." : "Fale naturalmente o que o cliente pediu."}
+-        footer={previa ? (
+-          <>
+-            <Btn variant="ghost" onClick={() => { setPrevia(null); }}>Recomeçar</Btn>
+-            <Btn disabled={!previa.clienteId || previa.itens.length === 0 || faltaPreco} onClick={confirmar}>Confirmar e abrir orçamento</Btn>
+-          </>
+-        ) : (
+-          <>
+-            <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+-            <Btn disabled={!fala.trim() || carregando} icon={carregando ? Loader2 : Sparkles} onClick={() => interpretar(null)}>
+-              {carregando ? "Interpretando…" : "Interpretar"}
+-            </Btn>
+-          </>
+-        )}>
+-
+-        {!previa && (
+-          <>
+-            <CampoVoz valor={fala} onChange={setFala} rows={6}
+-              placeholder="Ex.: cria um orçamento para o Condomínio Jardins com duas instalações de fechadura digital, mais uma visita técnica, cem reais de desconto, validade de 15 dias, serviço na portaria"
+-              dica="Você também pode digitar." />
+-            {erro && <p className="text-[13px] text-rose-700">{erro}</p>}
+-            <p className="text-[12px] text-slate-400 leading-relaxed">
+-              A interpretação usa um serviço de IA online. Se ele estiver indisponível, monte o orçamento pela tela normal — o resultado é exatamente o mesmo tipo de orçamento.
+-            </p>
+-          </>
+-        )}
+-
+-        {previa && (
+-          <>
+-            <p className="text-[14px] font-medium text-slate-700">Entendi seu orçamento assim:</p>
+-
+-            <div className="rounded-2xl ring-1 ring-slate-200 p-4">
+-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-1.5">Cliente</p>
+-              {previa.clienteId ? (
+-                <p className="text-[15px] font-medium text-slate-900">{clientes.find((c) => c.id === previa.clienteId)?.fantasia || clientes.find((c) => c.id === previa.clienteId)?.nome}</p>
+-              ) : (
+-                <div className="space-y-3">
+-                  <p className="text-[14px] text-amber-800">Não encontrei “{previa.clienteSugerido || "o cliente"}” no seu cadastro.</p>
+-                  {previa.parecidos.length > 0 && (
+-                    <div className="space-y-1.5">
+-                      <p className="text-[12px] text-slate-500">Você quis dizer:</p>
+-                      {previa.parecidos.map((c) => (
+-                        <button key={c.id} onClick={() => setPrevia({ ...previa, clienteId: c.id })}
+-                          className={cx("w-full text-left rounded-xl ring-1 ring-slate-200 px-3.5 py-2.5 text-[14px] hover:ring-teal-500", ring)}>
+-                          {c.fantasia || c.nome}
+-                        </button>
+-                      ))}
+-                    </div>
+-                  )}
+-                  <div className="flex gap-2 flex-wrap">
+-                    <Select value="" onChange={(e) => setPrevia({ ...previa, clienteId: e.target.value })} className="max-w-[240px]">
+-                      <option value="">Escolher da lista…</option>
+-                      {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+-                    </Select>
+-                    <Btn size="sm" variant="soft" icon={Plus} onClick={() => setNovoCliente({ tipo: "PF", nome: previa.clienteSugerido || "" })}>Cadastrar novo</Btn>
+-                  </div>
+-                </div>
+-              )}
+-            </div>
+-
+-            <div className="rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100">
+-              {previa.itens.map((i, idx) => (
+-                <div key={i.id} className="p-4">
+-                  <div className="flex items-start justify-between gap-3">
+-                    <div className="min-w-0">
+-                      <p className="text-[15px] text-slate-900">{i.nome}</p>
+-                      <p className="text-[12px] text-slate-500 mt-0.5">
+-                        {i.qtd} {unidadeLabel(i.unidade)} × {i.preco != null ? brl(i.preco) : "preço não informado"}
+-            
