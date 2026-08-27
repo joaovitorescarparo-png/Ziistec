@@ -1,0 +1,71 @@
+name: Package Claude Round 2
+
+on:
+  push:
+    branches: [tmp-ignore]
+    paths:
+      - .github/workflows/package-round2.yml
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact UI branch state
+        uses: actions/checkout@v4
+        with:
+          ref: dc98b73c6ba68d09722f6a6b67b5d21d95af67f4
+          path: source
+          persist-credentials: false
+
+      - name: Add Claude instructions
+        shell: bash
+        run: |
+          cat > source/INSTRUCOES_PARA_CLAUDE_ROUND2.txt <<'EOF'
+          ZIISTEC — SEGUNDA RODADA DE MELHORIAS
+
+          Este pacote corresponde à branch ui-v1-v2-merge no commit:
+          dc98b73c6ba68d09722f6a6b67b5d21d95af67f4
+
+          LEIA PRIMEIRO, INTEGRALMENTE:
+          docs/CLAUDE_ROUND2_MEGA_PROMPT.md
+
+          OBJETIVO
+          Executar as 10 melhorias da segunda rodada preservando a direção visual já aprovada.
+
+          REGRAS
+          - Não redesenhar o ZiisTec do zero.
+          - Não criar módulo V2 paralelo.
+          - Não alterar migrations, RLS, schema Supabase ou Vercel.
+          - Não inserir secrets/service-role.
+          - Não criar nota fiscal falsa.
+          - Recibo/documento de cobrança deve dizer DOCUMENTO NÃO FISCAL.
+          - Reutilizar APIs existentes.
+          - Se faltar backend, documentar em docs/ROUND2_BACKEND_NEEDS.md.
+          - Não incluir node_modules na entrega.
+
+          ANTES DE ENTREGAR
+          npm ci
+          npm run verify:v2
+          npm run build
+
+          ENTREGUE
+          - ZIP completo do projeto alterado.
+          - CLAUDE_ROUND2_CHANGELOG.md na raiz.
+          EOF
+
+      - name: Create ZIP
+        shell: bash
+        run: |
+          cd source
+          zip -qr ../ZiisTec_Claude_Round2.zip . -x '.git/*' -x 'node_modules/*'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZiisTec_Claude_Round2
+          path: ZiisTec_Claude_Round2.zip
+          if-no-files-found: error
+          retention-days: 1
