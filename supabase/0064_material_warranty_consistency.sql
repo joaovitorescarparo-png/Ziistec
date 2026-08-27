@@ -28,8 +28,7 @@ comment on column public.work_order_materials.warranty_policy is
 comment on column public.work_order_materials.warranty_override_months is
   'Prazo customizado em meses para este material/produto somente nesta OS; owner-only.';
 
--- Técnico pode registrar material, mas não pode injetar configuração administrativa
-'tec' de garantia.
+-- Técnico pode registrar material, mas não pode injetar configuração administrativa de garantia.
 drop policy if exists p_wo_mat_insert on public.work_order_materials;
 create policy p_wo_mat_insert on public.work_order_materials
   for insert to authenticated
