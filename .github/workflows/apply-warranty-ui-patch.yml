@@ -21,7 +21,9 @@ jobs:
           node-version: '24.x'
 
       - name: Apply guarded source patch in workspace
-        run: node scripts/apply-warranty-ui-patch.mjs
+        run: |
+          node scripts/apply-warranty-ui-patch.mjs
+          node scripts/fix-warranty-ui-patch-output.mjs
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund
