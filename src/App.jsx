@@ -124,18 +124,12 @@ function SeletorEmpresa({ sessao }) {
   );
 }
 
-function AtalhoV2({ onOpen }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen("home")}
-      className="fixed bottom-5 right-5 z-[9500] rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-800"
-      title="Abrir o ZiisTec V2"
-    >
-      Abrir ZiisTec V2
-    </button>
-  );
-}
+/* ETAPA A — o ZiisTec volta a ser um só.
+   O antigo atalho flutuante "Abrir ZiisTec V2" foi removido do produto final:
+   a V2 deixa de ser um hub paralelo e passa a ser absorvida pelas abas da
+   aplicação principal. As rotas ?v2=... continuam existindo, sem entrada
+   visível, apenas para teste técnico durante a transição — e mantêm os
+   mesmos owner gates de antes. */
 
 const workspaceInicial = () => {
   if (typeof window === "undefined") return null;
@@ -195,6 +189,10 @@ export default function App() {
       sessao: { usuarioId: s.perfil.id, membresiaId: s.membresiaAtual.id },
       sair: s.sair,
       recarregar: s.recarregar,
+      /* ETAPA A — ponto de integração: as telas do shell principal podem
+         abrir um recurso V2 pontual sem sair da navegação antiga. As etapas
+         C a E usam isto para absorver as funções V2 aba por aba. */
+      abrirRecursoV2: (chave) => navegarV2(chave),
       salvarEmpresa: async (dados) => {
         const { error } = await supabase.from("companies")
           .update(paraEmpresaBanco(dados)).eq("id", s.empresaId);
@@ -262,7 +260,6 @@ export default function App() {
       <Suspense fallback={<Carregando texto="Carregando seu ambiente" />}>
         <ZiisTecApp key={contexto.chave} contexto={contexto} />
       </Suspense>
-      <AtalhoV2 onOpen={navegarV2} />
     </>
   );
 }

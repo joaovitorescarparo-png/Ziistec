@@ -6,6 +6,7 @@ export const PROD_SUPABASE_HOSTS = Object.freeze([
 
 export const STAGING_SUPABASE_HOSTS = Object.freeze([
   "ziistec-git-product-v2-review-js-connect.vercel.app",
+  "ziistec-git-ui-v1-v2-merge-js-connect.vercel.app",
 ]);
 
 export function resolverConfigSupabase({
