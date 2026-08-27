@@ -2089,8 +2089,6 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
 function Orcamentos(p) {
   const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto } = p;
   const [filtro, setFiltro] = useState("todos");
-  const [voz, setVoz] = useState(false);
-  const [rascunhoVoz, setRascunhoVoz] = useState(null);
 
   if (orcamentoAberto) {
     if (String(orcamentoAberto).startsWith("novo")) {
@@ -2100,19 +2098,13 @@ function Orcamentos(p) {
     const o = orcamentos.find((x) => x.id === orcamentoAberto);
     if (o) return <OrcamentoDoc {...p} orc={o} />;
   }
-  if (rascunhoVoz) return <OrcamentoEditor {...p} inicial={rascunhoVoz} onFechar={() => setRascunhoVoz(null)} />;
 
   const filtrados = orcamentos.filter((o) => filtro === "todos" || o.status === filtro);
 
   return (
     <>
       <PageHead title="Orçamentos" sub="Monte, envie e acompanhe a resposta do cliente."
-        action={
-          <div className="flex gap-2">
-            <Btn variant="soft" icon={Mic} onClick={() => setVoz(true)}>Por voz</Btn>
-            <Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo</Btn>
-          </div>
-        } />
+        action={<Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo orçamento</Btn>} />
       <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
         opcoes={[{ id: "todos", label: "Todos" }, { id: "rascunho", label: "Rascunhos" }, { id: "enviado", label: "Aguardando" }, { id: "aprovado", label: "Aprovados" }]} />
 
@@ -2145,201 +2137,55 @@ function Orcamentos(p) {
         </Panel>
       )}
 
-      {voz && <OrcamentoVoz {...p} onClose={() => setVoz(false)} onConfirmar={(rasc) => { setVoz(false); setRascunhoVoz(rasc); }} />}
     </>
   );
 }
 
-/* ------------------------------------------- orçamento por voz (com confirmação) */
-function OrcamentoVoz({ onClose, onConfirmar, clientes, servicos, produtos, empresa, salvarCliente, aviso }) {
-  const [fala, setFala] = useState("");
-  const [carregando, setCarregando] = useState(false);
-  const [erro, setErro] = useState(null);
-  const [previa, setPrevia] = useState(null);
-  const [comando, setComando] = useState("");
-  const [novoCliente, setNovoCliente] = useState(null);
+/* -------- interpretação por IA reaproveitada DENTRO do editor manual --------
+   A lógica de leitura da fala continua a mesma que existia na tela separada
+   de "orçamento por voz"; o que muda é o destino: em vez de gerar um documento
+   próprio, ela devolve um patch que preenche o formulário manual já aberto. */
+function interpretarParaFormulario(bruto, { clientes, servicos, produtos, empresa }) {
+  const itens = (bruto.itens || []).map((i) => {
+    const cat = i.tipo === "produto"
+      ? produtos.find((p) => p.id === i.catalogoId)
+      : servicos.find((s) => s.id === i.catalogoId);
+    const precoCatalogo = cat?.preco;
+    return {
+      id: uid(), tipo: i.tipo || "servico", catalogoId: cat?.id || null,
+      nome: cat
+        ? (i.tipo === "produto" ? `${cat.nome}${cat.marca ? " · " + cat.marca : ""}${cat.modelo ? " " + cat.modelo : ""}` : cat.nome)
+        : i.nome,
+      unidade: cat?.unidade || i.unidade || "unidade",
+      qtd: Number(i.qtd) || 1,
+      preco: i.preco != null ? Number(i.preco) : (precoCatalogo ?? 0),
+      custo: cat?.custo || 0,
+      obs: "",
+      semPreco: i.preco == null && precoCatalogo == null,
+      foraDoCatalogo: !cat,
+    };
+  });
+  const cl = clientes.find((c) => c.id === bruto.clienteId);
+  const parecidos = !cl && bruto.clienteSugerido
+    ? clientes.filter((c) => semAcento(c.fantasia || c.nome).includes(semAcento(String(bruto.clienteSugerido).split(" ")[0] || "")))
+    : [];
+  const avisos = [...(bruto.avisos || [])];
+  itens.filter((i) => i.semPreco).forEach((i) => avisos.push(`Informe o preço de "${i.nome}".`));
+  itens.filter((i) => i.foraDoCatalogo).forEach((i) => avisos.push(`"${i.nome}" não está no catálogo e entrou como item livre.`));
 
-  const interpretar = async (comandoCorrecao) => {
-    setCarregando(true); setErro(null);
-    try {
-      const bruto = await chamarIA(promptOrcamento({
-        fala, clientes, servicos, produtos,
-        rascunho: comandoCorrecao ? previa.bruto : null, comando: comandoCorrecao,
-      }));
-      setPrevia(montarPrevia(bruto));
-      setComando("");
-    } catch (e) {
-      setErro("Não consegui interpretar agora. Você pode tentar de novo ou montar o orçamento manualmente.");
-    }
-    setCarregando(false);
+  return {
+    patch: {
+      clienteId: cl?.id || null,
+      itens,
+      desconto: Number(bruto.desconto) || 0,
+      acrescimo: Number(bruto.acrescimo) || 0,
+      validade: bruto.validadeDias ? addDays(HOJE, Number(bruto.validadeDias)) : null,
+      condicao: bruto.condicao || null,
+      obs: bruto.obs || null,
+      localServico: bruto.localServico || null,
+    },
+    avisos, clienteSugerido: bruto.clienteSugerido || null, parecidos,
   };
-
-  const montarPrevia = (bruto) => {
-    const itens = (bruto.itens || []).map((i) => {
-      const cat = i.tipo === "produto" ? produtos.find((p) => p.id === i.catalogoId) : servicos.find((s) => s.id === i.catalogoId);
-      const precoCatalogo = cat?.preco;
-      return {
-        id: uid(), tipo: i.tipo || "servico", catalogoId: cat?.id || null,
-        nome: cat ? (i.tipo === "produto" ? `${cat.nome}${cat.marca ? " · " + cat.marca : ""}${cat.modelo ? " " + cat.modelo : ""}` : cat.nome) : i.nome,
-        unidade: cat?.unidade || i.unidade || "unidade",
-        qtd: Number(i.qtd) || 1,
-        preco: i.preco != null ? Number(i.preco) : (precoCatalogo ?? null),
-        custo: cat?.custo || 0,
-        precoDito: i.preco != null && precoCatalogo != null && Number(i.preco) !== precoCatalogo,
-        semCatalogo: !cat,
-      };
-    });
-    const cl = clientes.find((c) => c.id === bruto.clienteId);
-    const parecidos = !cl && bruto.clienteSugerido
-      ? clientes.filter((c) => semAcento(c.fantasia || c.nome).includes(semAcento(bruto.clienteSugerido.split(" ")[0] || ""))) : [];
-    return { bruto, itens, clienteId: cl?.id || null, clienteSugerido: bruto.clienteSugerido, parecidos,
-      desconto: Number(bruto.desconto) || 0, acrescimo: Number(bruto.acrescimo) || 0,
-      validadeDias: bruto.validadeDias || empresa.validadePadrao,
-      condicao: bruto.condicao || empresa.condicaoPadrao, obs: bruto.obs || "",
-      localServico: bruto.localServico || "", avisos: bruto.avisos || [] };
-  };
-
-  const total = previa ? Math.max(0, previa.itens.reduce((t, i) => t + i.qtd * (i.preco || 0), 0) - previa.desconto + previa.acrescimo) : 0;
-  const faltaPreco = previa?.itens.some((i) => i.preco == null);
-
-  const confirmar = () => {
-    onConfirmar({
-      clienteId: previa.clienteId, itens: previa.itens.filter((i) => i.preco != null).map(({ precoDito, semCatalogo, ...i }) => i),
-      desconto: previa.desconto, acrescimo: previa.acrescimo,
-      validade: addDays(HOJE, previa.validadeDias), condicao: previa.condicao, obs: previa.obs,
-      localServico: previa.localServico, data: HOJE, status: "rascunho",
-    });
-  };
-
-  return (
-    <>
-      <Modal open onClose={onClose} wide title="Orçamento por voz"
-        sub={previa ? "Confira antes de criar. Nada é salvo sem a sua confirmação." : "Fale naturalmente o que o cliente pediu."}
-        footer={previa ? (
-          <>
-            <Btn variant="ghost" onClick={() => { setPrevia(null); }}>Recomeçar</Btn>
-            <Btn disabled={!previa.clienteId || previa.itens.length === 0 || faltaPreco} onClick={confirmar}>Confirmar e abrir orçamento</Btn>
-          </>
-        ) : (
-          <>
-            <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-            <Btn disabled={!fala.trim() || carregando} icon={carregando ? Loader2 : Sparkles} onClick={() => interpretar(null)}>
-              {carregando ? "Interpretando…" : "Interpretar"}
-            </Btn>
-          </>
-        )}>
-
-        {!previa && (
-          <>
-            <CampoVoz valor={fala} onChange={setFala} rows={6}
-              placeholder="Ex.: cria um orçamento para o Condomínio Jardins com duas instalações de fechadura digital, mais uma visita técnica, cem reais de desconto, validade de 15 dias, serviço na portaria"
-              dica="Você também pode digitar." />
-            {erro && <p className="text-[13px] text-rose-700">{erro}</p>}
-            <p className="text-[12px] text-slate-400 leading-relaxed">
-              A interpretação usa um serviço de IA online. Se ele estiver indisponível, monte o orçamento pela tela normal — o resultado é exatamente o mesmo tipo de orçamento.
-            </p>
-          </>
-        )}
-
-        {previa && (
-          <>
-            <p className="text-[14px] font-medium text-slate-700">Entendi seu orçamento assim:</p>
-
-            <div className="rounded-2xl ring-1 ring-slate-200 p-4">
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-1.5">Cliente</p>
-              {previa.clienteId ? (
-                <p className="text-[15px] font-medium text-slate-900">{clientes.find((c) => c.id === previa.clienteId)?.fantasia || clientes.find((c) => c.id === previa.clienteId)?.nome}</p>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-[14px] text-amber-800">Não encontrei “{previa.clienteSugerido || "o cliente"}” no seu cadastro.</p>
-                  {previa.parecidos.length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="text-[12px] text-slate-500">Você quis dizer:</p>
-                      {previa.parecidos.map((c) => (
-                        <button key={c.id} onClick={() => setPrevia({ ...previa, clienteId: c.id })}
-                          className={cx("w-full text-left rounded-xl ring-1 ring-slate-200 px-3.5 py-2.5 text-[14px] hover:ring-teal-500", ring)}>
-                          {c.fantasia || c.nome}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex gap-2 flex-wrap">
-                    <Select value="" onChange={(e) => setPrevia({ ...previa, clienteId: e.target.value })} className="max-w-[240px]">
-                      <option value="">Escolher da lista…</option>
-                      {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
-                    </Select>
-                    <Btn size="sm" variant="soft" icon={Plus} onClick={() => setNovoCliente({ tipo: "PF", nome: previa.clienteSugerido || "" })}>Cadastrar novo</Btn>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100">
-              {previa.itens.map((i, idx) => (
-                <div key={i.id} className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[15px] text-slate-900">{i.nome}</p>
-                      <p className="text-[12px] text-slate-500 mt-0.5">
-                        {i.qtd} {unidadeLabel(i.unidade)} × {i.preco != null ? brl(i.preco) : "preço não informado"}
-                        {i.tipo === "produto" && " · produto"}
-                      </p>
-                      {i.precoDito && <p className="text-[12px] text-amber-700 mt-1">Preço dito por você — o catálogo não será alterado.</p>}
-                      {i.semCatalogo && <p className="text-[12px] text-amber-700 mt-1">Não está no catálogo. Entra só neste orçamento.</p>}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <p className="text-[15px] font-semibold text-slate-900 tabular-nums">{i.preco != null ? brl(i.qtd * i.preco) : "—"}</p>
-                      <button onClick={() => setPrevia({ ...previa, itens: previa.itens.filter((_, k) => k !== idx) })}
-                        aria-label={`Remover ${i.nome}`} className={cx("p-1.5 rounded-lg text-slate-300 hover:text-rose-600", ring)}><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                  {i.preco == null && (
-                    <div className="mt-3 max-w-[200px]">
-                      <Field label="Informe o preço unitário">
-                        <Input type="number" min="0" onChange={(e) => setPrevia({ ...previa, itens: previa.itens.map((x, k) => k === idx ? { ...x, preco: Number(e.target.value) } : x) })} />
-                      </Field>
-                    </div>
-                  )}
-                </div>
-              ))}
-              <div className="p-4 space-y-1.5 text-[14px]">
-                {previa.desconto > 0 && <div className="flex justify-between text-slate-500"><span>Desconto</span><span className="tabular-nums">− {brl(previa.desconto)}</span></div>}
-                {previa.acrescimo > 0 && <div className="flex justify-between text-slate-500"><span>Acréscimo</span><span className="tabular-nums">+ {brl(previa.acrescimo)}</span></div>}
-                <div className="flex justify-between items-baseline pt-2">
-                  <span className="font-medium text-slate-700">Total</span>
-                  <span className="text-2xl font-semibold text-slate-900 tabular-nums">{brl(total)}</span>
-                </div>
-                <p className="text-[12px] text-slate-400 pt-1">Validade de {previa.validadeDias} dias · {previa.condicao}</p>
-                {previa.localServico && <p className="text-[12px] text-slate-400">Local do serviço: {previa.localServico}</p>}
-                {previa.obs && <p className="text-[12px] text-slate-400">Observações: {previa.obs}</p>}
-              </div>
-            </div>
-
-            {previa.avisos.length > 0 && (
-              <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 p-3.5 space-y-1">
-                {previa.avisos.map((a, i) => <p key={i} className="text-[13px] text-amber-900">{a}</p>)}
-              </div>
-            )}
-
-            <div>
-              <Field label="Quer corrigir algo? Fale ou escreva a correção">
-                <Input value={comando} onChange={(e) => setComando(e.target.value)} placeholder="Ex.: muda para três fechaduras e tira a visita técnica" />
-              </Field>
-              <div className="flex gap-2 mt-2">
-                <Btn size="sm" variant="soft" disabled={!comando.trim() || carregando} icon={carregando ? Loader2 : Sparkles} onClick={() => interpretar(comando)}>
-                  {carregando ? "Aplicando…" : "Aplicar correção"}
-                </Btn>
-              </div>
-              {erro && <p className="text-[13px] text-rose-700 mt-2">{erro}</p>}
-            </div>
-          </>
-        )}
-      </Modal>
-
-      <ClienteForm form={novoCliente} setForm={setNovoCliente} onSave={salvarCliente}
-        onSaved={(id) => id && setPrevia((pv) => ({ ...pv, clienteId: id }))} />
-    </>
-  );
 }
 
 /* -------------------------------------------------------- documento do orçamento */
@@ -2515,8 +2361,18 @@ function OrcamentoDoc(p) {
 
 /* -------------------------------------------------------------- editor de orçamento */
 function OrcamentoEditor(p) {
-  const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente, inicial, onFechar, cliente } = p;
+  const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente,
+    salvarServico, salvarProduto, inicial, onFechar, cliente, aviso } = p;
   const [novoCliente, setNovoCliente] = useState(false);
+  const [cadastroRapido, setCadastroRapido] = useState(null);   // "servico" | "produto"
+  /* IA e voz são auxiliares: preenchem este mesmo formulário e nada é salvo
+     sem o usuário revisar e clicar em criar/salvar. */
+  const [iaAberta, setIaAberta] = useState(false);
+  const [iaTexto, setIaTexto] = useState("");
+  const [iaOcupada, setIaOcupada] = useState(false);
+  const [iaErro, setIaErro] = useState(null);
+  const [iaAvisos, setIaAvisos] = useState([]);
+  const [iaSugestoes, setIaSugestoes] = useState([]);
   const [d, setD] = useState(() => ({
     id: inicial?.id, numero: inicial?.numero, clienteId: inicial?.clienteId || "",
     status: inicial?.status || "rascunho", data: inicial?.data || HOJE,
@@ -2548,6 +2404,58 @@ function OrcamentoEditor(p) {
   const upItem = (id, k, v) => setD((s) => ({ ...s, itens: s.itens.map((i) => (i.id === id ? { ...i, [k]: v } : i)) }));
   const rmItem = (id) => setD((s) => ({ ...s, itens: s.itens.filter((i) => i.id !== id) }));
 
+  /* Preenche o formulário aberto a partir do que foi falado/digitado.
+     Acrescenta itens em vez de descartar o que já existe, e só sobrescreve
+     um campo quando a fala trouxe informação para ele. */
+  const preencherComIA = async () => {
+    if (!iaTexto.trim()) return;
+    setIaOcupada(true); setIaErro(null); setIaAvisos([]); setIaSugestoes([]);
+    try {
+      const bruto = await chamarIA(promptOrcamento({ fala: iaTexto, clientes, servicos, produtos }));
+      const { patch, avisos, clienteSugerido, parecidos } =
+        interpretarParaFormulario(bruto, { clientes, servicos, produtos, empresa });
+
+      setD((st) => {
+        const proximo = { ...st, itens: [...st.itens, ...patch.itens.map(({ semPreco, foraDoCatalogo, ...i }) => i)] };
+        if (patch.clienteId && !st.clienteId) {
+          proximo.clienteId = patch.clienteId;
+          proximo.local = clientes.find((x) => x.id === patch.clienteId)?.endereco || st.local;
+        }
+        if (patch.desconto) proximo.desconto = patch.desconto;
+        if (patch.acrescimo) proximo.acrescimo = patch.acrescimo;
+        if (patch.validade) proximo.validade = patch.validade;
+        if (patch.condicao) proximo.condicao = patch.condicao;
+        if (patch.localServico) proximo.localServico = patch.localServico;
+        if (patch.obs) proximo.obs = st.obs && st.obs !== empresa.observacaoPadrao ? `${st.obs}\n${patch.obs}` : patch.obs;
+        return proximo;
+      });
+
+      const recados = [...avisos];
+      if (!patch.clienteId && clienteSugerido) recados.push(`Não encontrei "${clienteSugerido}" no cadastro. Selecione o cliente ou cadastre um novo.`);
+      setIaAvisos(recados);
+      setIaSugestoes(parecidos.slice(0, 4));
+      setIaTexto("");
+      aviso?.("Formulário preenchido. Revise antes de salvar.");
+    } catch (e) {
+      setIaErro("Não consegui interpretar agora. Continue preenchendo normalmente — o orçamento manual não depende da IA.");
+    }
+    setIaOcupada(false);
+  };
+
+  /* Cadastro rápido sem sair do orçamento: salva no catálogo e já usa o item. */
+  const cadastrarServicoRapido = async (dados) => {
+    const id = await salvarServico({ ...dados, ativo: true });
+    if (!id) return;
+    addServico({ ...dados, id });
+    setCadastroRapido(null);
+  };
+  const cadastrarProdutoRapido = async (dados) => {
+    const id = await salvarProduto({ ...dados, ativo: true });
+    if (!id) return;
+    addProduto({ ...dados, id });
+    setCadastroRapido(null);
+  };
+
   const dispS = servicos.filter((s) => s.ativo && semAcento(s.nome).includes(semAcento(buscaCat)));
   const dispP = produtos.filter((x) => x.ativo && semAcento(`${x.nome} ${x.marca} ${x.modelo}`).includes(semAcento(buscaCat)));
 
@@ -2556,7 +2464,48 @@ function OrcamentoEditor(p) {
       <button onClick={onFechar} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
         <ArrowLeft className="w-4 h-4" /> Voltar
       </button>
-      <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche." />
+      <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche."
+        action={
+          <Btn variant="soft" icon={Sparkles} onClick={() => setIaAberta((v) => !v)}>
+            {iaAberta ? "Fechar assistente" : "Preencher com IA / voz"}
+          </Btn>
+        } />
+
+      {iaAberta && (
+        <Panel className="p-5 mb-6">
+          <Rotulo>Assistente · opcional</Rotulo>
+          <p className="text-[13px] text-slate-500 mb-3 leading-relaxed">
+            Fale ou escreva o pedido do cliente. O ZiisTec preenche os campos abaixo e você continua editando tudo à mão.
+          </p>
+          <CampoVoz rows={3} valor={iaTexto} onChange={setIaTexto}
+            placeholder="Ex.: orçamento para o Condomínio Jardins com duas fechaduras digitais, uma visita técnica, cem reais de desconto e pagamento no Pix" />
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <Btn size="sm" icon={iaOcupada ? Loader2 : Sparkles} disabled={!iaTexto.trim() || iaOcupada} onClick={preencherComIA}>
+              {iaOcupada ? "Interpretando…" : "Preencher formulário"}
+            </Btn>
+            <span className="text-[12px] text-slate-400">Nada é salvo sem a sua confirmação.</span>
+          </div>
+          {iaErro && <p className="text-[13px] text-rose-700 mt-3">{iaErro}</p>}
+          {iaAvisos.length > 0 && (
+            <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 p-3.5 mt-3 space-y-1">
+              {iaAvisos.map((a, i) => <p key={i} className="text-[13px] text-amber-900">{a}</p>)}
+            </div>
+          )}
+          {iaSugestoes.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[12px] text-slate-500 mb-1.5">Você quis dizer:</p>
+              <div className="flex flex-wrap gap-2">
+                {iaSugestoes.map((c) => (
+                  <button key={c.id} onClick={() => { escolherCliente(c.id); setIaSugestoes([]); }}
+                    className={cx("rounded-xl ring-1 ring-slate-200 px-3 py-2 text-[13px] hover:ring-teal-500", ring)}>
+                    {c.fantasia || c.nome}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </Panel>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         <div className="lg:col-span-2 space-y-7">
@@ -2608,6 +2557,11 @@ function OrcamentoEditor(p) {
                       </button>))}
                   {(abaCat === "servicos" ? dispS : dispP).length === 0 && <p className="text-[13px] text-slate-400 py-1">Nada encontrado com esse nome.</p>}
                 </div>
+                {/* o que ainda não está no catálogo pode ser cadastrado aqui mesmo */}
+                <button onClick={() => setCadastroRapido(abaCat === "servicos" ? "servico" : "produto")}
+                  className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
+                  + Cadastrar {abaCat === "servicos" ? "serviço" : "produto"} no catálogo
+                </button>
                 </>)}
               </div>
 
@@ -2692,8 +2646,70 @@ function OrcamentoEditor(p) {
       </div>
 
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={(novo) => { const id = salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
+
+      <CadastroRapidoCatalogo
+        tipo={cadastroRapido}
+        onClose={() => setCadastroRapido(null)}
+        onSalvar={cadastroRapido === "servico" ? cadastrarServicoRapido : cadastrarProdutoRapido}
+      />
     </>
+  );
+}
+
+/* Cadastro rápido de serviço/produto sem sair do orçamento. Só o essencial;
+   o cadastro completo continua em "Serviços e produtos". */
+function CadastroRapidoCatalogo({ tipo, onClose, onSalvar }) {
+  const serv = tipo === "servico";
+  const vazio = { nome: "", categoria: "", marca: "", modelo: "", unidade: "unidade", preco: 0, custo: 0, descricao: "" };
+  const [f, setF] = useState(vazio);
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => { if (tipo) setF(vazio); }, [tipo]);
+  if (!tipo) return null;
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+
+  return (
+    <Modal open onClose={onClose} wide
+      title={serv ? "Cadastrar serviço" : "Cadastrar produto"}
+      sub="Fica salvo no catálogo e entra neste orçamento."
+      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn disabled={!f.nome.trim() || ocupado} onClick={async () => {
+          setOcupado(true);
+          await onSalvar(serv
+            ? { nome: f.nome.trim(), categoria: f.categoria.trim(), descricao: f.descricao, unidade: f.unidade,
+                preco: num(f.preco), custo: num(f.custo), garantiaDias: 0, retornoDias: 0 }
+            : { nome: f.nome.trim(), marca: f.marca.trim(), modelo: f.modelo.trim(), descricao: f.descricao,
+                unidade: f.unidade, preco: num(f.preco), custo: num(f.custo), garantiaMeses: 0 });
+          setOcupado(false);
+        }}>{ocupado ? "Salvando…" : "Salvar e adicionar"}</Btn></>}>
+      <Field label={serv ? "Nome do serviço" : "Nome do produto"}>
+        <Input value={f.nome} onChange={(e) => set("nome", e.target.value)} autoFocus
+          placeholder={serv ? "Ex.: Instalação de fechadura digital" : "Ex.: Fechadura digital biométrica"} />
+      </Field>
+      {serv ? (
+        <Field label="Categoria"><Input value={f.categoria} onChange={(e) => set("categoria", e.target.value)} placeholder="Ex.: Controle de acesso" /></Field>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Marca"><Input value={f.marca} onChange={(e) => set("marca", e.target.value)} /></Field>
+          <Field label="Modelo"><Input value={f.modelo} onChange={(e) => set("modelo", e.target.value)} /></Field>
+        </div>
+      )}
+      <div className="grid sm:grid-cols-3 gap-5">
+        <Field label="Unidade">
+          <Select value={f.unidade} onChange={(e) => set("unidade", e.target.value)}>
+            {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => set("preco", num(e.target.value))} /></Field>
+        <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => set("custo", num(e.target.value))} /></Field>
+      </div>
+      <Field label="Descrição" hint="Opcional.">
+        <CampoVoz rows={2} valor={f.descricao} onChange={(v) => set("descricao", v)} placeholder="O que está incluso" />
+      </Field>
+      <p className="text-[12px] text-slate-400 leading-relaxed">
+        Garantia, retorno e estoque continuam disponíveis no cadastro completo em "Serviços e produtos".
+      </p>
+    </Modal>
   );
 }
 
@@ -2932,7 +2948,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
       </Modal>
 
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={(novo) => { const id = salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
     </>
   );
 }
