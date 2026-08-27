@@ -47,6 +47,9 @@ export function mensagemErro(erro) {
   }
   if (codigo === "23505") return "Esse registro já existe.";
   if (codigo === "23503") return "Há um vínculo pendente que impede esta operação.";
+  if (codigo === "PGRST201" || /more than one relationship|could not embed/i.test(texto)) {
+    return "O registro pode ter sido salvo, mas não foi possível recarregá-lo. Atualize a tela antes de tentar novamente.";
+  }
   if (codigo === "PGRST301" || texto.includes("JWT")) {
     return "Sua sessão expirou. Entre novamente.";
   }
