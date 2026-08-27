@@ -1,0 +1,360 @@
+diff --git a/CLAUDE_ROUND2_CHANGELOG.md b/CLAUDE_ROUND2_CHANGELOG.md
+new file mode 100644
+index 0000000..c669806
+--- /dev/null
++++ b/CLAUDE_ROUND2_CHANGELOG.md
+@@ -0,0 +1,161 @@
++# ZiisTec — Changelog da Rodada 2
++
++Base: branch `ui-v1-v2-merge`, commit `dc98b73c6ba68d09722f6a6b67b5d21d95af67f4`.
++
++Nenhuma migration, policy, RLS, schema Supabase ou configuração da Vercel foi
++alterada. Nenhum secret ou service role entrou no frontend. Nenhum documento
++fiscal foi criado.
++
++---
++
++## Arquivos alterados
++
++| Arquivo | O que mudou |
++|---|---|
++| `src/legacy/ZiisTecApp.jsx` | Orçamento (pós-criação, barra fixa, quantidade, cadastro rápido com garantia), finalização da OS (garantias previstas e resultado), garantia (leitura), financeiro (4 abas, documentos, recibo) |
++| `src/lib/reciboPdf.js` | **Novo.** Recibo/documento de cobrança não fiscal em PDF, gerado no navegador com `pdf-lib` (dependência já existente) |
++| `scripts/verify-consolidated-source.mjs` | Apenas o pin de hash do arquivo consolidado. O guard continua ativo |
++| `docs/ROUND2_BACKEND_NEEDS.md` | **Novo.** Necessidade de backend que não pôde ser feita sem migration |
++| `CLAUDE_ROUND2_CHANGELOG.md` | **Novo.** Este arquivo |
++
++---
++
++## O que foi implementado
++
++**1. Pós-criação do orçamento.** Ao criar, nada é baixado automaticamente. Uma
++confirmação mostra `ORC-XXXX criado` com quatro ações: `Ver orçamento`,
++`Gerar PDF`, `Enviar pelo WhatsApp` e `Continuar depois`. O PDF continua vindo do
++registro persistido, por `baixarOrcamentoPDF`/`compartilharOrcamentoPDF`, e o
++WhatsApp reutiliza a lógica que já existia. A confirmação é renderizada pela
++tela de Orçamentos, não pelo editor: `salvarOrcamento` já navega para o
++documento e desmontaria o editor antes do modal aparecer.
++
++**2. Resumo e ação no celular/tablet.** Barra inferior fixa (`lg:hidden`) com o
++total do orçamento e o botão principal, sempre ao alcance do polegar. Nenhum
++campo foi escondido; a coluna de resumo do desktop continua igual.
++
++**3. Itens mais rápidos.** Quantidade com `−`/`+` de 44px ao lado do campo
++numérico, preço de venda editável, remoção por item e `Item livre` preservado.
++
++**4. Cadastro rápido com garantia.** Serviço e produto ganharam
++`Tem garantia? Sim/Não`; em Sim, atalhos (30/60/90/180/365 dias para serviço,
++3/6/12/24/36 meses para produto) e campo personalizado. O prazo é gravado em
++`garantiaDias`/`garantiaMeses`, os mesmos campos do cadastro completo. O custo só
++aparece para quem tem `verValores` — técnico não vê. Após salvar, o item entra
++no orçamento imediatamente.
++
++**5. Finalização da OS mais clara.** O resumo agora mostra relato, materiais,
++fotos, adicionais, pendência, **garantias deste atendimento** e o valor a
++receber, seguido de `Finalizado` / `Precisa retornar` / `Não finalizado`.
++`Precisa retornar` conclui e registra a pendência; `Não finalizado` salva relato,
++fotos e pendência sem concluir nada. O RPC de finalização não foi tocado. Para o
++técnico, o resumo continua sem custo, margem ou valores.
++
++**6. Garantias na OS.** A prévia mostra item, origem (serviço ou fabricante),
++prazo e data final calculada a partir da data de execução — a mesma regra que o
++backend aplica. Itens com prazo zero não geram garantia; atendimento em garantia
++não gera nova. **Desativar ou alterar o prazo só para aquela OS não foi
++implementado**: o contrato do RPC não aceita, e criar migration era proibido. Ver
++`docs/ROUND2_BACKEND_NEEDS.md`.
++
++**7. Leitura da garantia.** O detalhe passou a exibir origem e tempo restante,
++somados aos campos que já existiam: cliente, local, data inicial, data final,
++prazo, série, OS de origem e status Ativa/Expirada. `Gerar orçamento pago` para
++garantia expirada foi preservado.
++
++**8. Responsividade.** Melhorias restritas às áreas tocadas: barra fixa no
++orçamento, botões de quantidade e de resultado com área de toque confortável,
++modais com rolagem adequada. Paleta, sidebar e identidade intactas.
++
++**9. Financeiro operacional.** Reorganizado em `Visão geral`, `A receber`,
++`A pagar` e `Documentos`. A Visão geral reúne os indicadores do mês, o fluxo
++projetado e o resultado com margem por OS — todos calculados a partir de
++`financial_entries` e das OS reais, sem número inventado. `A receber` e `A pagar`
++mostram em aberto e já baixado no mesmo lugar. `Documentos` lista os boletos e
++notas anexados às compras, usando `purchase.anexos` com URL assinada do bucket
++privado `zt-documents` que já existia, e as cobranças que podem virar recibo.
++
++**10. Recibo não fiscal.** Nova ação em cada receita (`Recibo`) e na aba
++Documentos. O PDF traz logo quando houver, dados da empresa e do cliente, número
++do documento, OS de origem, itens, valor, vencimento ou data de pagamento, forma,
++observações ditáveis por voz e data de emissão — com **DOCUMENTO NÃO FISCAL** em
++destaque e a frase "não substitui nota fiscal". Gerado no navegador com
++`pdf-lib`; nenhum endpoint, bucket ou tabela nova. A área traz o aviso
++`Nota fiscal: integração ainda não configurada`, sem botão falso e sem chamada
++externa.
++
++---
++
++## Complemento: addendum financeiro (`docs/CLAUDE_ROUND2_FINANCE_ADDENDUM.md`)
++
++Depois das 10 melhorias, completei os pontos do addendum que ainda faltavam.
++Tudo em cima de `financial_entries`, `purchases` e das OS que já existiam.
++
++- **Fluxo de caixa 7 / 30 / 60 dias** (item F): a janela virou um seletor. Antes
++  era fixa em 30. Contas vencidas continuam fora da previsão e aparecem em
++  "Em atraso", para não inflar o projetado.
++- **Receber hoje / Pagar hoje** (item F): faixa no topo da Visão geral, exibida
++  só quando há algo vencendo hoje, com atalho para a aba correspondente.
++- **Filtros em A receber e A pagar** (itens A e B): busca na descrição, situação
++  (em dia, vencido, pago/recebido), origem (OS, contrato, compra, manual) e
++  cliente. São filtros de leitura: recortam a lista que a RLS já entregou, sem
++  alterar nada.
++- **Origem visível na linha** (itens A e B): cada lançamento mostra se veio de
++  ordem de serviço, compra, contrato ou lançamento manual, além do cliente.
++- **Cobrança por WhatsApp** (item A): ação rápida em contas a receber em aberto,
++  com valor e vencimento na mensagem. Aparece só quando o cliente tem telefone.
++- **Situação fiscal explícita** (item E): o recibo declara
++  "Situação fiscal: não emitida · integração com provedor de NFS-e ainda não
++  configurada". Nenhum botão de emissão, nenhuma chamada externa, nenhum status
++  fiscal inventado.
++
++### Correção encontrada pelos testes
++
++Ao trocar a janela fixa de 30 dias pelo seletor, duas referências a
++`entradas30`/`saidas30` ficaram órfãs no bloco de fluxo de caixa. O `vite build`
++passava — é JSX válido —, mas a aba quebrava em tempo de execução com
++`ReferenceError`. Os testes de comportamento pegaram e a referência foi
++corrigida. Vale como lembrete de que build verde não é o mesmo que tela
++funcionando.
++
++---
++
++## O que foi testado
++
++- `npm ci`, `npm run verify:v2` e `npm run build`: todos verdes, incluindo a
++  reexecução a partir do ZIP extraído em pasta limpa.
++- Nove testes de comportamento (Testing Library), todos passando:
++  1. criar orçamento oferece PDF/WhatsApp sem baixar sozinho, e a quantidade tem
++     `−`/`+`;
++  2. cadastro rápido aceita garantia sem sair do orçamento;
++  3. financeiro tem as quatro abas e a aba Documentos lista o boleto da compra;
++  4. o recibo se identifica como não fiscal e não simula NFS-e;
++  5. técnico continua sem Financeiro, Compras, Clientes e Orçamentos;
++  6. fluxo de caixa alterna entre 7, 30 e 60 dias;
++  7. A receber tem filtros de situação, origem e cliente;
++  8. a origem do lançamento aparece na linha;
++  9. o recibo declara situação fiscal sem simular emissão.
++
++**Não testado:** navegador real, celular e tablet físicos, e o Supabase de
++homologação — não tenho acesso a eles neste ambiente.
++
++---
++
++## Correção incidental
++
++`salvarOrcamento` não devolvia o id no modo demonstração, o que impediria a
++confirmação pós-criação de funcionar fora do ambiente conectado. Passou a
++devolver nos dois modos.
++
++
++---
++
++## Revisão de integração ChatGPT/OpenAI antes do deploy
++
++Antes de publicar a Rodada 2 na branch visual, a integração foi revisada de forma independente. Foram corrigidos três pontos sem alterar Supabase, migrations, RLS ou Vercel:
++
++1. **Salvar sem concluir:** quando o fechamento parcial incluía fotos junto com relato/pendência, o autosave persistia somente as fotos. O fluxo agora persiste as fotos e os demais campos na mesma ação. A interface também deixou de afirmar que materiais/adicionais são salvos antes da conclusão, pois o contrato atual só os registra na finalização.
++2. **Precisa retornar:** o resultado operacional já existia na interface, mas `work_orders.needs_return` não era gravado no caminho conectado. Agora o campo é atualizado antes da RPC de finalização, usando a permissão operacional já existente da OS.
++3. **Recibo x cobrança:** lançamento pago gera **RECIBO**; lançamento em aberto gera **DOCUMENTO DE COBRANÇA**. Os dois continuam identificados como **DOCUMENTO NÃO FISCAL** e não simulam NFS-e.
++
++Os guards `verify:v2` foram reexecutados após as correções. O build final fica como gate obrigatório da Vercel antes de disponibilizar o preview.
+diff --git a/docs/ROUND2_BACKEND_NEEDS.md b/docs/ROUND2_BACKEND_NEEDS.md
+new file mode 100644
+index 0000000..f338304
+--- /dev/null
++++ b/docs/ROUND2_BACKEND_NEEDS.md
+@@ -0,0 +1,62 @@
++# ZiisTec — necessidades de backend identificadas na Rodada 2
++
++Nenhuma migration, policy, RLS ou schema foi alterado nesta rodada. O item abaixo
++foi implementado até onde o contrato atual permite e está documentado aqui para
++revisão posterior.
++
++---
++
++## 1. Override de garantia por ordem de serviço
++
++**Pedido (item 6 do mega prompt):** antes de concluir a OS, permitir desativar a
++garantia daquele atendimento específico ou alterar o prazo somente para aquela
++OS, sem mudar o prazo padrão do catálogo.
++
++**Por que não foi feito:** a finalização usa a RPC
++`zt_finalize_work_order_atomic`, chamada em `src/lib/dataApi.js`
++(`finalizarOSDB`). O contrato aceita apenas:
++
++```
++p_wo, p_report, p_pending, p_extra_cost, p_due_days, p_materials, p_additions
++```
++
++Não há parâmetro para garantias. A criação das garantias acontece dentro da RPC,
++a partir de `services.warranty_days` e `products.warranty_months`. Um override
++por OS exigiria alterar a assinatura da função no banco — ou seja, migration.
++
++**O que foi entregue no lugar:** antes da confirmação final, a OS mostra a seção
++**Garantias deste atendimento** com o que será registrado — item, origem
++(serviço ou fabricante), prazo e data final calculada a partir da data de
++execução. É a mesma regra que o backend aplica, exibida para conferência, com a
++indicação de que o prazo vem do catálogo e pode ser ajustado lá antes de
++concluir. Itens com prazo zero continuam sem gerar garantia. Atendimento em
++garantia continua sem gerar nova garantia.
++
++**Menor mudança necessária, se for aprovada depois:**
++
++- acrescentar um parâmetro opcional `p_warranties jsonb default null` a
++  `zt_finalize_work_order_atomic`;
++- formato sugerido:
++  `[{ "item_id": uuid, "enabled": bool, "days": int|null, "months": int|null }]`;
++- quando `null`, manter exatamente o comportamento atual (compatível com o app
++  como está hoje);
++- quando presente, aplicar override apenas naquela OS, sem tocar em
++  `services.warranty_days` nem em `products.warranty_months`;
++- validar dentro da função que o item pertence à OS e à empresa do chamador,
++  preservando as checagens de autorização já existentes.
++
++Enquanto isso não existir, o caminho para mudar um prazo continua sendo editar o
++item em "Serviços e produtos" antes de concluir a ordem.
++
++---
++
++## 2. Observações sem impacto nesta rodada
++
++- **Recibo/documento de cobrança:** foi gerado no navegador com `pdf-lib`, que já
++  era dependência do projeto. Não foi criado endpoint, bucket nem tabela. Se no
++  futuro o recibo precisar ser arquivado, aí sim será necessário decidir onde
++  persistir (provável reuso de `attachments` + `zt-documents`).
++- **Documentos de compra:** reaproveitados de `purchase.anexos`, que já chegam
++  com URL assinada do bucket privado `zt-documents`. Nenhum storage novo.
++- **NFS-e:** apenas o aviso "integração ainda não configurada". Nenhum botão
++  falso, nenhuma chamada externa, nenhum certificado solicitado.
+diff --git a/scripts/verify-consolidated-source.mjs b/scripts/verify-consolidated-source.mjs
+index 5cf3f0f..750a3dc 100644
+--- a/scripts/verify-consolidated-source.mjs
++++ b/scripts/verify-consolidated-source.mjs
+@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
+ import { createHash } from 'node:crypto';
+ 
+ const file = 'src/legacy/ZiisTecApp.jsx';
+-const expected = '12b679ec1af62963d1d1022d63619a31e2112a57e34d45ade6e724d6b949b7e3';
++const expected = '3f2a8c4a30920b83090fcff36183a61ce8ab1867fb55051967a3871bbcefa7f1';
+ const content = readFileSync(file);
+ const actual = createHash('sha256').update(content).digest('hex');
+ if (actual !== expected) {
+diff --git a/src/legacy/ZiisTecApp.jsx b/src/legacy/ZiisTecApp.jsx
+index 99f2748..cbbce09 100644
+--- a/src/legacy/ZiisTecApp.jsx
++++ b/src/legacy/ZiisTecApp.jsx
+@@ -1,5 +1,6 @@
+ import React, { useState, useRef, useEffect } from "react";
+ import { baixarOrcamentoPDF, compartilharOrcamentoPDF, suportaCompartilharArquivo } from "../lib/quotePdf";
++import { baixarReciboPDF, compartilharReciboPDF, suportaCompartilharRecibo } from "../lib/reciboPdf";
+ import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";
+ import {
+   LayoutDashboard, CalendarDays, Users, Wrench, FileText, ClipboardList,
+@@ -805,8 +806,9 @@ export default function ZiisTec({ contexto }) {
+         aviso(o.id ? "Orçamento salvo" : `${salvo.numero} criado`); setOrcamentoAberto(salvo.id); return salvo.id;
+       } catch (e) { aviso(mensagemErro(e)); return null; }
+     }
+-    if (o.id) { setOrcamentos((l) => l.map((x) => (x.id === o.id ? o : x))); aviso("Orçamento salvo"); setOrcamentoAberto(o.id); }
+-    else { const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, osId: null }; setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado`); setOrcamentoAberto(novo.id); }
++    if (o.id) { setOrcamentos((l) => l.map((x) => (x.id === o.id ? o : x))); aviso("Orçamento salvo"); setOrcamentoAberto(o.id); return o.id; }
++    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, osId: null };
++    setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado`); setOrcamentoAberto(novo.id); return novo.id;
+   };
+   /* duplicar: copia cliente, itens e condições; não leva aprovação, OS nem número */
+   const duplicarOrcamento = async (o) => {
+@@ -879,6 +881,9 @@ export default function ZiisTec({ contexto }) {
+       try {
+         const alvo = ordens.find((o) => o.id === osId);
+         if (!alvo) throw new Error("Ordem de serviço não encontrada");
++        if (Object.prototype.hasOwnProperty.call(extras, "precisaRetornar")) {
++          await atualizarOSDB(osId, { needs_return: Boolean(extras.precisaRetornar) });
++        }
+         const preparado = await prepararFinalizacaoOSDB(alvo, extras, empresaId, usuarioAtual?.id, papel);
+         extras = { ...extras, ...preparado };
+         await finalizarOSDB(osId,extras);
+@@ -2087,16 +2092,29 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
+ 
+ /* ============================================================== Orçamentos */
+ function Orcamentos(p) {
+-  const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto } = p;
++  const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto, empresa, cliente, aviso, mudarStatusOrc } = p;
+   const [filtro, setFiltro] = useState("todos");
++  const [criado, setCriado] = useState(null);
++
++  const confirmacao = (
++    <OrcamentoCriado
++      id={criado} orcamentos={orcamentos} empresa={empresa} cliente={cliente}
++      aviso={aviso} mudarStatusOrc={mudarStatusOrc}
++      onVer={() => { setOrcamentoAberto(criado); setCriado(null); }}
++      onDepois={() => setCriado(null)}
++    />
++  );
+ 
+   if (orcamentoAberto) {
+     if (String(orcamentoAberto).startsWith("novo")) {
+       const preCliente = String(orcamentoAberto).split(":")[1] || "";
+-      return <OrcamentoEditor {...p} inicial={{ clienteId: preCliente }} onFechar={() => setOrcamentoAberto(null)} />;
++      return <>
++        <OrcamentoEditor {...p} inicial={{ clienteId: preCliente }} onOrcamentoCriado={setCriado} onFechar={() => setOrcamentoAberto(null)} />
++        {confirmacao}
++      </>;
+     }
+     const o = orcamentos.find((x) => x.id === orcamentoAberto);
+-    if (o) return <OrcamentoDoc {...p} orc={o} />;
++    if (o) return <><OrcamentoDoc {...p} orc={o} />{confirmacao}</>;
+   }
+ 
+   const filtrados = orcamentos.filter((o) => filtro === "todos" || o.status === filtro);
+@@ -2373,6 +2391,7 @@ function OrcamentoEditor(p) {
+   const [iaErro, setIaErro] = useState(null);
+   const [iaAvisos, setIaAvisos] = useState([]);
+   const [iaSugestoes, setIaSugestoes] = useState([]);
++  const [salvando, setSalvando] = useState(false);
+   const [d, setD] = useState(() => ({
+     id: inicial?.id, numero: inicial?.numero, clienteId: inicial?.clienteId || "",
+     status: inicial?.status || "rascunho", data: inicial?.data || HOJE,
+@@ -2442,6 +2461,21 @@ function OrcamentoEditor(p) {
+     setIaOcupada(false);
+   };
+ 
++  /* Salva e, quando é um orçamento novo, oferece os próximos passos em vez de
++     sair da tela ou baixar PDF sem o usuário pedir. */
++  const salvarEDecidir = async () => {
++    if (!d.clienteId || d.itens.length === 0 || salvando) return;
++    setSalvando(true);
++    const edicao = Boolean(d.id);
++    const id = await salvarOrcamento(d);
++    setSalvando(false);
++    if (!id) return;                     // erro já foi avisado por salvarOrcamento
++    if (edicao) { onFechar(); return; }
++    /* pós-criação: o registro já está salvo e a tela de Orçamentos abre as
++       próximas ações. Nada é baixado automaticamente. */
++    p.onOrcamentoCriado?.(id);
++  };
++
+   /* Cadastro rápido sem sair do orçamento: salva no catálogo e já usa o item. */
+   const cadastrarServicoRapido = async (dados) => {
+     const id = await salvarServico({ ...dados, ativo: true });
+@@ -2586,7 +2620,17 @@ function OrcamentoEditor(p) {
+                           className={cx("p-1.5 -m-1 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 shrink-0", ring)}><Trash2 className="w-4 h-4" /></button>
+                       </div>
+                       <div className="grid grid-cols-3 gap-3 sm:gap-4 items-end">
+-                        <Field label={`Qtd em ${unidadeLabel(i.unidade)}`}><Input type="number" min="0" step="0.5" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", num(e.target.value))} /></Field>
++                        <Field label={`Qtd em ${unidadeLabel(i.unidade)}`}>
++                          <div className="flex items-stretch gap-1.5">
++                            <button type="button" aria-label={`Diminuir quantidade de ${i.nome}`}
++                              onClick={() => upItem(i.id, "qtd", Math.max(0, num(i.qtd) - 1))}
++                              className={cx("w-11 shrink-0 rounded-xl ring-1 ring-slate-200 text-slate-600 text-lg leading-none hover:bg-slate-50", ring)}>−</button>
++                            <Input type="number" min="0" step="0.5" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", num(e.target.value))} className="text-center" />
++                            <button type="button" aria-label={`Aumentar quantidade de ${i.nome}`}
++                              onClick={() => upItem(i.id, "qtd", num(i.qtd) + 1)}
++                              className={cx("w-11 shrink-0 rounded-xl ring-1 ring-slate-200 text-slate-600 text-lg leading-none hover:bg-slate-50", ring)}>+</button>
++                          </div>
++                        
