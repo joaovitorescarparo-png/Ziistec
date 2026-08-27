@@ -1,0 +1,63 @@
+name: Package Claude Handoff
+
+on:
+  push:
+    branches:
+      - tmp-ignore
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Add handoff instructions
+        shell: bash
+        run: |
+          cat > INSTRUCOES_PARA_CLAUDE.txt <<'EOF'
+          ZIISTEC — PACOTE DE TRABALHO PARA CLAUDE
+
+          Fonte original: branch ui-v1-v2-merge
+          Commit base: 94c149ba91865a174b08bbc04ba263bf6e485354
+
+          OBJETIVO
+          Trabalhar somente nas ETAPAS A e B descritas em:
+          docs/CLAUDE_UI_V1_V2_MERGE_MEGA_PROMPT.md
+
+          REGRAS IMPORTANTES
+          - Preserve a experiência visual do primeiro ZiisTec como base.
+          - Integre as funções V2 dentro do fluxo principal; não crie uma segunda aplicação paralela.
+          - Orçamento manual deve ser o fluxo padrão.
+          - IA/voz devem ser opcionais para preencher o mesmo formulário manual.
+          - Preserve cadastro manual de serviços e produtos.
+          - Não criar migrations.
+          - Não alterar RLS.
+          - Não alterar schema do Supabase.
+          - Não configurar Vercel.
+          - Não remover os guards de segurança, isolamento de staging/produção ou verify:v2.
+          - Não usar dados de produção.
+
+          AO TERMINAR
+          - Rode: npm ci
+          - Rode: npm run verify:v2
+          - Rode: npm run build
+          - Corrija todos os erros.
+          - Entregue um ZIP completo com os arquivos alterados e um resumo objetivo do que mudou.
+          - Não é necessário fazer git push neste ambiente de chat.
+          EOF
+      - name: Create source package
+        shell: bash
+        run: |
+          zip -qr ZiisTec_Claude_UI_V1_V2_Merge.zip . \
+            -x '.git/*' \
+            -x '.github/workflows/package-claude.yml'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZiisTec_Claude_UI_V1_V2_Merge
+          path: ZiisTec_Claude_UI_V1_V2_Merge.zip
+          if-no-files-found: error
+          retention-days: 1
