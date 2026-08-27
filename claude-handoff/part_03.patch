@@ -1,0 +1,106 @@
+.push(`"${i.nome}" não está no catálogo e entrou como item livre.`));
++
++  return {
++    patch: {
++      clienteId: cl?.id || null,
++      itens,
++      desconto: Number(bruto.desconto) || 0,
++      acrescimo: Number(bruto.acrescimo) || 0,
++      validade: bruto.validadeDias ? addDays(HOJE, Number(bruto.validadeDias)) : null,
++      condicao: bruto.condicao || null,
++      obs: bruto.obs || null,
++      localServico: bruto.localServico || null,
++    },
++    avisos, clienteSugerido: bruto.clienteSugerido || null, parecidos,
++  };
+ }
+ 
+ /* -------------------------------------------------------- documento do orçamento */
+@@ -2515,8 +2361,18 @@
+ 
+ /* -------------------------------------------------------------- editor de orçamento */
+ function OrcamentoEditor(p) {
+-  const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente, inicial, onFechar, cliente } = p;
++  const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente,
++    salvarServico, salvarProduto, inicial, onFechar, cliente, aviso } = p;
+   const [novoCliente, setNovoCliente] = useState(false);
++  const [cadastroRapido, setCadastroRapido] = useState(null);   // "servico" | "produto"
++  /* IA e voz são auxiliares: preenchem este mesmo formulário e nada é salvo
++     sem o usuário revisar e clicar em criar/salvar. */
++  const [iaAberta, setIaAberta] = useState(false);
++  const [iaTexto, setIaTexto] = useState("");
++  const [iaOcupada, setIaOcupada] = useState(false);
++  const [iaErro, setIaErro] = useState(null);
++  const [iaAvisos, setIaAvisos] = useState([]);
++  const [iaSugestoes, setIaSugestoes] = useState([]);
+   const [d, setD] = useState(() => ({
+     id: inicial?.id, numero: inicial?.numero, clienteId: inicial?.clienteId || "",
+     status: inicial?.status || "rascunho", data: inicial?.data || HOJE,
+@@ -2548,6 +2404,58 @@
+   const upItem = (id, k, v) => setD((s) => ({ ...s, itens: s.itens.map((i) => (i.id === id ? { ...i, [k]: v } : i)) }));
+   const rmItem = (id) => setD((s) => ({ ...s, itens: s.itens.filter((i) => i.id !== id) }));
+ 
++  /* Preenche o formulário aberto a partir do que foi falado/digitado.
++     Acrescenta itens em vez de descartar o que já existe, e só sobrescreve
++     um campo quando a fala trouxe informação para ele. */
++  const preencherComIA = async () => {
++    if (!iaTexto.trim()) return;
++    setIaOcupada(true); setIaErro(null); setIaAvisos([]); setIaSugestoes([]);
++    try {
++      const bruto = await chamarIA(promptOrcamento({ fala: iaTexto, clientes, servicos, produtos }));
++      const { patch, avisos, clienteSugerido, parecidos } =
++        interpretarParaFormulario(bruto, { clientes, servicos, produtos, empresa });
++
++      setD((st) => {
++        const proximo = { ...st, itens: [...st.itens, ...patch.itens.map(({ semPreco, foraDoCatalogo, ...i }) => i)] };
++        if (patch.clienteId && !st.clienteId) {
++          proximo.clienteId = patch.clienteId;
++          proximo.local = clientes.find((x) => x.id === patch.clienteId)?.endereco || st.local;
++        }
++        if (patch.desconto) proximo.desconto = patch.desconto;
++        if (patch.acrescimo) proximo.acrescimo = patch.acrescimo;
++        if (patch.validade) proximo.validade = patch.validade;
++        if (patch.condicao) proximo.condicao = patch.condicao;
++        if (patch.localServico) proximo.localServico = patch.localServico;
++        if (patch.obs) proximo.obs = st.obs && st.obs !== empresa.observacaoPadrao ? `${st.obs}\n${patch.obs}` : patch.obs;
++        return proximo;
++      });
++
++      const recados = [...avisos];
++      if (!patch.clienteId && clienteSugerido) recados.push(`Não encontrei "${clienteSugerido}" no cadastro. Selecione o cliente ou cadastre um novo.`);
++      setIaAvisos(recados);
++      setIaSugestoes(parecidos.slice(0, 4));
++      setIaTexto("");
++      aviso?.("Formulário preenchido. Revise antes de salvar.");
++    } catch (e) {
++      setIaErro("Não consegui interpretar agora. Continue preenchendo normalmente — o orçamento manual não depende da IA.");
++    }
++    setIaOcupada(false);
++  };
++
++  /* Cadastro rápido sem sair do orçamento: salva no catálogo e já usa o item. */
++  const cadastrarServicoRapido = async (dados) => {
++    const id = await salvarServico({ ...dados, ativo: true });
++    if (!id) return;
++    addServico({ ...dados, id });
++    setCadastroRapido(null);
++  };
++  const cadastrarProdutoRapido = async (dados) => {
++    const id = await salvarProduto({ ...dados, ativo: true });
++    if (!id) return;
++    addProduto({ ...dados, id });
++    setCadastroRapido(null);
++  };
++
+   const dispS = servicos.filter((s) => s.ativo && semAcento(s.nome).includes(semAcento(buscaCat)));
+   const dispP = produtos.filter((x) => x.ativo && semAcento(`${x.nome} ${x.marca} ${x.modelo}`).includes(semAcento(buscaCat)));
+ 
+@@ -2556,7 +2464,48 @@
+       <button onClick={onFechar} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
+         <ArrowLeft className="w-4 h-4" /> Voltar
+       </button>
+-      <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche." />
++      <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche."
++        action={
++          <Btn variant="soft" icon={Sparkles} onClick={() => setIaAberta((v) => !v)}>
++            {iaAberta ? "Fechar assistente" : 
