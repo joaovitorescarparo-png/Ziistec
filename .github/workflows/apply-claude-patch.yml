@@ -1,5 +1,6 @@
 name: Apply Reviewed Claude Patch
 
+# Temporary controller: remove after the reviewed patch is integrated.
 on:
   push:
     branches: [tmp-ignore]
