@@ -1,24 +1,26 @@
-name: Apply warranty UI patch
+name: Validate warranty UI patch
 
 on:
   push:
     branches: [hardening-v2-staging]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch:
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
 
-      - name: Apply guarded source patch
+      - name: Apply guarded source patch in workspace
         run: node scripts/apply-warranty-ui-patch.mjs
 
       - name: Install locked dependencies
@@ -33,14 +35,13 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Commit patched source
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/dataApi.js src/lib/runtimeApi.js src/legacy/ZiisTecApp.jsx
-          if git diff --cached --quiet; then
-            echo "No source changes to commit."
-            exit 0
-          fi
-          git commit -m "ui: wire per-OS warranty overrides"
-          git push
+      - name: Preserve validated patched source
+        uses: actions/upload-artifact@v4
+        with:
+          name: warranty-ui-validated-source
+          path: |
+            src/lib/dataApi.js
+            src/lib/runtimeApi.js
+            src/legacy/ZiisTecApp.jsx
+          if-no-files-found: error
+          retention-days: 1
