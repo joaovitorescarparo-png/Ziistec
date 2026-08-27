@@ -1,0 +1,325 @@
+</Field>
+                         <Field label="Valor unitário"><Input type="number" min="0" step="0.01" value={i.preco} onChange={(e) => upItem(i.id, "preco", num(e.target.value))} /></Field>
+                         <div className="text-right pb-3">
+                           <p className="text-[12px] text-slate-400">Total</p>
+@@ -2637,19 +2681,31 @@ function OrcamentoEditor(p) {
+               <span className="text-[14px] font-medium text-slate-600">Total</span>
+               <span className="text-[26px] font-semibold text-slate-900 tracking-tight tabular-nums">{brl(totalDoc(d))}</span>
+             </div>
+-            <Btn className="w-full mt-5" disabled={!d.clienteId || d.itens.length === 0} onClick={() => { salvarOrcamento(d); onFechar(); }}>
+-              {d.id ? "Salvar alterações" : "Criar orçamento"}
++            <Btn className="w-full mt-5" disabled={!d.clienteId || d.itens.length === 0 || salvando} onClick={salvarEDecidir}>
++              {salvando ? "Salvando…" : d.id ? "Salvar alterações" : "Criar orçamento"}
+             </Btn>
+             <p className="text-[12px] text-slate-400 text-center mt-3 leading-relaxed">Mudar o valor aqui não altera o preço do seu catálogo.</p>
+           </Panel>
+         </section>
+       </div>
+ 
++      {/* barra fixa no celular/tablet: total e ação principal sempre à mão */}
++      <div className="lg:hidden sticky bottom-0 -mx-4 sm:-mx-8 mt-6 border-t border-slate-200 bg-white/95 backdrop-blur px-4 sm:px-8 py-3 flex items-center justify-between gap-4 z-20">
++        <div>
++          <p className="text-[11px] text-slate-500 leading-none">Total</p>
++          <p className="text-[20px] font-semibold text-slate-900 tabular-nums leading-tight">{brl(totalDoc(d))}</p>
++        </div>
++        <Btn disabled={!d.clienteId || d.itens.length === 0 || salvando} onClick={salvarEDecidir} className="min-w-[170px]">
++          {salvando ? "Salvando…" : d.id ? "Salvar alterações" : "Criar orçamento"}
++        </Btn>
++      </div>
++
+       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
+         onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
+ 
+       <CadastroRapidoCatalogo
+         tipo={cadastroRapido}
++        verCusto={p.permitido ? p.permitido("verValores") : true}
+         onClose={() => setCadastroRapido(null)}
+         onSalvar={cadastroRapido === "servico" ? cadastrarServicoRapido : cadastrarProdutoRapido}
+       />
+@@ -2657,16 +2713,73 @@ function OrcamentoEditor(p) {
+   );
+ }
+ 
++/* Confirmação após criar o orçamento. O documento já está salvo; aqui o usuário
++   escolhe o próximo passo. O PDF sai sempre do registro persistido e nunca é
++   baixado sem ele pedir. */
++function OrcamentoCriado({ id, orcamentos, empresa, cliente, aviso, mudarStatusOrc, onVer, onDepois }) {
++  const [ocupado, setOcupado] = useState(false);
++  if (!id) return null;
++  const orc = (orcamentos || []).find((o) => o.id === id);
++  if (!orc) return null;
++  const c = cliente(orc.clienteId);
++  const arquivo = `Orcamento-${orc.numero}.pdf`;
++  const texto = () => {
++    const linhas = orc.itens.map((i) => `• ${i.qtd}× ${i.nome} — ${brl(i.qtd * i.preco)}`).join("\n");
++    return `*${empresa.nome}*\nOrçamento ${orc.numero}\n\n${linhas}\n\n*Total: ${brl(totalDoc(orc))}*\nValidade: ${dataBR(orc.validade)}\n${orc.condicao || ""}`;
++  };
++
++  const gerarPdf = async () => {
++    if (ocupado) return;
++    setOcupado(true);
++    try { await baixarOrcamentoPDF(orc.id, orc.empresaId, arquivo); aviso("PDF gerado a partir do orçamento salvo."); }
++    catch (e) { aviso(e?.message || "Não foi possível gerar o PDF."); }
++    finally { setOcupado(false); }
++  };
++
++  const enviar = async () => {
++    if (ocupado) return;
++    const txt = texto();
++    if (suportaCompartilharArquivo()) {
++      setOcupado(true);
++      try {
++        const r = await compartilharOrcamentoPDF({ quoteId: orc.id, companyId: orc.empresaId, filename: arquivo, text: txt });
++        if (r.shared) { if (orc.status === "rascunho") await mudarStatusOrc(orc.id, "enviado"); else aviso("PDF compartilhado."); setOcupado(false); return; }
++      } catch (e) { aviso(e?.message || "Não foi possível compartilhar o PDF."); setOcupado(false); return; }
++      setOcupado(false);
++    }
++    window.open(`https://wa.me/55${soDigitos(c?.whatsapp)}?text=${encodeURIComponent(txt)}`, "_blank");
++    if (orc.status === "rascunho") await mudarStatusOrc(orc.id, "enviado");
++  };
++
++  return (
++    <Modal open onClose={onDepois} title={`${orc.numero} criado`} sub={`${c?.fantasia || c?.nome || "Cliente"} · ${brl(totalDoc(orc))}`}>
++      <p className="text-[14px] text-slate-600 leading-relaxed">
++        O orçamento já está salvo. O que você quer fazer agora?
++      </p>
++      <div className="space-y-2.5">
++        <Btn className="w-full" icon={FileText} onClick={onVer}>Ver orçamento</Btn>
++        <Btn variant="soft" className="w-full" icon={Printer} disabled={ocupado} onClick={gerarPdf}>
++          {ocupado ? "Gerando…" : "Gerar PDF"}
++        </Btn>
++        <Btn variant="soft" className="w-full" icon={Send} disabled={ocupado} onClick={enviar}>Enviar pelo WhatsApp</Btn>
++        <Btn variant="ghost" className="w-full" onClick={onDepois}>Continuar depois</Btn>
++      </div>
++    </Modal>
++  );
++}
++
+ /* Cadastro rápido de serviço/produto sem sair do orçamento. Só o essencial;
+    o cadastro completo continua em "Serviços e produtos". */
+-function CadastroRapidoCatalogo({ tipo, onClose, onSalvar }) {
++function CadastroRapidoCatalogo({ tipo, onClose, onSalvar, verCusto = true }) {
+   const serv = tipo === "servico";
+-  const vazio = { nome: "", categoria: "", marca: "", modelo: "", unidade: "unidade", preco: 0, custo: 0, descricao: "" };
++  const vazio = { nome: "", categoria: "", marca: "", modelo: "", unidade: "unidade", preco: 0, custo: 0, descricao: "", temGarantia: false, prazo: 0 };
+   const [f, setF] = useState(vazio);
+   const [ocupado, setOcupado] = useState(false);
+   useEffect(() => { if (tipo) setF(vazio); }, [tipo]);
+   if (!tipo) return null;
+   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
++  const atalhos = serv ? [30, 60, 90, 180, 365] : [3, 6, 12, 24, 36];
++  const unidadePrazo = serv ? "dias" : "meses";
+ 
+   return (
+     <Modal open onClose={onClose} wide
+@@ -2675,11 +2788,12 @@ function CadastroRapidoCatalogo({ tipo, onClose, onSalvar }) {
+       footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+         <Btn disabled={!f.nome.trim() || ocupado} onClick={async () => {
+           setOcupado(true);
++          const prazo = f.temGarantia ? Math.max(0, num(f.prazo)) : 0;
+           await onSalvar(serv
+             ? { nome: f.nome.trim(), categoria: f.categoria.trim(), descricao: f.descricao, unidade: f.unidade,
+-                preco: num(f.preco), custo: num(f.custo), garantiaDias: 0, retornoDias: 0 }
++                preco: num(f.preco), custo: verCusto ? num(f.custo) : 0, garantiaDias: prazo, retornoDias: 0 }
+             : { nome: f.nome.trim(), marca: f.marca.trim(), modelo: f.modelo.trim(), descricao: f.descricao,
+-                unidade: f.unidade, preco: num(f.preco), custo: num(f.custo), garantiaMeses: 0 });
++                unidade: f.unidade, preco: num(f.preco), custo: verCusto ? num(f.custo) : 0, garantiaMeses: prazo });
+           setOcupado(false);
+         }}>{ocupado ? "Salvando…" : "Salvar e adicionar"}</Btn></>}>
+       <Field label={serv ? "Nome do serviço" : "Nome do produto"}>
+@@ -2694,20 +2808,59 @@ function CadastroRapidoCatalogo({ tipo, onClose, onSalvar }) {
+           <Field label="Modelo"><Input value={f.modelo} onChange={(e) => set("modelo", e.target.value)} /></Field>
+         </div>
+       )}
+-      <div className="grid sm:grid-cols-3 gap-5">
++      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+         <Field label="Unidade">
+           <Select value={f.unidade} onChange={(e) => set("unidade", e.target.value)}>
+             {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+           </Select>
+         </Field>
+         <Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => set("preco", num(e.target.value))} /></Field>
+-        <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => set("custo", num(e.target.value))} /></Field>
++        {verCusto && (
++          <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => set("custo", num(e.target.value))} /></Field>
++        )}
++      </div>
++
++      {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,
++          usado automaticamente quando uma OS com este item for finalizada */}
++      <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-4">
++        <div className="flex items-center justify-between gap-4 flex-wrap">
++          <div>
++            <p className="text-[14px] font-medium text-slate-800">Tem garantia?</p>
++            <p className="text-[12.5px] text-slate-500 mt-0.5">Vira o prazo padrão deste item no catálogo.</p>
++          </div>
++          <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
++            {[[false, "Não"], [true, "Sim"]].map(([v, label]) => (
++              <button key={label} type="button" onClick={() => setF((st) => ({ ...st, temGarantia: v, prazo: v ? (st.prazo || (serv ? 90 : 12)) : 0 }))}
++                aria-pressed={f.temGarantia === v}
++                className={cx("px-5 py-2 rounded-lg text-[14px] font-medium transition-colors", f.temGarantia === v ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
++                {label}
++              </button>
++            ))}
++          </div>
++        </div>
++        {f.temGarantia && (
++          <div className="flex flex-wrap gap-2 items-end">
++            {atalhos.map((v) => (
++              <button key={v} type="button" onClick={() => set("prazo", v)} aria-pressed={num(f.prazo) === v}
++                className={cx("px-3.5 py-2.5 rounded-xl text-[13px] font-medium transition-colors", ring,
++                  num(f.prazo) === v ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
++                {v} {unidadePrazo}
++              </button>
++            ))}
++            <div className="w-[150px]">
++              <Field label="Personalizado">
++                <Input type="number" min="1" value={f.prazo} aria-label={`Prazo em ${unidadePrazo}`}
++                  onChange={(e) => set("prazo", Math.max(1, num(e.target.value)))} />
++              </Field>
++            </div>
++          </div>
++        )}
+       </div>
+       <Field label="Descrição" hint="Opcional.">
+         <CampoVoz rows={2} valor={f.descricao} onChange={(v) => set("descricao", v)} placeholder="O que está incluso" />
+       </Field>
+       <p className="text-[12px] text-slate-400 leading-relaxed">
+-        Garantia, retorno e estoque continuam disponíveis no cadastro completo em "Serviços e produtos".
++        Retorno sugerido, estoque e demais campos continuam no cadastro completo em "Serviços e produtos".
+       </p>
+     </Modal>
+   );
+@@ -2982,7 +3135,18 @@ function OSDetalhe(p) {
+     setOrdens((l) => l.map((x) => (x.id === os.id ? { ...x, ...patch } : x)));
+     if (real) {
+       clearTimeout(persistTimer.current);
+-      persistTimer.current = setTimeout(() => { const tarefa = patch.fotos ? persistirFotosOSDB(os.id, patch.fotos, empresaId, usuarioAtual?.id) : persistirEdicaoOSDB(next, patch, empresaId, usuarioAtual?.id, papel); tarefa.then((r) => { if (r?.checklist) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, checklist: r.checklist } : x)); if (r?.fotos) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, fotos: r.fotos } : x)); }).catch((e) => aviso(mensagemErro(e))); }, 500);
++      persistTimer.current = setTimeout(() => {
++        const { fotos: fotosPatch, ...outrosCampos } = patch;
++        const tarefas = [];
++        if (fotosPatch) tarefas.push(persistirFotosOSDB(os.id, fotosPatch, empresaId, usuarioAtual?.id));
++        if (Object.keys(outrosCampos).length) tarefas.push(persistirEdicaoOSDB(next, outrosCampos, empresaId, usuarioAtual?.id, papel));
++        Promise.all(tarefas).then((resultados) => {
++          resultados.filter(Boolean).forEach((r) => {
++            if (r?.checklist) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, checklist: r.checklist } : x));
++            if (r?.fotos) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, fotos: r.fotos } : x));
++          });
++        }).catch((e) => aviso(mensagemErro(e)));
++      }, 500);
+     }
+   };
+   const toggleCheck = (id) => up({ checklist: os.checklist.map((k) => (k.id === id ? { ...k, feito: !k.feito } : k)) });
+@@ -3409,7 +3573,7 @@ function BlocoRelato({ valor, onChange, placeholder, destaque = true, rows = 5 }
+ }
+ 
+ /* --------------------------------------------------- finalizar atendimento */
+-function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produtos, jaConcluida, verValores = true }) {
++function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servicos = [], produtos, jaConcluida, verValores = true }) {
+   const [etapa, setEtapa] = useState(0);
+   const [relato, setRelato] = useState(os.relato || "");
+   const [materiais, setMateriais] = useState([]);
+@@ -3418,6 +3582,8 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
+   const [custosExtras, setCustosExtras] = useState(os.custosExtras || 0);
+   const [temPendencia, setTemPendencia] = useState(os.pendencia ? true : null);
+   const [pendencia, setPendencia] = useState(os.pendencia || "");
++  /* resultado operacional do atendimento: finalizado, precisa voltar ou não finalizado */
++  const [resultado, setResultado] = useState("finalizado");
+   const [fotos, setFotos] = useState(os.fotos || []);
+   const [addProduto, setAddProduto] = useState(false);
+ 
+@@ -3427,12 +3593,31 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
+   };
+ 
+   const itensFinais = [...os.itens, ...materiais];
++
++  /* Prévia das garantias que a conclusão vai registrar. O prazo vem do catálogo:
++     é a mesma regra que o backend aplica, mostrada aqui para o profissional
++     conferir antes de concluir. Alterar prazo só para esta OS exigiria mudança
++     de contrato no RPC — ver docs/ROUND2_BACKEND_NEEDS.md. */
++  const execucaoPrevista = os.data || HOJE;
++  const garantiasPrevistas = os.emGarantia ? [] : itensFinais.flatMap((i) => {
++    if (i.tipo === "servico") {
++      const cat = servicos.find((x) => x.id === i.catalogoId);
++      if (!(cat?.garantiaDias > 0)) return [];
++      return [{ id: i.id, nome: cat.nome, prazo: `${cat.garantiaDias} dias`, ate: addDays(execucaoPrevista, cat.garantiaDias), origem: "Serviço" }];
++    }
++    const cat = produtos.find((x) => x.id === i.catalogoId);
++    if (!(cat?.garantiaMeses > 0)) return [];
++    return [{ id: i.id, nome: i.nome, prazo: `${cat.garantiaMeses} meses`, ate: addMeses(execucaoPrevista, cat.garantiaMeses), origem: "Fabricante" }];
++  });
+   const adicionaisFinais = temAdicional ? adicionais : [];
+   const somaAdd = adicionaisFinais.reduce((t, a) => t + a.qtd * a.preco, 0);
+   const total = itensFinais.reduce((t, i) => t + i.qtd * i.preco, 0) + somaAdd;
+   const extras = {
+     relato, itens: itensFinais, adicionais: adicionaisFinais, valorAdicional: 0, descricaoAdicional: "",
+-    custosExtras: num(custosExtras), pendencia: temPendencia ? pendencia : "", fotos,
++    custosExtras: num(custosExtras),
++    pendencia: temPendencia ? pendencia : (resultado === "retorno" ? "Cliente precisa de novo atendimento." : ""),
++    precisaRetornar: resultado === "retorno",
++    fotos,
+   };
+ 
+   /* edição do registro depois de concluído: sem etapas, só o que faz sentido rever */
+@@ -3606,6 +3791,54 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
+               <span className="text-[14px] text-slate-500">Pendência</span>
+               <span className="text-[14px] text-slate-800 text-right">{temPendencia && pendencia.trim() ? pendencia : "nenhuma"}</span>
+             </div>
++            <div className="px-4 py-3.5">
++              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-2">Garantias deste atendimento</p>
++              {garantiasPrevistas.length === 0 ? (
++                <p className="text-[13.5px] text-slate-500 leading-relaxed">
++                  {os.emGarantia
++                    ? "Atendimento em garantia: a garantia original continua valendo."
++                    : "Nenhum item deste atendimento tem prazo de garantia configurado no catálogo."}
++                </p>
++              ) : (
++                <div className="space-y-2">
++                  {garantiasPrevistas.map((g) => (
++                    <div key={g.id} className="flex items-start justify-between gap-3">
++                      <div className="min-w-0">
++                        <p className="text-[13.5px] text-slate-800 truncate">{g.nome}</p>
++                        <p className="text-[12px] text-slate-400">{g.origem} · {g.prazo}</p>
++                      </div>
++                      <span className="text-[12.5px] text-slate-600 shrink-0 tabular-nums">até {dataBR(g.ate)}</span>
++                    </div>
++                  ))}
++                  <p className="text-[12px] text-slate-400 leading-relaxed pt-1">
++                    O prazo vem do cadastro em "Serviços e produtos". Para mudar, ajuste o item no catálogo antes de concluir.
++                  </p>
++                </div>
++              )}
++            </div>
++          </div>
++
++          <div>
++            <p className="text-[13px] font-medium text-slate-600 mb-2">Como este atendimento terminou?</p>
++            <div className="grid sm:grid-cols-3 gap-2">
++              {[["finalizado", "Finalizado"], ["retorno", "Precisa retornar"], ["naoFinalizado", "Não finalizado"]].map(([v, label]) => (
++                <button key={v} type="button" onClick={() => setResultado(v)} aria-pressed={resultado === v}
++                  className={cx("py-3.5 rounded-xl text-[14px] font-medium transition-colors", ring,
++                    resultado === v ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
++                  {label}
++                </button>
++              ))}
++            </div>
++            {resultado === "retorno" && (
++              <p className="text-[12.5px] text-amber-800 bg-amber-50 ring-1 ring-amber-200/70 rounded-xl px-3.5 py-3 mt-3 leading-relaxed">
++                O atendimento é concluído e a pendência fica registrada para você abrir o retorno depois.
++              </p>
++            )}
++            {resultado === "naoFinalizado" && (
++              <p className="text-[12.5px] text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-xl px-3.5 py-3 mt-3 leading-relaxed">
++                Nada é concluído agora: o relato, as fotos e a pendência ficam salvos e a ordem continua em andamento. Materiais e adicionais desse fechamento só são registrados ao concluir.
++              </p>
++            )}
+           </div>
+ 
+           <div className="rounded-2xl bg-slate-50 ring-1 ring-slate-200 p-4">
+@@ -3639,7 +3872,13 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
+             <div className="flex items-center gap-3">
+               {atual.pular && <Btn variant="ghost" onClick={() => setEtapa(etapa + 1)}>{atual.pular}</Btn>}
+               {ultima
+-                ? <Btn icon={Check} onClick={() => onFinalizar(extras)}>Concluir atendimento</Btn>
++                ? (resultado === "naoFinalizado"
++                    ? <Btn variant="soft" icon={Check} onClick={() => { onSalvarParcial({ relato, fotos, pendencia: temPendencia ? p
