@@ -1,0 +1,72 @@
+name: Apply Reviewed Claude Patch
+
+on:
+  push:
+    branches: [tmp-ignore]
+    paths:
+      - .github/workflows/apply-claude-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-reviewed-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout controller branch
+        uses: actions/checkout@v4
+        with:
+          ref: tmp-ignore
+          path: controller
+          persist-credentials: false
+
+      - name: Checkout isolated UI branch
+        uses: actions/checkout@v4
+        with:
+          ref: ui-v1-v2-merge
+          path: target
+
+      - name: Assemble and verify reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat controller/claude-handoff/part_*.patch > /tmp/claude.patch
+          echo "02fb581f8dbc1d8e3db1da3a75c5380e1990867027f7c04b57ac3a7187dc9c4b  /tmp/claude.patch" | sha256sum -c -
+          cd target
+          git apply --check /tmp/claude.patch
+          git apply /tmp/claude.patch
+          git diff --check
+          actual="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' scripts/verify-consolidated-source.mjs src/App.jsx src/legacy/ZiisTecApp.jsx | sort)"
+          test "$actual" = "$expected"
+
+      - name: Use Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+
+      - name: Install dependencies
+        working-directory: target
+        run: npm ci --ignore-scripts --no-fund --no-audit
+
+      - name: Verify V2 guards
+        working-directory: target
+        run: npm run verify:v2
+
+      - name: Build production bundle
+        working-directory: target
+        run: npm run build
+
+      - name: Commit only reviewed files
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ZiisTec Review Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/App.jsx src/legacy/ZiisTecApp.jsx scripts/verify-consolidated-source.mjs
+          test "$(git diff --cached --name-only | wc -l)" -eq 3
+          git commit -m "ui: merge V1 shell with manual-first quote flow"
+          git push origin HEAD:ui-v1-v2-merge
