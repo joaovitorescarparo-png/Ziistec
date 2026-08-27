@@ -40,7 +40,7 @@ const toProduct = (x, companyId) => ({
   ...(Object.prototype.hasOwnProperty.call(x,'estoqueMinimo')?{low_stock_threshold:Math.max(0,n(x.estoqueMinimo))}:{}),
 });
 
-const fromItem = (x) => ({ id:x.id, tipo:itemKindFromDb[x.kind]||'livre', catalogoId:x.service_id||x.product_id||null, nome:x.name, unidade:x.unit||'unidade', qtd:n(x.quantity)||1, preco:n(x.unit_price), custo:n(x.unit_cost), obs:x.notes||'', adicional:Boolean(x.is_extra), aguardandoValor:Boolean(x.price_pending) });
+const fromItem = (x) => ({ id:x.id, tipo:itemKindFromDb[x.kind]||'livre', catalogoId:x.service_id||x.product_id||null, nome:x.name, unidade:x.unit||'unidade', qtd:n(x.quantity)||1, preco:n(x.unit_price), custo:n(x.unit_cost), obs:x.notes||'', adicional:Boolean(x.is_extra), aguardandoValor:Boolean(x.price_pending), garantiaPolitica:x.warranty_policy||'catalog', garantiaDiasOverride:x.warranty_override_days==null?null:Number(x.warranty_override_days), garantiaMesesOverride:x.warranty_override_months==null?null:Number(x.warranty_override_months) });
 const fromMaterial = (x) => ({ id:x.id, produtoId:x.product_id||null, nome:x.name||'Material', qtd:n(x.quantity)||1, custo:n(x.unit_cost), serie:x.serial_number||'' });
 const toItem = (x, companyId, parentKey, parentId, pos=0, workOrder=false) => ({
   [parentKey]:parentId, company_id:companyId, kind:itemKindToDb[x.tipo]||'free', service_id:x.tipo==='servico'?x.catalogoId||null:null, product_id:x.tipo==='produto'?x.catalogoId||null:null,
@@ -155,7 +155,7 @@ export async function atualizarOSDB(id, patch){
   return fromWorkOrder(await carregarOSCompletaDB(id));
 }
 export async function finalizarOSDB(id, extras={}){
-  const r=await supabase.rpc('zt_finalize_work_order_atomic',{
+  const r=await supabase.rpc('zt_finalize_work_order_with_warranty_overrides',{
     p_wo:id,
     p_report:extras.relato||extras.relatorio||null,
     p_pending:extras.pendencia||null,
@@ -163,6 +163,7 @@ export async function finalizarOSDB(id, extras={}){
     p_due_days:7,
     p_materials:extras.materiaisDB||[],
     p_additions:extras.adicionaisDB||[],
+    p_warranty_overrides:Array.isArray(extras.garantiaOverrides)?extras.garantiaOverrides:null,
   });
   check(r);
   return true;
