@@ -26,11 +26,17 @@ jobs:
           ref: ui-v1-v2-merge
           path: target
 
-      - name: Apply reviewed patch and prove exact files
+      - name: Reassemble exact reviewed patch
         shell: bash
         run: |
           set -euo pipefail
-          cat controller/claude-handoff/part_*.patch > /tmp/claude.patch
+          cat controller/claude-handoff-b64/b64_*.txt | tr -d '\r\n' | base64 -d > /tmp/claude.patch
+          echo "02fb581f8dbc1d8e3db1da3a75c5380e1990867027f7c04b57ac3a7187dc9c4b  /tmp/claude.patch" | sha256sum -c -
+
+      - name: Apply patch and prove exact final files
+        shell: bash
+        run: |
+          set -euo pipefail
           cd target
           git apply --check /tmp/claude.patch
           git apply /tmp/claude.patch
