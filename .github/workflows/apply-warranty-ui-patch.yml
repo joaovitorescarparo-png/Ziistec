@@ -35,13 +35,15 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Preserve validated patched source
+      - name: Preserve patched source for review
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: warranty-ui-validated-source
+          name: warranty-ui-patched-source
           path: |
             src/lib/dataApi.js
             src/lib/runtimeApi.js
             src/legacy/ZiisTecApp.jsx
+            scripts/verify-consolidated-source.mjs
           if-no-files-found: error
           retention-days: 1
