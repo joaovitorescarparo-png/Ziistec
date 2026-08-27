@@ -1,0 +1,104 @@
+"Preencher com IA / voz"}
++          </Btn>
++        } />
++
++      {iaAberta && (
++        <Panel className="p-5 mb-6">
++          <Rotulo>Assistente · opcional</Rotulo>
++          <p className="text-[13px] text-slate-500 mb-3 leading-relaxed">
++            Fale ou escreva o pedido do cliente. O ZiisTec preenche os campos abaixo e você continua editando tudo à mão.
++          </p>
++          <CampoVoz rows={3} valor={iaTexto} onChange={setIaTexto}
++            placeholder="Ex.: orçamento para o Condomínio Jardins com duas fechaduras digitais, uma visita técnica, cem reais de desconto e pagamento no Pix" />
++          <div className="flex flex-wrap items-center gap-2 mt-3">
++            <Btn size="sm" icon={iaOcupada ? Loader2 : Sparkles} disabled={!iaTexto.trim() || iaOcupada} onClick={preencherComIA}>
++              {iaOcupada ? "Interpretando…" : "Preencher formulário"}
++            </Btn>
++            <span className="text-[12px] text-slate-400">Nada é salvo sem a sua confirmação.</span>
++          </div>
++          {iaErro && <p className="text-[13px] text-rose-700 mt-3">{iaErro}</p>}
++          {iaAvisos.length > 0 && (
++            <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 p-3.5 mt-3 space-y-1">
++              {iaAvisos.map((a, i) => <p key={i} className="text-[13px] text-amber-900">{a}</p>)}
++            </div>
++          )}
++          {iaSugestoes.length > 0 && (
++            <div className="mt-3">
++              <p className="text-[12px] text-slate-500 mb-1.5">Você quis dizer:</p>
++              <div className="flex flex-wrap gap-2">
++                {iaSugestoes.map((c) => (
++                  <button key={c.id} onClick={() => { escolherCliente(c.id); setIaSugestoes([]); }}
++                    className={cx("rounded-xl ring-1 ring-slate-200 px-3 py-2 text-[13px] hover:ring-teal-500", ring)}>
++                    {c.fantasia || c.nome}
++                  </button>
++                ))}
++              </div>
++            </div>
++          )}
++        </Panel>
++      )}
+ 
+       <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
+         <div className="lg:col-span-2 space-y-7">
+@@ -2608,6 +2557,11 @@
+                       </button>))}
+                   {(abaCat === "servicos" ? dispS : dispP).length === 0 && <p className="text-[13px] text-slate-400 py-1">Nada encontrado com esse nome.</p>}
+                 </div>
++                {/* o que ainda não está no catálogo pode ser cadastrado aqui mesmo */}
++                <button onClick={() => setCadastroRapido(abaCat === "servicos" ? "servico" : "produto")}
++                  className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
++                  + Cadastrar {abaCat === "servicos" ? "serviço" : "produto"} no catálogo
++                </button>
+                 </>)}
+               </div>
+ 
+@@ -2692,8 +2646,70 @@
+       </div>
+ 
+       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
+-        onSave={(novo) => { const id = salvarCliente(novo); if (id) escolherCliente(id); }} />
++        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
++
++      <CadastroRapidoCatalogo
++        tipo={cadastroRapido}
++        onClose={() => setCadastroRapido(null)}
++        onSalvar={cadastroRapido === "servico" ? cadastrarServicoRapido : cadastrarProdutoRapido}
++      />
+     </>
++  );
++}
++
++/* Cadastro rápido de serviço/produto sem sair do orçamento. Só o essencial;
++   o cadastro completo continua em "Serviços e produtos". */
++function CadastroRapidoCatalogo({ tipo, onClose, onSalvar }) {
++  const serv = tipo === "servico";
++  const vazio = { nome: "", categoria: "", marca: "", modelo: "", unidade: "unidade", preco: 0, custo: 0, descricao: "" };
++  const [f, setF] = useState(vazio);
++  const [ocupado, setOcupado] = useState(false);
++  useEffect(() => { if (tipo) setF(vazio); }, [tipo]);
++  if (!tipo) return null;
++  const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
++
++  return (
++    <Modal open onClose={onClose} wide
++      title={serv ? "Cadastrar serviço" : "Cadastrar produto"}
++      sub="Fica salvo no catálogo e entra neste orçamento."
++      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
++        <Btn disabled={!f.nome.trim() || ocupado} onClick={async () => {
++          setOcupado(true);
++          await onSalvar(serv
++            ? { nome: f.nome.trim(), categoria: f.categoria.trim(), descricao: f.descricao, unidade: f.unidade,
++                preco: num(f.preco), custo: num(f.custo), garantiaDias: 0, retornoDias: 0 }
++            : { nome: f.nome.trim(), marca: f.marca.trim(), modelo: f.modelo.trim(), descricao: f.descricao,
++                unidade: f.unidade, preco: num(f.preco), custo: num(f.custo), garantiaMeses: 0 });
++          setOcupado(false);
++        }}>{ocupado ? "Salvando…" : "Salvar e adicionar"}</Btn></>}
++      <Field label={serv ? "Nome do serviço" : "Nome do produto"}>
++        <Input value={f.nome} onChange={(e) => set("nome", e.target.value)} autoFocus
++          placeholder={serv ? "Ex.: Instalação de fechadura digital" : "Ex.: Fechadura digital biométrica"} />
++      </Field>
++      {serv ? (
++        <Field label="Categoria"><Input value={f.categoria} onChange={(e) => set("categoria", e.target.value)} placeholder="Ex.: Controle de acesso" /></Field>
++      ) : (
++        <div className="grid sm:grid-cols-2 gap-5">
++          <Field
