@@ -1,0 +1,128 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -124,18 +124,12 @@
+   );
+ }
+ 
+-function AtalhoV2({ onOpen }) {
+-  return (
+-    <button
+-      type="button"
+-      onClick={() => onOpen("home")}
+-      className="fixed bottom-5 right-5 z-[9500] rounded-2xl border border-emerald-200 bg-emerald-700 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-800"
+-      title="Abrir o ZiisTec V2"
+-    >
+-      Abrir ZiisTec V2
+-    </button>
+-  );
+-}
++/* ETAPA A — o ZiisTec volta a ser um só.
++   O antigo atalho flutuante "Abrir ZiisTec V2" foi removido do produto final:
++   a V2 deixa de ser um hub paralelo e passa a ser absorvida pelas abas da
++   aplicação principal. As rotas ?v2=... continuam existindo, sem entrada
++   visível, apenas para teste técnico durante a transição — e mantêm os
++   mesmos owner gates de antes. */
+ 
+ const workspaceInicial = () => {
+   if (typeof window === "undefined") return null;
+@@ -195,6 +189,10 @@
+       sessao: { usuarioId: s.perfil.id, membresiaId: s.membresiaAtual.id },
+       sair: s.sair,
+       recarregar: s.recarregar,
++      /* ETAPA A — ponto de integração: as telas do shell principal podem
++         abrir um recurso V2 pontual sem sair da navegação antiga. As etapas
++         C a E usam isto para absorver as funções V2 aba por aba. */
++      abrirRecursoV2: (chave) => navegarV2(chave),
+       salvarEmpresa: async (dados) => {
+         const { error } = await supabase.from("companies")
+           .update(paraEmpresaBanco(dados)).eq("id", s.empresaId);
+@@ -262,7 +260,6 @@
+       <Suspense fallback={<Carregando texto="Carregando seu ambiente" />}>
+         <ZiisTecApp key={contexto.chave} contexto={contexto} />
+       </Suspense>
+-      <AtalhoV2 onOpen={navegarV2} />
+     </>
+   );
+ }
+--- a/src/legacy/ZiisTecApp.jsx
++++ b/src/legacy/ZiisTecApp.jsx
+@@ -2089,8 +2089,6 @@
+ function Orcamentos(p) {
+   const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto } = p;
+   const [filtro, setFiltro] = useState("todos");
+-  const [voz, setVoz] = useState(false);
+-  const [rascunhoVoz, setRascunhoVoz] = useState(null);
+ 
+   if (orcamentoAberto) {
+     if (String(orcamentoAberto).startsWith("novo")) {
+@@ -2100,19 +2098,13 @@
+     const o = orcamentos.find((x) => x.id === orcamentoAberto);
+     if (o) return <OrcamentoDoc {...p} orc={o} />;
+   }
+-  if (rascunhoVoz) return <OrcamentoEditor {...p} inicial={rascunhoVoz} onFechar={() => setRascunhoVoz(null)} />;
+ 
+   const filtrados = orcamentos.filter((o) => filtro === "todos" || o.status === filtro);
+ 
+   return (
+     <>
+       <PageHead title="Orçamentos" sub="Monte, envie e acompanhe a resposta do cliente."
+-        action={
+-          <div className="flex gap-2">
+-            <Btn variant="soft" icon={Mic} onClick={() => setVoz(true)}>Por voz</Btn>
+-            <Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo</Btn>
+-          </div>
+-        } />
++        action={<Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo orçamento</Btn>} />
+       <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
+         opcoes={[{ id: "todos", label: "Todos" }, { id: "rascunho", label: "Rascunhos" }, { id: "enviado", label: "Aguardando" }, { id: "aprovado", label: "Aprovados" }]} />
+ 
+@@ -2145,201 +2137,55 @@
+         </Panel>
+       )}
+ 
+-      {voz && <OrcamentoVoz {...p} onClose={() => setVoz(false)} onConfirmar={(rasc) => { setVoz(false); setRascunhoVoz(rasc); }} />}
+     </>
+   );
+ }
+ 
+-/* ------------------------------------------- orçamento por voz (com confirmação) */
+-function OrcamentoVoz({ onClose, onConfirmar, clientes, servicos, produtos, empresa, salvarCliente, aviso }) {
+-  const [fala, setFala] = useState("");
+-  const [carregando, setCarregando] = useState(false);
+-  const [erro, setErro] = useState(null);
+-  const [previa, setPrevia] = useState(null);
+-  const [comando, setComando] = useState("");
+-  const [novoCliente, setNovoCliente] = useState(null);
+-
+-  const interpretar = async (comandoCorrecao) => {
+-    setCarregando(true); setErro(null);
+-    try {
+-      const bruto = await chamarIA(promptOrcamento({
+-        fala, clientes, servicos, produtos,
+-        rascunho: comandoCorrecao ? previa.bruto : null, comando: comandoCorrecao,
+-      }));
+-      setPrevia(montarPrevia(bruto));
+-      setComando("");
+-    } catch (e) {
+-      setErro("Não consegui interpretar agora. Você pode tentar de novo ou montar o orçamento manualmente.");
+-    }
+-    setCarregando(false);
+-  };
+-
+-  const montarPrevia = (bruto) => {
+-    const itens = (bruto.itens || []).map((i) => {
+-      const cat = i.tipo === "produto" ? produtos.find((p) => p.id === i.catalogoId) : servicos.find((s) => s.id === i.catalogoId);
+-      const precoCatalogo = cat?.preco;
+-      return {
+-        id: uid(), tipo: i.tipo || "servico", catalogoId: cat?.id || null,
+-        nome: cat ? (i.tipo === "produto" ? `${cat.nome}${cat.marca ? " · " + cat.marca : ""}${cat.modelo ? " " + cat.modelo : ""}` : cat.nome) : i.nome,
+-        unidade: cat?.unidade || i.unidade || "unidade",
+-        qtd: Number(i.qtd) || 1,
+-        preco: i.preco != null ? Number(i.preco) : (precoCatalogo ?? null),
+-        custo: cat?.custo || 0,
+-        precoDito: i.preco != null && precoCatalogo != null && Number(i.preco) !== precoCatalogo,
+-        semCatalogo: !cat,
+-      };
+-    });
+-    const cl = clientes.find((c) => c.id === bruto.clienteId);
+-    const parecidos = !cl && bruto.
