@@ -26,12 +26,11 @@ jobs:
           ref: ui-v1-v2-merge
           path: target
 
-      - name: Assemble and verify reviewed patch
+      - name: Apply reviewed patch and prove exact files
         shell: bash
         run: |
           set -euo pipefail
           cat controller/claude-handoff/part_*.patch > /tmp/claude.patch
-          echo "02fb581f8dbc1d8e3db1da3a75c5380e1990867027f7c04b57ac3a7187dc9c4b  /tmp/claude.patch" | sha256sum -c -
           cd target
           git apply --check /tmp/claude.patch
           git apply /tmp/claude.patch
@@ -39,6 +38,9 @@ jobs:
           actual="$(git diff --name-only | sort)"
           expected="$(printf '%s\n' scripts/verify-consolidated-source.mjs src/App.jsx src/legacy/ZiisTecApp.jsx | sort)"
           test "$actual" = "$expected"
+          echo "f7318b71bb949bc12517807768213ad5a845caee675571f4dc6a48b129b72f9a  src/App.jsx" | sha256sum -c -
+          echo "12b679ec1af62963d1d1022d63619a31e2112a57e34d45ade6e724d6b949b7e3  src/legacy/ZiisTecApp.jsx" | sha256sum -c -
+          echo "f99c43477a8fe019d17838e4891ee0aaee68cfbcab6b3116a00c46facf49cf2d  scripts/verify-consolidated-source.mjs" | sha256sum -c -
 
       - name: Use Node 24
         uses: actions/setup-node@v4
