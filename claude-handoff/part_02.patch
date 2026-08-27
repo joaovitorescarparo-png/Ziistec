@@ -1,0 +1,89 @@
+             {i.tipo === "produto" && " · produto"}
+-                      </p>
+-                      {i.precoDito && <p className="text-[12px] text-amber-700 mt-1">Preço dito por você — o catálogo não será alterado.</p>}
+-                      {i.semCatalogo && <p className="text-[12px] text-amber-700 mt-1">Não está no catálogo. Entra só neste orçamento.</p>}
+-                    </div>
+-                    <div className="flex items-center gap-2 shrink-0">
+-                      <p className="text-[15px] font-semibold text-slate-900 tabular-nums">{i.preco != null ? brl(i.qtd * i.preco) : "—"}</p>
+-                      <button onClick={() => setPrevia({ ...previa, itens: previa.itens.filter((_, k) => k !== idx) })}
+-                        aria-label={`Remover ${i.nome}`} className={cx("p-1.5 rounded-lg text-slate-300 hover:text-rose-600", ring)}><Trash2 className="w-4 h-4" /></button>
+-                    </div>
+-                  </div>
+-                  {i.preco == null && (
+-                    <div className="mt-3 max-w-[200px]">
+-                      <Field label="Informe o preço unitário">
+-                        <Input type="number" min="0" onChange={(e) => setPrevia({ ...previa, itens: previa.itens.map((x, k) => k === idx ? { ...x, preco: Number(e.target.value) } : x) })} />
+-                      </Field>
+-                    </div>
+-                  )}
+-                </div>
+-              ))}
+-              <div className="p-4 space-y-1.5 text-[14px]">
+-                {previa.desconto > 0 && <div className="flex justify-between text-slate-500"><span>Desconto</span><span className="tabular-nums">− {brl(previa.desconto)}</span></div>}
+-                {previa.acrescimo > 0 && <div className="flex justify-between text-slate-500"><span>Acréscimo</span><span className="tabular-nums">+ {brl(previa.acrescimo)}</span></div>}
+-                <div className="flex justify-between items-baseline pt-2">
+-                  <span className="font-medium text-slate-700">Total</span>
+-                  <span className="text-2xl font-semibold text-slate-900 tabular-nums">{brl(total)}</span>
+-                </div>
+-                <p className="text-[12px] text-slate-400 pt-1">Validade de {previa.validadeDias} dias · {previa.condicao}</p>
+-                {previa.localServico && <p className="text-[12px] text-slate-400">Local do serviço: {previa.localServico}</p>}
+-                {previa.obs && <p className="text-[12px] text-slate-400">Observações: {previa.obs}</p>}
+-              </div>
+-            </div>
+-
+-            {previa.avisos.length > 0 && (
+-              <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 p-3.5 space-y-1">
+-                {previa.avisos.map((a, i) => <p key={i} className="text-[13px] text-amber-900">{a}</p>)}
+-              </div>
+-            )}
+-
+-            <div>
+-              <Field label="Quer corrigir algo? Fale ou escreva a correção">
+-                <Input value={comando} onChange={(e) => setComando(e.target.value)} placeholder="Ex.: muda para três fechaduras e tira a visita técnica" />
+-              </Field>
+-              <div className="flex gap-2 mt-2">
+-                <Btn size="sm" variant="soft" disabled={!comando.trim() || carregando} icon={carregando ? Loader2 : Sparkles} onClick={() => interpretar(comando)}>
+-                  {carregando ? "Aplicando…" : "Aplicar correção"}
+-                </Btn>
+-              </div>
+-              {erro && <p className="text-[13px] text-rose-700 mt-2">{erro}</p>}
+-            </div>
+-          </>
+-        )}
+-      </Modal>
+-
+-      <ClienteForm form={novoCliente} setForm={setNovoCliente} onSave={salvarCliente}
+-        onSaved={(id) => id && setPrevia((pv) => ({ ...pv, clienteId: id }))} />
+-    </>
+-  );
++/* -------- interpretação por IA reaproveitada DENTRO do editor manual --------
++   A lógica de leitura da fala continua a mesma que existia na tela separada
++   de "orçamento por voz"; o que muda é o destino: em vez de gerar um documento
++   próprio, ela devolve um patch que preenche o formulário manual já aberto. */
++function interpretarParaFormulario(bruto, { clientes, servicos, produtos, empresa }) {
++  const itens = (bruto.itens || []).map((i) => {
++    const cat = i.tipo === "produto"
++      ? produtos.find((p) => p.id === i.catalogoId)
++      : servicos.find((s) => s.id === i.catalogoId);
++    const precoCatalogo = cat?.preco;
++    return {
++      id: uid(), tipo: i.tipo || "servico", catalogoId: cat?.id || null,
++      nome: cat
++        ? (i.tipo === "produto" ? `${cat.nome}${cat.marca ? " · " + cat.marca : ""}${cat.modelo ? " " + cat.modelo : ""}` : cat.nome)
++        : i.nome,
++      unidade: cat?.unidade || i.unidade || "unidade",
++      qtd: Number(i.qtd) || 1,
++      preco: i.preco != null ? Number(i.preco) : (precoCatalogo ?? 0),
++      custo: cat?.custo || 0,
++      obs: "",
++      semPreco: i.preco == null && precoCatalogo == null,
++      foraDoCatalogo: !cat,
++    };
++  });
++  const cl = clientes.find((c) => c.id === bruto.clienteId);
++  const parecidos = !cl && bruto.clienteSugerido
++    ? clientes.filter((c) => semAcento(c.fantasia || c.nome).includes(semAcento(String(bruto.clienteSugerido).split(" ")[0] || "")))
++    : [];
++  const avisos = [...(bruto.avisos || [])];
++  itens.filter((i) => i.semPreco).forEach((i) => avisos.push(`Informe o preço de "${i.nome}".`));
++  itens.filter((i) => i.foraDoCatalogo).forEach((i) => avisos
