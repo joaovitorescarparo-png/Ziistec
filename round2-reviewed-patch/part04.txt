@@ -1,0 +1,365 @@
+/>
++                <div className="min-w-0">
++                  <p className="text-[14px] font-medium text-slate-800 truncate">{a.nome}</p>
++                  <p className="text-[12px] text-slate-400 truncate">
++                    {a.compra.numero} · {a.compra.fornecedor} · vence {dataBR(a.compra.vencimento)}
++                  </p>
++                </div>
++              </div>
++              <div className="flex items-center gap-2 shrink-0">
++                <Btn size="sm" variant="ghost" onClick={() => abrirCompra(a.compra.id)}>Ver compra</Btn>
++                {a.url
++                  ? <a href={a.url} target="_blank" rel="noreferrer"
++                      className={cx("inline-flex items-center gap-2 rounded-xl bg-white ring-1 ring-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50", ring)}>
++                      Abrir documento
++                    </a>
++                  : <span className="text-[12px] text-slate-400">disponível ao salvar a compra</span>}
++              </div>
++            </div>
++          </Linha>
++        ))}
++      </Panel>
++
++      <div className="mt-8">
++        <Rotulo>Recibos para o cliente</Rotulo>
++        <Panel className="divide-y divide-slate-100 overflow-hidden">
++          {receitas.length === 0 ? (
++            <Empty icon={Receipt} title="Nenhuma cobrança registrada" sub="Conclua uma ordem de serviço ou lance uma receita para emitir o recibo." />
++          ) : receitas.map((l) => {
++            const st = statusLanc(l);
++            return (
++              <Linha key={l.id}>
++                <div className="flex items-center justify-between gap-3">
++                  <div className="min-w-0">
++                    <p className="text-[14px] font-medium text-slate-800 truncate">{l.descricao}</p>
++                    <p className="text-[12px] text-slate-400">
++                      {l.pago ? `recebido em ${dataBR(l.pagoEm)}` : `vence ${dataBR(l.vencimento)}`} · {brl(l.valor)}
++                    </p>
++                  </div>
++                  <div className="flex items-center gap-3 shrink-0">
++                    <Pill tone={st.tone}>{st.label}</Pill>
++                    <Btn size="sm" variant="soft" icon={Receipt} onClick={() => onRecibo(l)}>Gerar recibo</Btn>
++                  </div>
++                </div>
++              </Linha>
++            );
++          })}
++        </Panel>
++      </div>
++
++      <Panel className="p-5 mt-6">
++        <div className="flex gap-3">
++          <FileText className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" aria-hidden="true" />
++          <p className="text-[13px] text-slate-600 leading-relaxed">
++            <span className="font-medium text-slate-800">Nota fiscal:</span> integração ainda não configurada.
++            O recibo do ZiisTec é um comprovante de cobrança e não substitui documento fiscal.
++          </p>
++        </div>
++      </Panel>
++    </>
++  );
++}
++
++/* Recibo / documento de cobrança. Não é nota fiscal e o PDF diz isso. */
++function ReciboModal({ lanc, onClose, empresa, clientes, ordens, aviso }) {
++  const [obs, setObs] = useState("");
++  const [ocupado, setOcupado] = useState(false);
++  useEffect(() => { if (lanc) setObs(""); }, [lanc]);
++  if (!lanc) return null;
++
++  const cli = clientes.find((c) => c.id === lanc.clienteId) || null;
++  const os = lanc.origemTipo === "os" ? (ordens || []).find((o) => o.id === lanc.origemId) : null;
++  const tipoDocumento = lanc.pago ? "Recibo" : "Documento de cobrança";
++  const prefixoDocumento = lanc.pago ? "REC" : "COB";
++  const numero = `${prefixoDocumento}-${String(lanc.id || "").slice(-6).toUpperCase()}`;
++  const itens = os
++    ? [...(os.itens || []).map((i) => ({ nome: i.nome, qtd: i.qtd, unidade: unidadeLabel(i.unidade), total: i.qtd * i.preco })),
++       ...(os.adicionais || []).map((a) => ({ nome: `${a.nome} (adicional)`, qtd: a.qtd, unidade: unidadeLabel(a.unidade), total: a.qtd * a.preco }))]
++    : [{ nome: lanc.descricao, total: lanc.valor }];
++
++  const dados = {
++    empresa: { nome: empresa?.nome, documento: empresa?.documento, telefone: empresa?.telefone, email: empresa?.email, endereco: empresa?.endereco },
++    cliente: { nome: cli?.nome || cli?.fantasia || "Cliente", documento: cli?.documento, telefone: cli?.telefone, endereco: cli?.endereco },
++    numero,
++    origem: os ? `Ordem de serviço ${os.numero}` : lanc.descricao,
++    itens, valor: lanc.valor,
++    vencimento: lanc.pago ? null : lanc.vencimento,
++    pagoEm: lanc.pago ? lanc.pagoEm : null,
++    forma: lanc.forma || null,
++    observacoes: obs,
++  };
++
++  const gerar = async () => {
++    if (ocupado) return;
++    setOcupado(true);
++    try { await baixarReciboPDF(dados, numero); aviso(`${tipoDocumento} gerado. Documento não fiscal.`); }
++    catch (e) { aviso(e?.message || `Não foi possível gerar ${tipoDocumento.toLowerCase()}.`); }
++    finally { setOcupado(false); }
++  };
++
++  const compartilhar = async () => {
++    if (ocupado) return;
++    const texto = `${empresa?.nome || "ZiisTec"} · ${numero}\n${dados.origem}\nValor: ${brl(lanc.valor)}\nDocumento não fiscal.`;
++    setOcupado(true);
++    try {
++      if (suportaCompartilharRecibo()) {
++        const r = await compartilharReciboPDF(dados, numero, texto);
++        if (r.shared) { setOcupado(false); return; }
++      }
++      window.open(`https://wa.me/55${soDigitos(cli?.whatsapp || cli?.telefone)}?text=${encodeURIComponent(texto)}`, "_blank");
++    } catch (e) { aviso(e?.message || `Não foi possível compartilhar ${tipoDocumento.toLowerCase()}.`); }
++    finally { setOcupado(false); }
++  };
++
++  return (
++    <Modal open onClose={onClose} wide title={lanc.pago ? "Recibo do cliente" : "Documento de cobrança"} sub={`${numero} · ${brl(lanc.valor)}`}
++      footer={<><Btn variant="ghost" onClick={onClose}>Fechar</Btn>
++        <Btn variant="soft" icon={Share2} disabled={ocupado} onClick={compartilhar}>Enviar pelo WhatsApp</Btn>
++        <Btn icon={Printer} disabled={ocupado} onClick={gerar}>{ocupado ? "Gerando…" : "Gerar PDF"}</Btn></>}>
++      <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3">
++        <p className="text-[13px] font-semibold text-amber-900">DOCUMENTO NÃO FISCAL</p>
++        <p className="text-[12.5px] text-amber-900/90 mt-1 leading-relaxed">
++          Comprovante de serviço e cobrança. Não substitui nota fiscal.
++        </p>
++        <p className="text-[12px] text-amber-900/80 mt-2">
++          Situação fiscal: <span className="font-medium">não emitida</span> · integração com provedor de NFS-e ainda não configurada.
++        </p>
++      </div>
++
++      <div className="rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100 text-[14px]">
++        <div className="px-4 py-3 flex justify-between gap-3"><span className="text-slate-500">Cliente</span><span className="text-slate-800 text-right">{dados.cliente.nome}</span></div>
++        <div className="px-4 py-3 flex justify-between gap-3"><span className="text-slate-500">Referente a</span><span className="text-slate-800 text-right">{dados.origem}</span></div>
++        <div className="px-4 py-3 flex justify-between gap-3">
++          <span className="text-slate-500">{lanc.pago ? "Pago em" : "Vencimento"}</span>
++          <span className="text-slate-800">{dataBR(lanc.pago ? lanc.pagoEm : lanc.vencimento)}{lanc.forma ? ` · ${lanc.forma}` : ""}</span>
++        </div>
++        <div className="px-4 py-3 flex justify-between items-baseline gap-3">
++          <span className="text-slate-500">Valor</span>
++          <span className="text-xl font-semibold text-slate-900 tabular-nums">{brl(lanc.valor)}</span>
++        </div>
++      </div>
++
++      <Field label="Observações do recibo" hint="Opcional. Sai no documento.">
++        <CampoVoz rows={2} valor={obs} onChange={setObs} placeholder="Ex.: pagamento referente à segunda parcela" />
++      </Field>
++    </Modal>
++  );
++}
++
+ /* =========================================================== Configurações */
+ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssinatura, pedirConfirmacao }) {
+   const [f, setF] = useState(empresa);
+@@ -4375,10 +4908,12 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
+               <Panel className="divide-y divide-slate-100">
+                 {[
+                   ["Cliente", nomeCliente(g.clienteId), () => abrirCliente(g.clienteId)],
++                  ["Origem", g.tipo === "servico" ? "Serviço executado" : "Produto instalado", null],
+                   ["Local do serviço", g.local || "—", null],
+                   ["Executado em", dataBR(g.inicio), null],
+                   ["Prazo", g.tipo === "servico" ? `${g.dias} dias` : `${g.meses} meses do fabricante`, null],
+                   ["Válida até", dataBR(g.ate), null],
++                  ["Tempo restante", st.detalhe, null],
+                   ["Ordem de origem", origem ? origem.numero : "—", origem ? () => abrirOS(origem.id) : null],
+                   ...(produto ? [["Equipamento", `${produto.nome}${produto.marca ? " · " + produto.marca : ""} ${produto.modelo || ""}`, null]] : []),
+                   ...(g.serie ? [["Número de série", g.serie, null]] : []),
+diff --git a/src/lib/reciboPdf.js b/src/lib/reciboPdf.js
+new file mode 100644
+index 0000000..94b5b91
+--- /dev/null
++++ b/src/lib/reciboPdf.js
+@@ -0,0 +1,195 @@
++import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
++
++/* Recibo / documento de cobrança para o cliente.
++ *
++ * NÃO é documento fiscal e o PDF diz isso de forma explícita. Não emite NF-e,
++ * NFS-e nem DANFE, e não chama nenhum serviço externo.
++ *
++ * É gerado no próprio navegador a partir de dados que o proprietário já tem
++ * carregados (protegidos por RLS). Não cria endpoint, bucket nem tabela nova.
++ */
++
++const limpar = (v = '') => String(v ?? '')
++  .replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"')
++  .replace(/[\u2022]/g, '-').replace(/[\u2013\u2014]/g, '-')
++  .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '?');
++
++const dinheiro = (n) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
++const dataBR = (s) => (s ? String(s).split('-').reverse().join('/') : '-');
++const nomeArquivoSeguro = (s) => limpar(s).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-').slice(0, 80) || 'recibo';
++
++function quebrar(texto, fonte, tamanho, largura) {
++  const linhas = [];
++  for (const paragrafo of limpar(texto).split(/\r?\n/)) {
++    const palavras = paragrafo.split(/\s+/).filter(Boolean);
++    if (!palavras.length) { linhas.push(''); continue; }
++    let linha = '';
++    for (const palavra of palavras) {
++      const teste = linha ? `${linha} ${palavra}` : palavra;
++      if (fonte.widthOfTextAtSize(teste, tamanho) <= largura) linha = teste;
++      else { if (linha) linhas.push(linha); linha = palavra; }
++    }
++    if (linha) linhas.push(linha);
++  }
++  return linhas;
++}
++
++export async function montarReciboPDF(dados) {
++  const {
++    empresa = {}, cliente = {}, numero = '', origem = '', itens = [],
++    valor = 0, vencimento = null, pagoEm = null, forma = null,
++    observacoes = '', emitidoEm = new Date().toISOString().slice(0, 10),
++    logoBytes = null, logoTipo = '',
++  } = dados || {};
++
++  const tituloDocumento = pagoEm ? 'RECIBO' : 'DOCUMENTO DE COBRANCA';
++  const pdf = await PDFDocument.create();
++  const pagina = pdf.addPage([595.28, 841.89]);          // A4
++  const regular = await pdf.embedFont(StandardFonts.Helvetica);
++  const negrito = await pdf.embedFont(StandardFonts.HelveticaBold);
++  const { width, height } = pagina.getSize();
++  const margem = 48;
++  const tinta = rgb(0.08, 0.11, 0.15);
++  const suave = rgb(0.45, 0.5, 0.56);
++  const linhaCor = rgb(0.85, 0.88, 0.91);
++  let y = height - margem;
++
++  const escrever = (texto, { x = margem, size = 10, fonte = regular, cor = tinta } = {}) => {
++    pagina.drawText(limpar(texto), { x, y, size, font: fonte, color: cor });
++  };
++  const direita = (texto, { size = 10, fonte = regular, cor = tinta } = {}) => {
++    const t = limpar(texto);
++    pagina.drawText(t, { x: width - margem - fonte.widthOfTextAtSize(t, size), y, size, font: fonte, color: cor });
++  };
++  const regua = () => {
++    pagina.drawLine({ start: { x: margem, y }, end: { x: width - margem, y }, thickness: 0.7, color: linhaCor });
++  };
++
++  /* cabeçalho: logo quando houver, dados da empresa e identificação do documento */
++  if (logoBytes) {
++    try {
++      const tipo = String(logoTipo || '').toLowerCase();
++      const img = tipo.includes('png') ? await pdf.embedPng(logoBytes)
++        : (tipo.includes('jpeg') || tipo.includes('jpg')) ? await pdf.embedJpg(logoBytes) : null;
++      if (img) {
++        const alvo = 46;
++        const escala = Math.min(alvo / img.height, 120 / img.width);
++        pagina.drawImage(img, { x: margem, y: y - alvo, width: img.width * escala, height: img.height * escala });
++      }
++    } catch { /* logo inválida não impede o documento */ }
++  }
++
++  y -= 8;
++  escrever(empresa.nome || 'Empresa', { x: margem + (logoBytes ? 132 : 0), size: 15, fonte: negrito });
++  direita(tituloDocumento, { size: 15, fonte: negrito });
++  y -= 15;
++  if (empresa.documento) escrever(`CNPJ/CPF: ${empresa.documento}`, { x: margem + (logoBytes ? 132 : 0), size: 9, cor: suave });
++  direita(numero ? `Nº ${numero}` : '', { size: 9, cor: suave });
++  y -= 12;
++  const contato = [empresa.telefone, empresa.email].filter(Boolean).join(' · ');
++  if (contato) escrever(contato, { x: margem + (logoBytes ? 132 : 0), size: 9, cor: suave });
++  direita(`Emitido em ${dataBR(emitidoEm)}`, { size: 9, cor: suave });
++  y -= 12;
++  if (empresa.endereco) {
++    for (const linha of quebrar(empresa.endereco, regular, 9, 300)) { escrever(linha, { x: margem + (logoBytes ? 132 : 0), size: 9, cor: suave }); y -= 11; }
++  }
++
++  y -= 10; regua(); y -= 20;
++
++  /* aviso obrigatório: este documento não substitui nota fiscal */
++  pagina.drawRectangle({ x: margem, y: y - 22, width: width - margem * 2, height: 30, color: rgb(0.98, 0.95, 0.86) });
++  escrever('DOCUMENTO NAO FISCAL', { x: margem + 12, size: 11, fonte: negrito, cor: rgb(0.48, 0.35, 0.05) });
++  y -= 13;
++  escrever('Comprovante de servico/cobranca. Nao substitui nota fiscal.', { x: margem + 12, size: 8.5, cor: rgb(0.48, 0.35, 0.05) });
++  y -= 30;
++
++  /* cliente */
++  escrever('CLIENTE', { size: 8.5, fonte: negrito, cor: suave }); y -= 14;
++  escrever(cliente.nome || '-', { size: 11.5, fonte: negrito }); y -= 13;
++  if (cliente.documento) { escrever(`CNPJ/CPF: ${cliente.documento}`, { size: 9, cor: suave }); y -= 12; }
++  if (cliente.telefone) { escrever(cliente.telefone, { size: 9, cor: suave }); y -= 12; }
++  if (cliente.endereco) {
++    for (const linha of quebrar(cliente.endereco, regular, 9, width - margem * 2)) { escrever(linha, { size: 9, cor: suave }); y -= 11; }
++  }
++  if (origem) { y -= 2; escrever(`Referente a: ${origem}`, { size: 9, cor: suave }); y -= 12; }
++
++  y -= 8; regua(); y -= 20;
++
++  /* itens/resumo do serviço */
++  escrever('DESCRICAO', { size: 8.5, fonte: negrito, cor: suave });
++  direita('VALOR', { size: 8.5, fonte: negrito, cor: suave });
++  y -= 6; regua(); y -= 16;
++
++  const lista = (itens || []).slice(0, 40);
++  if (!lista.length) { escrever('Servicos prestados', { size: 10 }); y -= 16; }
++  for (const item of lista) {
++    const descricao = [item.nome, item.qtd ? `(${item.qtd} ${item.unidade || 'un'})` : ''].filter(Boolean).join(' ');
++    const linhas = quebrar(descricao, regular, 10, width - margem * 2 - 110);
++    linhas.forEach((linha, idx) => {
++      escrever(linha, { size: 10 });
++      if (idx === 0 && item.total != null) direita(dinheiro(item.total), { size: 10 });
++      y -= 14;
++    });
++    if (y < 170) break;                    // mantém o rodapé legível em uma página
++  }
++
++  y -= 4; regua(); y -= 24;
++  escrever('TOTAL', { size: 11, fonte: negrito });
++  direita(dinheiro(valor), { size: 18, fonte: negrito });
++  y -= 26;
++
++  /* pagamento */
++  const pagamento = [];
++  if (pagoEm) pagamento.push(`Pago em ${dataBR(pagoEm)}`);
++  else if (vencimento) pagamento.push(`Vencimento ${dataBR(vencimento)}`);
++  if (forma) pagamento.push(`Forma: ${forma}`);
++  if (pagamento.length) { escrever(pagamento.join('   ·   '), { size: 9.5, cor: suave }); y -= 18; }
++
++  if (observacoes) {
++    y -= 4;
++    escrever('OBSERVACOES', { size: 8.5, fonte: negrito, cor: suave }); y -= 13;
++    for (const linha of quebrar(observacoes, regular, 9.5, width - margem * 2)) {
++      if (y < 90) break;
++      escrever(linha, { size: 9.5, cor: suave }); y -= 12;
++    }
++  }
++
++  /* rodapé */
++  pagina.drawText(limpar('Documento nao fiscal emitido pelo ZiisTec.'), {
++    x: margem, y: 46, size: 8, font: regular, color: suave,
++  });
++
++  return pdf.save();
++}
++
++export async function baixarReciboPDF(dados, nomeArquivo) {
++  const bytes = await montarReciboPDF(dados);
++  const blob = new Blob([bytes], { type: 'application/pdf' });
++  const url = URL.createObjectURL(blob);
++  const a = document.createElement('a');
++  const rotulo = dados?.pagoEm ? 'Recibo' : 'Cobranca';
++  a.href = url; a.download = nomeArquivoSeguro(nomeArquivo || `${rotulo}-${dados?.numero || ''}`) + (String(nomeArquivo || '').endsWith('.pdf') ? '' : '.pdf');
++  a.rel = 'noopener';
++  document.body.appendChild(a); a.click(); a.remove();
++  setTimeout(() => URL.revokeObjectURL(url), 30000);
++  return true;
++}
++
++export function suportaCompartilharRecibo() {
++  return typeof navigator !== 'undefined' && typeof navigator.share === 'function'
++    && typeof navigator.canShare === 'function' && typeof File !== 'undefined';
++}
++
++export async function compartilharReciboPDF(dados, nomeArquivo, texto = '') {
++  if (!suportaCompartilharRecibo()) return { shared: false, unsupported: true };
++  const bytes = await montarReciboPDF(dados);
++  const arquivo = new File([bytes], nomeArquivoSeguro(nomeArquivo) + '.pdf', { type: 'application/pdf' });
++  if (!navigator.canShare({ files: [arquivo] })) return { shared: false, unsupported: true };
++  try {
++    await navigator.share({ title: dados?.pagoEm ? 'Recibo' : 'Documento de cobrança', text: texto, files: [arquivo] });
++    return { shared: true };
++  } catch (e) {
++    if (e?.name === 'AbortError') return { shared: false, cancelled: true };
++    throw e;
++  }
++}
