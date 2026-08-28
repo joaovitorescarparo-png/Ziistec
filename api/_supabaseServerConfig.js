@@ -6,6 +6,7 @@ const STAGING_BRANCH = 'product-v2-review';
 const STAGING_BRANCHES = Object.freeze([
   STAGING_BRANCH,
   'ui-v1-v2-merge',
+  'hardening-v2-staging',
 ]);
 
 const clean = (value) => String(value || '').trim();
