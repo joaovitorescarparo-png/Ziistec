@@ -1,0 +1,28 @@
+name: Snapshot Round 3.1 base
+
+on:
+  push:
+    branches: [hardening-v2-staging]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: round31-exact-base
+          path: |
+            api/quote-pdf.js
+            src/lib/dataApi.js
+            scripts/reassemble.mjs
+            scripts/verify-consolidated-source.mjs
+            package.json
+          if-no-files-found: error
+          retention-days: 1
