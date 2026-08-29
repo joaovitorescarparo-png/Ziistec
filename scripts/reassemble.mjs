@@ -1,10 +1,25 @@
 import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function assertHashes(files, contents, expected, label) {
+  if (files.length !== expected.length) {
+    throw new Error(`Expected ${expected.length} ${label} parts, found ${files.length}`);
+  }
+  const actual = contents.map((content) => sha256(Buffer.from(content, 'utf8')));
+  const mismatches = actual
+    .map((hash, index) => ({ file: files[index], expected: expected[index], actual: hash }))
+    .filter((item) => item.expected !== item.actual);
+  if (mismatches.length) {
+    console.error(`${label} integrity mismatches:`, JSON.stringify(mismatches, null, 2));
+    throw new Error(`${label} part integrity check failed`);
+  }
 }
 
 function assembleText(dir, output, expected) {
@@ -20,53 +35,52 @@ function assembleText(dir, output, expected) {
 
 function assembleGzipBase64({ dir, output, partHashes, gzipHash, outputHash }) {
   const parts = readdirSync(dir).filter((f) => /^part\d{2}\.b64$/.test(f)).sort();
-  if (parts.length !== partHashes.length) {
-    throw new Error(`Expected ${partHashes.length} parts in ${dir}, found ${parts.length}`);
-  }
-
   const contents = parts.map((file) => readFileSync(join(dir, file), 'utf8'));
-  const actualPartHashes = contents.map((content) => sha256(Buffer.from(content, 'utf8')));
-  const encoded = contents.join('');
-  const compressed = Buffer.from(encoded, 'base64');
-  const actualGzipHash = sha256(compressed);
+  assertHashes(parts, contents, partHashes, 'base source');
 
-  let content;
-  try {
-    content = gunzipSync(compressed);
-  } catch (error) {
-    console.error('Round3 integrity diagnostics:', JSON.stringify({
-      parts,
-      actualPartHashes,
-      actualGzipHash,
-      gunzipError: error instanceof Error ? error.message : String(error),
-    }, null, 2));
-    throw error;
+  const compressed = Buffer.from(contents.join(''), 'base64');
+  const actualGzipHash = sha256(compressed);
+  if (actualGzipHash !== gzipHash) {
+    throw new Error(`Compressed integrity check failed for ${output}: ${actualGzipHash}`);
   }
 
+  const content = gunzipSync(compressed);
   const actualOutputHash = sha256(content);
-  const mismatchedParts = actualPartHashes
-    .map((actual, index) => ({ file: parts[index], expected: partHashes[index], actual }))
-    .filter(({ expected, actual }) => expected !== actual);
-
-  const diagnostics = {
-    parts,
-    actualPartHashes,
-    expectedPartHashes: partHashes,
-    mismatchedParts,
-    actualGzipHash,
-    expectedGzipHash: gzipHash,
-    actualOutputHash,
-    expectedOutputHash: outputHash,
-  };
-
-  if (mismatchedParts.length || actualGzipHash !== gzipHash || actualOutputHash !== outputHash) {
-    console.error('Round3 integrity diagnostics:', JSON.stringify(diagnostics, null, 2));
-    throw new Error(`Integrity check failed for ${output}`);
+  if (actualOutputHash !== outputHash) {
+    throw new Error(`Integrity check failed for ${output}: ${actualOutputHash}`);
   }
 
   mkdirSync(dirname(output), { recursive: true });
   writeFileSync(output, content);
-  console.log(`Reassembled ${output} (${actualOutputHash})`);
+  console.log(`Reassembled validated base ${output} (${actualOutputHash})`);
+}
+
+function applyBase64Patch({ dir, target, partHashes, patchHash, outputHash }) {
+  const parts = readdirSync(dir).filter((f) => /^part\d{2}\.b64$/.test(f)).sort();
+  const contents = parts.map((file) => readFileSync(join(dir, file), 'utf8'));
+  assertHashes(parts, contents, partHashes, 'round 3 patch');
+
+  const patchBytes = Buffer.from(contents.join(''), 'base64');
+  const actualPatchHash = sha256(patchBytes);
+  if (actualPatchHash !== patchHash) {
+    throw new Error(`Round 3 patch integrity check failed: ${actualPatchHash}`);
+  }
+
+  const applied = spawnSync('git', ['apply', '--whitespace=nowarn', '-'], {
+    input: patchBytes,
+    encoding: 'utf8',
+  });
+  if (applied.status !== 0) {
+    throw new Error(`Could not apply Round 3 patch: ${applied.stderr || applied.stdout || 'unknown git apply error'}`);
+  }
+
+  const finalContent = readFileSync(target);
+  const actualOutputHash = sha256(finalContent);
+  if (actualOutputHash !== outputHash) {
+    throw new Error(`Final Round 3 source integrity check failed: ${actualOutputHash}`);
+  }
+  console.log(`Applied verified Round 3 patch (${actualPatchHash})`);
+  console.log(`Final ${target} verified (${actualOutputHash})`);
 }
 
 // Migration histórica de fundação.
@@ -76,20 +90,38 @@ assembleText(
   '80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd',
 );
 
-// Fonte consolidada: hardening V2 + Rodada 3 integrada.
+// Base que já havia passado pela CI antes da Rodada 3.
 assembleGzipBase64({
   dir: 'src/legacy/ZiisTecApp.gz.parts',
   output: 'src/legacy/ZiisTecApp.jsx',
   partHashes: [
-    'd1474108571542f01fd3e507c868fa54714d241e1e0ba3a6dd18034ff68de9d2',
-    '402906e0368e6ba6c42b6ad6652aa0a4fa1f25e469f0ad4cebcdbaff34da0090',
-    '107317f702e1632a224fea1e91d8d4cdfc792d10e1e89335774466e3b91c75e5',
-    'bc223e4d2447caac328cafc7f9fcc6e2788009ac2409cae088a3bda37b28e1e7',
-    'd05e7ac31a18bccfcd902a1d970503aa7dbdd62acef7e879ecd68831844b4b26',
-    'b726f003f311399202d335a0359936aaf4f3c709c86179a6e2115a59b996c956',
-    '11d17564abc9252e620861a91d4f48313810c1fed16b5501032b3cf5d37f0aaa',
-    'e6080734c6d45c3147b980cdfb4a64b5421c7d8dad5f52ea2165ab7455e7164',
+    '93ca2dc2759834f9513bb1d8aac0a05d5a348c533bdf901f783fe19c8e78a199',
+    '68d5b0a21ad58963d0f4b76cbdd133fb613d2003236b598b294b4ac2b252e4ed',
+    'fa39ece10c892d031174782affa353a0e9ccdef5d7c280a7b183a0512d770e24',
+    'e52d06294933388511b0af107162bfa4ca9a4f76872c8abfa8df2d130c8fb224',
+    '02718cc20823a0f43e46d424c5b7d583dc28fbdae0816f71f40124fd1adf4bbc',
+    '655b86c428145c791fb220eeb7d68ca31b4165e3f0be409c28e7508edaedbcfe',
+    'b77d88cca14974b45021425482e8037dab293886cf0bce53cccd5beb303e5b98',
+    '06baf80d0126b60d4496c9a170facfb3a54fa862a6ee01c500f54309f2f683d2',
   ],
-  gzipHash: '340f818d0d260469045b2a7c75601a53a212d90254f0a8855f9e35dc3b7ab2e0',
+  gzipHash: '1c78beeff724d9469872a47a3cb629fa1a71848e73f730b555f1be753f53534a',
+  outputHash: '3289874849f1e5ee87c30d8d0670b0c6f302a8589c508467bb86d966dff98cbd',
+});
+
+// Delta pequeno e auditável que leva a base validada para a Rodada 3 integrada.
+applyBase64Patch({
+  dir: 'src/legacy/round3.patch.v2.parts',
+  target: 'src/legacy/ZiisTecApp.jsx',
+  partHashes: [
+    'bee62e3e562eb6fc51d7d8403c6c302d5bd3baca00000c3996a59d48cf475d95',
+    '9d49a20bf1cb62aaa79ecd055f8517ae6e89e406666cd718313337f0803a868e',
+    '87ba8b4004c82e06b61f15dd542cb79f9192a9183c9ae16da89a21a43067df4d',
+    '46794b35cb60a5035f44f13c52ac168ad76803c40721f6330cb4fb562861b2e5',
+    'c7dcab799180e30c037315244a3276fea2fa265c3403d1d90b9f1e6daa7e19f0',
+    '1d1e512043f3abf7775f786b06d88c01efb165a6933387cdf4dd6a827f304bd1',
+    '6c03604a724c3bd85ba2e7531a8acc6d5028db133765f5f638157a0a946906f6',
+    '2085ca718faeb22d35c58d9a3586b1f308781e76006b33b75461e97aa3df8017',
+  ],
+  patchHash: '3835bb13d6b00cdaf22da9a505e1d7d74fec1549e54200ceb17b5fed86de570c',
   outputHash: 'ce1523f036d2db33d6bfe24631907ef2bf3d2aca144366c1fc64fbdb0a5e9104',
 });
