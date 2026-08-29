@@ -62,26 +62,34 @@ for (const marker of [
   'ORÇAMENTO',
   'CONDIÇÕES DE PAGAMENTO',
   'const sigW = 190',
-  "company.owner_name || 'Responsável'",
   'ZiisTec ·',
   'const txtRight =',
   'Tabela com grade visual consistente e números alinhados pela direita.',
   'qtyRight',
   'unitRight',
   'totalRight',
-  'const SAFE_BOTTOM = 66',
-  'const minVisibleRows = 5',
-  'Informações finais em card único para reduzir vazios e impedir sobreposição.',
-  'Rodapé é desenhado por último e possui uma zona protegida de 66 pt acima dele.',
+  'const SAFE_BOTTOM = 72',
+  'const minVisibleRows = 6',
+  "const companyTextX = logo ? margin + 116 : margin",
+  'Grade vazia estruturada; a marca-d\'água só ocupa essa área sem texto.',
+  'const watermarkBandH = fillerTop - fillerBottom',
+  'drawLogoFit(page, logo, tableRight - wmW - 14, wmY, wmW, wmH, 0.055)',
+  'Calcula o bloco inferior antes de desenhar: total, informações e assinaturas ficam juntos.',
+  'Assinaturas com rótulo e nome em área própria; nunca invadem rodapé ou card.',
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
-if (pdf.includes('drawWatermark(page)')) fail('PDF reintroduziu a imagem completa da logo como marca-d’água gigante');
-else ok('PDF mantém a logo no cabeçalho sem marca-d’água invasiva');
-if (!pdf.includes('while (fillerRows > 0 && y - 32 > 310)')) fail('PDF perdeu o preenchimento estrutural seguro para orçamentos com poucos itens');
+if (pdf.includes("page.drawRectangle({ x: margin, y: A4[1] - 101, width: 132, height: 70, color: white })")) {
+  fail('PDF reintroduziu a caixa branca rígida atrás da logo do cabeçalho');
+} else ok('Logo do cabeçalho é renderizada diretamente, sem quadrado branco extra');
+if (pdf.includes('drawWatermark(page)')) fail('PDF reintroduziu a marca-d’água de página inteira que podia cruzar textos');
+else ok('Marca-d’água não é desenhada sobre a página inteira');
+if (!pdf.includes('while (fillerRows > 0 && y - 32 > 300)')) fail('PDF perdeu o preenchimento estrutural seguro para orçamentos com poucos itens');
 else ok('PDF usa linhas vazias estruturadas para reduzir espaço solto sem inventar itens');
 if (!pdf.includes('if (y - signatureH < SAFE_BOTTOM) newPage(true);')) fail('PDF perdeu a proteção das assinaturas contra o rodapé');
 else ok('Assinaturas respeitam zona segura e não podem invadir o rodapé');
+if (!pdf.includes('if (y - lowerBlockH < SAFE_BOTTOM) newPage(true);')) fail('PDF perdeu a reserva conjunta do bloco inferior');
+else ok('Total, card inferior e assinaturas são reservados antes do desenho');
 if ((pdf.match(/page\.drawLine\(\{ start:/g) || []).length < 2) fail('PDF premium perdeu as linhas de assinatura/estrutura visual');
 else ok('PDF premium mantém áreas de assinatura para responsável e cliente');
 const quoteItemsLine = pdf.split('\n').find((line) => line.includes('/rest/v1/quote_items?')) || '';
@@ -89,9 +97,9 @@ if (/unit_cost|\bcost\b|margin|margem/i.test(quoteItemsLine)) fail('PDF premium 
 else ok('PDF premium mantém custos internos fora do documento do cliente');
 
 if (failures.length) {
-  console.error('\nROUND 3.2 SECURITY/UX CHECK: FAIL\n');
+  console.error('\nROUND 3.3 SECURITY/UX CHECK: FAIL\n');
   failures.forEach((message, index) => console.error(`${index + 1}. ${message}`));
   process.exit(1);
 }
 
-console.log('\nROUND 3.2 SECURITY/UX CHECK: OK');
+console.log('\nROUND 3.3 SECURITY/UX CHECK: OK');
