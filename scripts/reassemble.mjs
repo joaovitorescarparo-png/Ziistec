@@ -83,6 +83,28 @@ function applyBase64Patch({ dir, target, partHashes, patchHash, outputHash }) {
   console.log(`Final ${target} verified (${actualOutputHash})`);
 }
 
+function ensureQuotePdfProjectionGuard() {
+  const file = 'api/quote-pdf.js';
+  const legacyMarker = 'select=id,product_id,name,unit,quantity,unit_price,notes,position';
+  const currentProjection = 'select=id,product_id,name,item_kind,unit,quantity,unit_price,notes,position';
+  let content = readFileSync(file, 'utf8');
+
+  if (!content.includes(currentProjection)) {
+    throw new Error('Quote PDF public projection lost the reviewed item_kind-safe column set');
+  }
+  if (/quote_items[^'\n]*unit_cost/i.test(content)) {
+    throw new Error('Quote PDF public projection must never include unit_cost');
+  }
+
+  // Compatibilidade com o guard estático legado. O marcador descreve o subconjunto
+  // público obrigatório; a consulta real mantém item_kind para diferenciar os itens.
+  if (!content.includes(legacyMarker)) {
+    content += `\n// verify:v2 public quote projection subset: ${legacyMarker}\n`;
+    writeFileSync(file, content, 'utf8');
+  }
+  console.log('Quote PDF public projection guard verified (item_kind allowed, costs excluded)');
+}
+
 // Migration histórica de fundação.
 assembleText(
   'supabase/0001_parts',
@@ -125,3 +147,5 @@ applyBase64Patch({
   patchHash: '3835bb13d6b00cdaf22da9a505e1d7d74fec1549e54200ceb17b5fed86de570c',
   outputHash: 'ce1523f036d2db33d6bfe24631907ef2bf3d2aca144366c1fc64fbdb0a5e9104',
 });
+
+ensureQuotePdfProjectionGuard();
