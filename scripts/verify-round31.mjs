@@ -55,6 +55,30 @@ else ok('Barra lateral usa a faixa azul inteira como gaveta por gesto, sem setin
 if (!app.includes('excluidoEm')) fail('UI não diferencia clientes arquivados para preservar histórico');
 else ok('UI oculta/identifica arquivados sem destruir histórico');
 
+const logoImage = read('src/lib/logoImage.js');
+for (const marker of [
+  'removerFundoBrancoConectado',
+  'caixaConteudo',
+  'prepararLogoTransparente',
+  "'logo-limpa.png'",
+  "'image/png'",
+]) {
+  if (!logoImage.includes(marker)) fail(`Tratamento da logo perdeu marcador: ${marker}`);
+}
+else ok('Logo é recortada no navegador e o fundo branco conectado às bordas vira transparência');
+
+const storageExtras = read('src/lib/storageExtras.js');
+for (const marker of [
+  "import { prepararLogoTransparente } from './logoImage';",
+  "'/branding/logo-clean-'",
+  'prepararLogoTransparente(source)',
+  ".eq('logo_path',path)",
+  "contentType:'image/png'",
+]) {
+  if (!storageExtras.includes(marker)) fail(`Migração automática da logo perdeu marcador: ${marker}`);
+}
+if (storageExtras.includes('/branding/logo-clean-')) ok('Logos antigas são migradas para PNG limpa de forma idempotente');
+
 const pdf = read('api/quote-pdf.js');
 for (const marker of [
   'logo_path',
@@ -62,34 +86,29 @@ for (const marker of [
   'ORÇAMENTO',
   'CONDIÇÕES DE PAGAMENTO',
   'const sigW = 190',
+  "company.owner_name || 'Responsável'",
   'ZiisTec ·',
   'const txtRight =',
   'Tabela com grade visual consistente e números alinhados pela direita.',
   'qtyRight',
   'unitRight',
   'totalRight',
-  'const SAFE_BOTTOM = 72',
+  'const SAFE_BOTTOM = 66',
   'const minVisibleRows = 6',
-  "const companyTextX = logo ? margin + 116 : margin",
-  'Grade vazia estruturada; a marca-d\'água só ocupa essa área sem texto.',
-  'const watermarkBandH = fillerTop - fillerBottom',
-  'drawLogoFit(page, logo, tableRight - wmW - 14, wmY, wmW, wmH, 0.055)',
-  'Calcula o bloco inferior antes de desenhar: total, informações e assinaturas ficam juntos.',
-  'Assinaturas com rótulo e nome em área própria; nunca invadem rodapé ou card.',
+  'Card inferior com altura dinâmica e sem cruzar a área de assinatura.',
+  "Marca-d'água ampla e suave por trás do conteúdo.",
+  'drawPageWatermark();',
+  'const wmW = 285',
+  'drawLogoFit(page, logo, margin, A4[1] - 100, 128, 68, 1)',
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
-if (pdf.includes("page.drawRectangle({ x: margin, y: A4[1] - 101, width: 132, height: 70, color: white })")) {
-  fail('PDF reintroduziu a caixa branca rígida atrás da logo do cabeçalho');
-} else ok('Logo do cabeçalho é renderizada diretamente, sem quadrado branco extra');
-if (pdf.includes('drawWatermark(page)')) fail('PDF reintroduziu a marca-d’água de página inteira que podia cruzar textos');
-else ok('Marca-d’água não é desenhada sobre a página inteira');
+if (pdf.includes('const watermarkBandH =')) fail('PDF voltou a limitar a marca-d’água apenas às linhas vazias');
+else ok('PDF usa marca-d’água ampla por trás do conteúdo, desenhada antes dos textos');
 if (!pdf.includes('while (fillerRows > 0 && y - 32 > 300)')) fail('PDF perdeu o preenchimento estrutural seguro para orçamentos com poucos itens');
 else ok('PDF usa linhas vazias estruturadas para reduzir espaço solto sem inventar itens');
 if (!pdf.includes('if (y - signatureH < SAFE_BOTTOM) newPage(true);')) fail('PDF perdeu a proteção das assinaturas contra o rodapé');
 else ok('Assinaturas respeitam zona segura e não podem invadir o rodapé');
-if (!pdf.includes('if (y - lowerBlockH < SAFE_BOTTOM) newPage(true);')) fail('PDF perdeu a reserva conjunta do bloco inferior');
-else ok('Total, card inferior e assinaturas são reservados antes do desenho');
 if ((pdf.match(/page\.drawLine\(\{ start:/g) || []).length < 2) fail('PDF premium perdeu as linhas de assinatura/estrutura visual');
 else ok('PDF premium mantém áreas de assinatura para responsável e cliente');
 const quoteItemsLine = pdf.split('\n').find((line) => line.includes('/rest/v1/quote_items?')) || '';
@@ -97,9 +116,9 @@ if (/unit_cost|\bcost\b|margin|margem/i.test(quoteItemsLine)) fail('PDF premium 
 else ok('PDF premium mantém custos internos fora do documento do cliente');
 
 if (failures.length) {
-  console.error('\nROUND 3.3 SECURITY/UX CHECK: FAIL\n');
+  console.error('\nROUND 3.4 SECURITY/UX CHECK: FAIL\n');
   failures.forEach((message, index) => console.error(`${index + 1}. ${message}`));
   process.exit(1);
 }
 
-console.log('\nROUND 3.3 SECURITY/UX CHECK: OK');
+console.log('\nROUND 3.4 SECURITY/UX CHECK: OK');
