@@ -31,13 +31,20 @@ A versão atual preserva as migrations e hardenings posteriores à base do Claud
 5. A observação da entrega original do Claude sobre garantia por OS é histórica: a necessidade já foi resolvida posteriormente pelas migrations 0063/0064 e não deve ser tratada como pendência atual.
 
 ## Integridade da fonte consolidada
-O `src/legacy/ZiisTecApp.jsx` integrado é reconstruído a partir de partes gzip/base64 verificadas por SHA-256.
+Para reduzir o risco de corrupção na transferência do arquivo React grande, a integração usa duas camadas verificáveis:
 
-SHA-256 esperado da fonte consolidada:
+1. a fonte-base já aprovada anteriormente é reconstruída a partir de 8 partes gzip/base64 com hashes fixados;
+2. um patch pequeno da Rodada 3, também dividido em 8 partes com SHA-256 individual, é validado e aplicado sobre essa base.
+
+O patch completo possui SHA-256:
+
+`3835bb13d6b00cdaf22da9a505e1d7d74fec1549e54200ceb17b5fed86de570c`
+
+SHA-256 esperado da fonte final consolidada:
 
 `ce1523f036d2db33d6bfe24631907ef2bf3d2aca144366c1fc64fbdb0a5e9104`
 
-O script `scripts/reassemble.mjs` valida cada parte, o gzip completo e o arquivo final antes de gravar a fonte. O script `scripts/verify-consolidated-source.mjs` valida novamente o hash consolidado.
+O script `scripts/reassemble.mjs` valida a base, cada parte do patch, o patch completo e o arquivo final. O script `scripts/verify-consolidated-source.mjs` valida novamente o hash final.
 
 ## O que NÃO foi feito nesta integração
 - Nenhuma migration nova foi criada para a Rodada 3.
