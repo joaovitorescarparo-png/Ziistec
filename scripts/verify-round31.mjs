@@ -69,11 +69,19 @@ for (const marker of [
   'qtyRight',
   'unitRight',
   'totalRight',
+  'const SAFE_BOTTOM = 66',
+  'const minVisibleRows = 5',
+  'Informações finais em card único para reduzir vazios e impedir sobreposição.',
+  'Rodapé é desenhado por último e possui uma zona protegida de 66 pt acima dele.',
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
 if (pdf.includes('drawWatermark(page)')) fail('PDF reintroduziu a imagem completa da logo como marca-d’água gigante');
 else ok('PDF mantém a logo no cabeçalho sem marca-d’água invasiva');
+if (!pdf.includes('while (fillerRows > 0 && y - 32 > 310)')) fail('PDF perdeu o preenchimento estrutural seguro para orçamentos com poucos itens');
+else ok('PDF usa linhas vazias estruturadas para reduzir espaço solto sem inventar itens');
+if (!pdf.includes('if (y - signatureH < SAFE_BOTTOM) newPage(true);')) fail('PDF perdeu a proteção das assinaturas contra o rodapé');
+else ok('Assinaturas respeitam zona segura e não podem invadir o rodapé');
 if ((pdf.match(/page\.drawLine\(\{ start:/g) || []).length < 2) fail('PDF premium perdeu as linhas de assinatura/estrutura visual');
 else ok('PDF premium mantém áreas de assinatura para responsável e cliente');
 const quoteItemsLine = pdf.split('\n').find((line) => line.includes('/rest/v1/quote_items?')) || '';
