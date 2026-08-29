@@ -100,7 +100,8 @@ for (const marker of [
   'Card inferior com altura dinâmica e sem cruzar a área de assinatura.',
   "Marca-d'água ampla e suave por trás do conteúdo.",
   'drawPageWatermark();',
-  'const wmW = 285',
+  'const wmW = 390',
+  'const wmH = 280',
   'drawLogoFit(page, logo, margin, A4[1] - 100, 128, 68, 1)',
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
