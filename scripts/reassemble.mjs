@@ -24,26 +24,44 @@ function assembleGzipBase64({ dir, output, partHashes, gzipHash, outputHash }) {
     throw new Error(`Expected ${partHashes.length} parts in ${dir}, found ${parts.length}`);
   }
 
-  const encoded = parts.map((file, index) => {
-    const content = readFileSync(join(dir, file), 'utf8');
-    const actual = sha256(Buffer.from(content, 'utf8'));
-    const expected = partHashes[index];
-    if (actual !== expected) {
-      throw new Error(`Integrity check failed for ${dir}/${file}: ${actual}`);
-    }
-    return content;
-  }).join('');
-
+  const contents = parts.map((file) => readFileSync(join(dir, file), 'utf8'));
+  const actualPartHashes = contents.map((content) => sha256(Buffer.from(content, 'utf8')));
+  const encoded = contents.join('');
   const compressed = Buffer.from(encoded, 'base64');
   const actualGzipHash = sha256(compressed);
-  if (actualGzipHash !== gzipHash) {
-    throw new Error(`Compressed integrity check failed for ${output}: ${actualGzipHash}`);
+
+  let content;
+  try {
+    content = gunzipSync(compressed);
+  } catch (error) {
+    console.error('Round3 integrity diagnostics:', JSON.stringify({
+      parts,
+      actualPartHashes,
+      actualGzipHash,
+      gunzipError: error instanceof Error ? error.message : String(error),
+    }, null, 2));
+    throw error;
   }
 
-  const content = gunzipSync(compressed);
   const actualOutputHash = sha256(content);
-  if (actualOutputHash !== outputHash) {
-    throw new Error(`Integrity check failed for ${output}: ${actualOutputHash}`);
+  const mismatchedParts = actualPartHashes
+    .map((actual, index) => ({ file: parts[index], expected: partHashes[index], actual }))
+    .filter(({ expected, actual }) => expected !== actual);
+
+  const diagnostics = {
+    parts,
+    actualPartHashes,
+    expectedPartHashes: partHashes,
+    mismatchedParts,
+    actualGzipHash,
+    expectedGzipHash: gzipHash,
+    actualOutputHash,
+    expectedOutputHash: outputHash,
+  };
+
+  if (mismatchedParts.length || actualGzipHash !== gzipHash || actualOutputHash !== outputHash) {
+    console.error('Round3 integrity diagnostics:', JSON.stringify(diagnostics, null, 2));
+    throw new Error(`Integrity check failed for ${output}`);
   }
 
   mkdirSync(dirname(output), { recursive: true });
