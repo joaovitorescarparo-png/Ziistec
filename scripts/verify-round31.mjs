@@ -55,11 +55,14 @@ for (const marker of [
   'zt-branding',
   'ORÇAMENTO',
   'CONDIÇÕES DE PAGAMENTO',
-  'ASSINATURAS',
-  'Documento gerado pela ZiisTec',
+  'const sigW = 190',
+  "company.owner_name || 'Responsável'",
+  'ZiisTec ·',
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
+if ((pdf.match(/page\.drawLine\(\{ start:/g) || []).length < 2) fail('PDF premium perdeu as linhas de assinatura/estrutura visual');
+else ok('PDF premium mantém áreas de assinatura para responsável e cliente');
 const quoteItemsLine = pdf.split('\n').find((line) => line.includes('/rest/v1/quote_items?')) || '';
 if (/unit_cost|\bcost\b|margin|margem/i.test(quoteItemsLine)) fail('PDF premium expõe custo/margem na consulta pública');
 else ok('PDF premium mantém custos internos fora do documento do cliente');
