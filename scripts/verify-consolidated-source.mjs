@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
 const file = 'src/legacy/ZiisTecApp.jsx';
-const expected = '3289874849f1e5ee87c30d8d0670b0c6f302a8589c508467bb86d966dff98cbd';
+const expected = 'ce1523f036d2db33d6bfe24631907ef2bf3d2aca144366c1fc64fbdb0a5e9104';
 const content = readFileSync(file);
 const actual = createHash('sha256').update(content).digest('hex');
 if (actual !== expected) {
