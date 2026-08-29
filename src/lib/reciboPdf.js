@@ -99,7 +99,7 @@ export async function montarReciboPDF(dados) {
   pagina.drawRectangle({ x: margem, y: y - 22, width: width - margem * 2, height: 30, color: rgb(0.98, 0.95, 0.86) });
   escrever('DOCUMENTO NAO FISCAL', { x: margem + 12, size: 11, fonte: negrito, cor: rgb(0.48, 0.35, 0.05) });
   y -= 13;
-  escrever('Comprovante de servico/cobranca. Nao substitui nota fiscal.', { x: margem + 12, size: 8.5, cor: rgb(0.48, 0.35, 0.05) });
+  escrever('Este documento nao substitui NF-e ou NFS-e.', { x: margem + 12, size: 8.5, cor: rgb(0.48, 0.35, 0.05) });
   y -= 30;
 
   /* cliente */
@@ -154,7 +154,7 @@ export async function montarReciboPDF(dados) {
   }
 
   /* rodapé */
-  pagina.drawText(limpar('Documento nao fiscal emitido pelo ZiisTec.'), {
+  pagina.drawText(limpar('Documento nao fiscal gerado pela ZiisTec.'), {
     x: margem, y: 46, size: 8, font: regular, color: suave,
   });
 
@@ -184,7 +184,7 @@ export async function compartilharReciboPDF(dados, nomeArquivo, texto = '') {
   const arquivo = new File([bytes], nomeArquivoSeguro(nomeArquivo) + '.pdf', { type: 'application/pdf' });
   if (!navigator.canShare({ files: [arquivo] })) return { shared: false, unsupported: true };
   try {
-    await navigator.share({ title: 'Recibo', text: texto, files: [arquivo] });
+    await navigator.share({ title: dados?.titulo === 'COBRANÇA' ? 'Cobrança' : 'Recibo', text: texto, files: [arquivo] });
     return { shared: true };
   } catch (e) {
     if (e?.name === 'AbortError') return { shared: false, cancelled: true };
