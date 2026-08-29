@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const file = 'src/legacy/ZiisTecApp.jsx';
 let src = readFileSync(file, 'utf8');
 
-if (src.includes('CALCULADORA DE MARGEM SOBRE CUSTO')) {
+if (src.includes('CALCULADORA RAPIDA DE MARGEM')) {
   console.log('Round 3.5 product margin calculator already applied');
   process.exit(0);
 }
@@ -80,29 +80,36 @@ requireOnce(
 );
 
 requireOnce(
-`      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
-        <Field label="Unidade">
-          <Select value={f.unidade} onChange={(e) => set("unidade", e.target.value)}>
-            {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
-          </Select>
-        </Field>
-        <Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => set("preco", num(e.target.value))} /></Field>
-        {verCusto && (
-          <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => set("custo", num(e.target.value))} /></Field>
-        )}
-      </div>`,
-`      <div className={cx("grid gap-5", verCusto && !serv ? "sm:grid-cols-2 lg:grid-cols-4" : verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
-        <Field label="Unidade">
-          <Select value={f.unidade} onChange={(e) => set("unidade", e.target.value)}>
-            {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
-          </Select>
-        </Field>
-        {verCusto && (
-          <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => {
+`      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>`,
+`      {/* CALCULADORA RAPIDA DE MARGEM */}
+      <div className={cx("grid gap-5", verCusto && !serv ? "sm:grid-cols-2 lg:grid-cols-4" : verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>`,
+'quick pricing grid',
+);
+
+requireOnce(
+`        <Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => set("preco", num(e.target.value))} /></Field>`,
+`        <Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => {
+          const preco = num(e.target.value);
+          setF((s) => ({ ...s, preco, ...(!serv && verCusto && s.custo > 0 ? { margemPct: acrescimoSobreCusto(s.custo, preco) } : {}) }));
+        }} /></Field>`,
+'quick sale price',
+);
+
+requireOnce(
+`          <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => set("custo", num(e.target.value))} /></Field>`,
+`          <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => {
             const custo = num(e.target.value);
             setF((s) => ({ ...s, custo, ...(!serv && s.margemPct !== "" ? { preco: precoComAcrescimo(custo, s.margemPct) } : {}) }));
-          }} /></Field>
-        )}
+          }} /></Field>`,
+'quick cost field',
+);
+
+requireOnce(
+`        )}
+      </div>
+
+      {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,`,
+`        )}
         {!serv && verCusto && (
           <Field label="Acréscimo (%)" hint="R$ 80 + 45% = R$ 116"><Input type="number" min="0" step="0.01" value={f.margemPct ?? ""} placeholder="45" onChange={(e) => {
             const raw = e.target.value;
@@ -110,18 +117,16 @@ requireOnce(
             setF((s) => ({ ...s, margemPct, ...(raw !== "" ? { preco: precoComAcrescimo(s.custo, margemPct) } : {}) }));
           }} /></Field>
         )}
-        <Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => {
-          const preco = num(e.target.value);
-          setF((s) => ({ ...s, preco, ...(!serv && verCusto && s.custo > 0 ? { margemPct: acrescimoSobreCusto(s.custo, preco) } : {}) }));
-        }} /></Field>
       </div>
       {!serv && verCusto && (
         <div className="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 px-4 py-3 flex items-center justify-between gap-4 flex-wrap text-[13px]">
           <span className="text-emerald-800">Preço calculado: <b className="tabular-nums">{brl(f.preco)}</b></span>
           <span className="text-emerald-700">Lucro bruto/un.: <b className="tabular-nums">{brl(Math.max(0, num(f.preco) - num(f.custo)))}</b></span>
         </div>
-      )}`,
-'quick product margin calculator',
+      )}
+
+      {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,`,
+'quick margin field and summary',
 );
 
 writeFileSync(file, src, 'utf8');
