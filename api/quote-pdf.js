@@ -126,6 +126,8 @@ export default async function handler(req, res) {
     const A4 = [595.28, 841.89];
     const margin = 38;
     const contentW = A4[0] - margin * 2;
+    const FOOTER_H = 34;
+    const SAFE_BOTTOM = 66;
     const navy = rgb(0.035, 0.075, 0.13);
     const teal = rgb(0.04, 0.52, 0.46);
     const ink = rgb(0.10, 0.13, 0.17);
@@ -136,45 +138,42 @@ export default async function handler(req, res) {
 
     let page;
     let y;
-    let pageNo = 0;
-    const drawLogoFit = (pg, img, x, yy, boxW, boxH, opacity = 1) => {
+    const pg = () => page;
+    const txt = (t, x, yy, size = 9, font = normal, color = ink) => pg().drawText(clean(t), { x, y: yy, size, font, color });
+    const txtRight = (t, right, yy, size = 9, font = normal, color = ink) => {
+      const value = clean(t);
+      const width = font.widthOfTextAtSize(value, size);
+      pg().drawText(value, { x: Math.max(margin, right - width), y: yy, size, font, color });
+    };
+    const drawLogoFit = (targetPage, img, x, yy, boxW, boxH, opacity = 1) => {
       if (!img) return;
       const scale = Math.min(boxW / img.width, boxH / img.height);
-      const w = img.width * scale, h = img.height * scale;
-      pg.drawImage(img, { x: x + (boxW - w) / 2, y: yy + (boxH - h) / 2, width: w, height: h, opacity });
+      const w = img.width * scale;
+      const h = img.height * scale;
+      targetPage.drawImage(img, { x: x + (boxW - w) / 2, y: yy + (boxH - h) / 2, width: w, height: h, opacity });
     };
-    const drawWatermark = (pg) => {
-      if (!logo) return;
-      const box = 310;
-      drawLogoFit(pg, logo, A4[0] - box + 48, 24, box, box, 0.035);
-    };
-    const txt = (t, x, yy, size = 9, font = normal, color = ink) => pg().drawText(clean(t), { x, y: yy, size, font, color });
-    const pg = () => page;
 
     const newPage = (continuacao = false) => {
       page = pdf.addPage(A4);
-      pageNo += 1;
-      drawWatermark(page);
       if (continuacao) {
         page.drawRectangle({ x: 0, y: A4[1] - 62, width: A4[0], height: 62, color: navy });
         txt(`${companyName} · ${quote.number}`, margin, A4[1] - 38, 10, bold, white);
-        txt('ORÇAMENTO · CONTINUAÇÃO', A4[0] - margin - 170, A4[1] - 38, 9, bold, rgb(0.70, 0.95, 0.90));
+        txtRight('ORÇAMENTO · CONTINUAÇÃO', A4[0] - margin, A4[1] - 38, 9, bold, rgb(0.70, 0.95, 0.90));
         y = A4[1] - 88;
-      } else y = A4[1] - 40;
+      } else {
+        y = A4[1] - 40;
+      }
     };
-    const ensure = (height) => { if (y - height < 72) newPage(true); };
-    const wrappedAt = (t, x, maxW, size = 9, font = normal, color = ink, lineH = 12) => {
-      const lines = wrapText(t, font, size, maxW);
-      ensure(lines.length * lineH + 2);
-      for (const l of lines) { txt(l, x, y, size, font, color); y -= lineH; }
-      return lines.length;
+    const ensure = (height) => {
+      if (y - height < SAFE_BOTTOM) newPage(true);
     };
 
     newPage(false);
 
-    // Cabeçalho premium inspirado em fatura/proposta comercial.
+    // Cabeçalho premium com a identidade cadastrada pelo proprietário.
     const headerH = 126;
     page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: headerH, color: navy });
+    page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: 4, color: teal });
     if (logo) {
       page.drawRectangle({ x: margin, y: A4[1] - 101, width: 132, height: 70, color: white });
       drawLogoFit(page, logo, margin + 8, A4[1] - 94, 116, 56, 1);
@@ -183,101 +182,163 @@ export default async function handler(req, res) {
     }
     if (logo) {
       const companyLines = wrapText(companyName, bold, 13, 180).slice(0, 2);
-      let cy = A4[1] - 52;
-      for (const l of companyLines) { txt(l, margin + 148, cy, 13, bold, white); cy -= 16; }
-      if (company.owner_name) txt(company.owner_name, margin + 148, cy - 2, 8.5, normal, rgb(0.72, 0.78, 0.84));
+      let companyY = A4[1] - 52;
+      for (const l of companyLines) { txt(l, margin + 148, companyY, 13, bold, white); companyY -= 16; }
+      if (company.owner_name) txt(company.owner_name, margin + 148, companyY - 2, 8.5, normal, rgb(0.72, 0.78, 0.84));
     }
-    txt('ORÇAMENTO', A4[0] - margin - 154, A4[1] - 58, 24, bold, white);
-    txt(quote.number, A4[0] - margin - 154, A4[1] - 78, 10.5, bold, rgb(0.40, 0.95, 0.85));
-    txt(`Emissão ${dateBR(quote.issue_date)}`, A4[0] - margin - 154, A4[1] - 96, 8.5, normal, rgb(0.78, 0.82, 0.86));
-    if (quote.valid_until) txt(`Validade ${dateBR(quote.valid_until)}`, A4[0] - margin - 154, A4[1] - 110, 8.5, normal, rgb(0.78, 0.82, 0.86));
-    y = A4[1] - headerH - 28;
+    txtRight('ORÇAMENTO', A4[0] - margin, A4[1] - 58, 24, bold, white);
+    txtRight(quote.number, A4[0] - margin, A4[1] - 78, 10.5, bold, rgb(0.40, 0.95, 0.85));
+    txtRight(`Emissão ${dateBR(quote.issue_date)}`, A4[0] - margin, A4[1] - 96, 8.5, normal, rgb(0.78, 0.82, 0.86));
+    if (quote.valid_until) txtRight(`Validade ${dateBR(quote.valid_until)}`, A4[0] - margin, A4[1] - 110, 8.5, normal, rgb(0.78, 0.82, 0.86));
+    y = A4[1] - headerH - 24;
 
-    // Cliente e local em duas colunas.
-    txt('CLIENTE', margin, y, 8, bold, teal);
-    txt('LOCAL / REFERÊNCIA', margin + 300, y, 8, bold, teal);
-    y -= 18;
-    const clientY = y;
-    const clientNameLines = wrapText(nomeCliente, bold, 14, 250).slice(0, 2);
-    let cy = y;
-    for (const l of clientNameLines) { txt(l, margin, cy, 14, bold, ink); cy -= 17; }
-    const clientMeta = [client.tax_id && `Documento: ${client.tax_id}`, client.contact_name && `Contato: ${client.contact_name}`, client.phone && `Tel.: ${client.phone}`, client.whatsapp && `WhatsApp: ${client.whatsapp}`].filter(Boolean);
-    for (const m of clientMeta) { txt(m, margin, cy, 8.5, normal, muted); cy -= 12; }
+    // Bloco do cliente e local com altura calculada: nada invade o conteúdo seguinte.
+    const clientLines = wrapText(nomeCliente, bold, 13.5, 238).slice(0, 2);
+    const clientMeta = [
+      client.tax_id && `Documento: ${client.tax_id}`,
+      client.contact_name && `Contato: ${client.contact_name}`,
+      client.phone && `Tel.: ${client.phone}`,
+      client.whatsapp && `WhatsApp: ${client.whatsapp}`,
+    ].filter(Boolean);
     const local = [quote.service_place, quote.address || client.address].filter(Boolean).join(' · ') || 'Não informado';
-    let ly = clientY;
-    for (const l of wrapText(local, normal, 9, 255).slice(0, 5)) { txt(l, margin + 300, ly, 9, normal, ink); ly -= 13; }
-    y = Math.min(cy, ly) - 14;
-    page.drawLine({ start: { x: margin, y }, end: { x: A4[0] - margin, y }, thickness: 0.7, color: line });
-    y -= 22;
+    const localLines = wrapText(local, normal, 8.8, 235).slice(0, 5);
+    const clientBlockRows = Math.max(clientLines.length + clientMeta.length, localLines.length, 2);
+    const clientBlockH = Math.max(72, 35 + clientBlockRows * 12);
+    page.drawRectangle({ x: margin, y: y - clientBlockH, width: contentW, height: clientBlockH, color: soft, borderColor: line, borderWidth: 0.6 });
+    txt('CLIENTE', margin + 12, y - 18, 8, bold, teal);
+    txt('LOCAL / REFERÊNCIA', margin + 292, y - 18, 8, bold, teal);
+    let clientY = y - 38;
+    for (const l of clientLines) { txt(l, margin + 12, clientY, 13.5, bold, ink); clientY -= 16; }
+    for (const m of clientMeta) { txt(m, margin + 12, clientY, 8.2, normal, muted); clientY -= 11; }
+    let localY = y - 38;
+    for (const l of localLines) { txt(l, margin + 292, localY, 8.8, normal, ink); localY -= 12; }
+    page.drawLine({ start: { x: margin + 278, y: y - 12 }, end: { x: margin + 278, y: y - clientBlockH + 12 }, thickness: 0.5, color: line });
+    y -= clientBlockH + 18;
 
-    // Tabela.
-    const col = { desc: margin, qty: margin + 304, unit: margin + 366, total: margin + 448 };
-    page.drawRectangle({ x: margin, y: y - 22, width: contentW, height: 26, color: navy });
-    txt('DESCRIÇÃO', col.desc + 7, y - 14, 8.5, bold, white);
-    txt('QTD', col.qty, y - 14, 8.5, bold, white);
-    txt('PREÇO UNI.', col.unit, y - 14, 8.5, bold, white);
-    txt('TOTAL', col.total, y - 14, 8.5, bold, white);
-    y -= 34;
+    // Tabela com grade visual consistente e números alinhados pela direita.
+    const tableRight = A4[0] - margin;
+    const col = { desc: margin + 8, qtyRight: margin + 350, unitRight: margin + 438, totalRight: tableRight - 8 };
+    const drawTableHeader = () => {
+      page.drawRectangle({ x: margin, y: y - 23, width: contentW, height: 28, color: navy });
+      txt('DESCRIÇÃO', col.desc, y - 14, 8.5, bold, white);
+      txtRight('QTD', col.qtyRight, y - 14, 8.5, bold, white);
+      txtRight('PREÇO UNI.', col.unitRight, y - 14, 8.5, bold, white);
+      txtRight('TOTAL', col.totalRight, y - 14, 8.5, bold, white);
+      y -= 38;
+    };
+    drawTableHeader();
 
     let subtotal = 0;
+    let rowIndex = 0;
     for (const item of items || []) {
-      const qty = Number(item.quantity || 0), unit = Number(item.unit_price || 0), total = qty * unit;
+      const qty = Number(item.quantity || 0);
+      const unit = Number(item.unit_price || 0);
+      const total = qty * unit;
       subtotal += total;
-      const desc = wrapText(item.name || 'Item', normal, 9.2, 286);
-      const notes = item.notes ? wrapText(item.notes, normal, 7.5, 286) : [];
-      const rowH = Math.max(34, desc.length * 12 + notes.length * 9 + 10);
-      ensure(rowH + 6);
-      let yy = y;
-      for (const l of desc) { txt(l, col.desc + 7, yy, 9.2, normal, ink); yy -= 12; }
-      for (const l of notes) { txt(l, col.desc + 7, yy, 7.5, normal, muted); yy -= 9; }
-      const qtdTxt = `${qty.toLocaleString('pt-BR')} ${clean(item.unit || '')}`;
-      txt(qtdTxt, col.qty, y, 8.5, normal, muted);
-      txt(money(unit), col.unit, y, 8.5, normal, ink);
-      txt(money(total), col.total, y, 8.5, bold, ink);
+      const desc = wrapText(item.name || 'Item', normal, 9.2, 270);
+      const notes = item.notes ? wrapText(item.notes, normal, 7.5, 270) : [];
+      const rowH = Math.max(40, desc.length * 12 + notes.length * 9 + 15);
+      if (y - rowH < SAFE_BOTTOM + 185) {
+        newPage(true);
+        drawTableHeader();
+      }
+      if (rowIndex % 2 === 1) page.drawRectangle({ x: margin, y: y - rowH + 8, width: contentW, height: rowH + 2, color: soft });
+      let rowY = y;
+      for (const l of desc) { txt(l, col.desc, rowY, 9.2, normal, ink); rowY -= 12; }
+      for (const l of notes) { txt(l, col.desc, rowY, 7.5, normal, muted); rowY -= 9; }
+      const qtdTxt = (qty.toLocaleString('pt-BR') + ' ' + clean(item.unit || '')).trim();
+      txtRight(qtdTxt, col.qtyRight, y, 8.5, normal, muted);
+      txtRight(money(unit), col.unitRight, y, 8.5, normal, ink);
+      txtRight(money(total), col.totalRight, y, 8.5, bold, ink);
       y -= rowH;
-      page.drawLine({ start: { x: margin, y: y + 5 }, end: { x: A4[0] - margin, y: y + 5 }, thickness: 0.5, color: line });
+      page.drawLine({ start: { x: margin, y: y + 7 }, end: { x: tableRight, y: y + 7 }, thickness: 0.45, color: line });
+      rowIndex += 1;
     }
 
-    y -= 8;
-    ensure(120);
-    const discount = Number(quote.discount || 0), surcharge = Number(quote.surcharge || 0);
+    // Quando há poucos itens, completa a grade com linhas vazias como numa proposta comercial.
+    // Isso ocupa a página de forma organizada sem inventar itens nem esticar textos.
+    const minVisibleRows = 5;
+    let fillerRows = Math.max(0, minVisibleRows - (items || []).length);
+    while (fillerRows > 0 && y - 32 > 310) {
+      if (rowIndex % 2 === 1) page.drawRectangle({ x: margin, y: y - 25, width: contentW, height: 32, color: soft });
+      y -= 32;
+      page.drawLine({ start: { x: margin, y: y + 7 }, end: { x: tableRight, y: y + 7 }, thickness: 0.45, color: line });
+      rowIndex += 1;
+      fillerRows -= 1;
+    }
+
+    y -= 6;
+    ensure(125);
+    const discount = Number(quote.discount || 0);
+    const surcharge = Number(quote.surcharge || 0);
     const grand = Math.max(0, subtotal - discount + surcharge);
     const totalX = A4[0] - margin - 230;
     if (discount > 0 || surcharge > 0) {
-      txt('Subtotal', totalX, y, 8.5, normal, muted); txt(money(subtotal), A4[0] - margin - 90, y, 8.5, normal, ink); y -= 14;
-      if (discount > 0) { txt('Desconto', totalX, y, 8.5, normal, muted); txt(`- ${money(discount)}`, A4[0] - margin - 90, y, 8.5, normal, ink); y -= 14; }
-      if (surcharge > 0) { txt('Acréscimo', totalX, y, 8.5, normal, muted); txt(`+ ${money(surcharge)}`, A4[0] - margin - 90, y, 8.5, normal, ink); y -= 18; }
+      txt('Subtotal', totalX, y, 8.5, normal, muted); txtRight(money(subtotal), A4[0] - margin, y, 8.5, normal, ink); y -= 14;
+      if (discount > 0) { txt('Desconto', totalX, y, 8.5, normal, muted); txtRight(`- ${money(discount)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 14; }
+      if (surcharge > 0) { txt('Acréscimo', totalX, y, 8.5, normal, muted); txtRight(`+ ${money(surcharge)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 18; }
     }
     page.drawRectangle({ x: totalX - 10, y: y - 17, width: A4[0] - margin - totalX + 10, height: 38, color: navy });
     txt('TOTAL', totalX + 3, y - 2, 11, bold, white);
-    txt(money(grand), A4[0] - margin - 118, y - 4, 15, bold, white);
-    y -= 52;
+    txtRight(money(grand), A4[0] - margin - 14, y - 4, 15, bold, white);
+    y -= 50;
 
-    // Condições, observações e assinatura.
-    const leftW = 300;
-    let leftY = y;
-    txt('CONDIÇÕES DE PAGAMENTO', margin, leftY, 9.5, bold, ink); leftY -= 15;
+    // Informações finais em card único para reduzir vazios e impedir sobreposição.
     const payment = quote.payment_terms || 'A combinar com o cliente.';
-    for (const l of wrapText(payment, normal, 8.5, leftW)) { txt(l, margin, leftY, 8.5, normal, muted); leftY -= 12; }
-    if (quote.notes) {
-      leftY -= 8; txt('OBSERVAÇÕES', margin, leftY, 9.5, bold, ink); leftY -= 15;
-      for (const l of wrapText(quote.notes, normal, 8.5, leftW)) { txt(l, margin, leftY, 8.5, normal, muted); leftY -= 12; }
-    }
-    y = Math.min(y, leftY) - 24;
-    ensure(95);
-    const sigW = 190;
-    page.drawLine({ start: { x: margin + 8, y }, end: { x: margin + 8 + sigW, y }, thickness: 0.8, color: ink });
-    page.drawLine({ start: { x: A4[0] - margin - sigW - 8, y }, end: { x: A4[0] - margin - 8, y }, thickness: 0.8, color: ink });
-    txt(company.owner_name || 'Responsável', margin + 8, y - 14, 8.5, bold, muted);
-    txt(nomeCliente, A4[0] - margin - sigW - 8, y - 14, 8.5, bold, muted);
+    const paymentLines = wrapText(payment, normal, 8.4, 285);
+    const noteLines = quote.notes ? wrapText(quote.notes, normal, 8.3, contentW - 24) : [];
+    const leftInfoH = 35 + Math.max(1, paymentLines.length) * 11;
+    const rightInfoH = 72;
+    const notesH = noteLines.length ? 26 + noteLines.length * 11 : 0;
+    const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 20;
+    ensure(infoCardH + 90);
 
-    // Rodapé escuro semelhante à referência visual.
-    for (const pgx of pdf.getPages()) {
-      pgx.drawRectangle({ x: 0, y: 0, width: A4[0], height: 34, color: navy });
-      const info = [company.tax_id, company.phone, company.whatsapp, company.email].filter(Boolean).join(' · ');
-      pgx.drawText(clean(info).slice(0, 95), { x: margin, y: 13, size: 6.8, font: normal, color: rgb(0.78, 0.82, 0.86) });
-      pgx.drawText(`ZiisTec · ${pageNo > 1 ? 'proposta comercial' : 'documento comercial'}`, { x: A4[0] - margin - 120, y: 13, size: 6.8, font: normal, color: rgb(0.50, 0.58, 0.64) });
+    const cardTop = y;
+    const cardBottom = cardTop - infoCardH;
+    page.drawRectangle({ x: margin, y: cardBottom, width: contentW, height: infoCardH, color: soft, borderColor: line, borderWidth: 0.6 });
+    txt('CONDIÇÕES DE PAGAMENTO', margin + 12, cardTop - 18, 9, bold, ink);
+    let paymentY = cardTop - 36;
+    for (const l of paymentLines) { txt(l, margin + 12, paymentY, 8.4, normal, muted); paymentY -= 11; }
+
+    const infoX = margin + 330;
+    txt('DADOS DO ORÇAMENTO', infoX, cardTop - 18, 9, bold, ink);
+    txt('Número', infoX, cardTop - 38, 7.5, normal, muted);
+    txtRight(quote.number, A4[0] - margin - 12, cardTop - 38, 8.2, bold, ink);
+    txt('Emissão', infoX, cardTop - 52, 7.5, normal, muted);
+    txtRight(dateBR(quote.issue_date), A4[0] - margin - 12, cardTop - 52, 8.2, normal, ink);
+    txt('Validade', infoX, cardTop - 66, 7.5, normal, muted);
+    txtRight(quote.valid_until ? dateBR(quote.valid_until) : 'A combinar', A4[0] - margin - 12, cardTop - 66, 8.2, normal, ink);
+    page.drawLine({ start: { x: margin + 314, y: cardTop - 12 }, end: { x: margin + 314, y: cardTop - Math.max(leftInfoH, rightInfoH) - 4 }, thickness: 0.5, color: line });
+
+    if (noteLines.length) {
+      const dividerY = cardTop - Math.max(leftInfoH, rightInfoH) - 2;
+      page.drawLine({ start: { x: margin + 12, y: dividerY }, end: { x: A4[0] - margin - 12, y: dividerY }, thickness: 0.5, color: line });
+      txt('OBSERVAÇÕES', margin + 12, dividerY - 18, 8.5, bold, ink);
+      let noteY = dividerY - 34;
+      for (const l of noteLines) { txt(l, margin + 12, noteY, 8.3, normal, muted); noteY -= 11; }
     }
+    y = cardBottom - 26;
+
+    // Assinaturas sempre acima da área segura do rodapé.
+    const signatureH = 46;
+    if (y - signatureH < SAFE_BOTTOM) newPage(true);
+    const sigW = 190;
+    const sigY = y - 8;
+    page.drawLine({ start: { x: margin + 8, y: sigY }, end: { x: margin + 8 + sigW, y: sigY }, thickness: 0.8, color: ink });
+    page.drawLine({ start: { x: A4[0] - margin - sigW - 8, y: sigY }, end: { x: A4[0] - margin - 8, y: sigY }, thickness: 0.8, color: ink });
+    txt(company.owner_name || 'Responsável', margin + 8, sigY - 14, 8.2, bold, muted);
+    txt(nomeCliente, A4[0] - margin - sigW - 8, sigY - 14, 8.2, bold, muted);
+
+    // Rodapé é desenhado por último e possui uma zona protegida de 66 pt acima dele.
+    const pages = pdf.getPages();
+    pages.forEach((targetPage, index) => {
+      targetPage.drawRectangle({ x: 0, y: 0, width: A4[0], height: FOOTER_H, color: navy });
+      const info = [company.tax_id, company.phone, company.whatsapp, company.email].filter(Boolean).join(' · ');
+      targetPage.drawText(clean(info).slice(0, 95), { x: margin, y: 13, size: 6.8, font: normal, color: rgb(0.78, 0.82, 0.86) });
+      const footerRight = `ZiisTec · ${index + 1}/${pages.length}`;
+      const footerWidth = normal.widthOfTextAtSize(footerRight, 6.8);
+      targetPage.drawText(footerRight, { x: A4[0] - margin - footerWidth, y: 13, size: 6.8, font: normal, color: rgb(0.50, 0.58, 0.64) });
+    });
 
     const bytes = await pdf.save();
     const filename = `${safeFile(quote.number)} - ${safeFile(nomeCliente)}.pdf`;
