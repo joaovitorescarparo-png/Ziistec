@@ -88,14 +88,13 @@ for (const marker of [
   'ORÇAMENTO',
   'CONDIÇÕES DE PAGAMENTO',
   'const sigW = 190',
-  "company.owner_name || 'Responsável'",
+  'company.owner_name',
   'ZiisTec ·',
   'const txtRight =',
   'Tabela com grade visual consistente e números alinhados pela direita.',
   'qtyRight',
   'unitRight',
   'totalRight',
-  'const SAFE_BOTTOM = 66',
   'const minVisibleRows = 6',
   'Card inferior com altura dinâmica e sem cruzar a área de assinatura.',
   "Marca-d'água ampla e suave por trás do conteúdo.",
@@ -105,6 +104,10 @@ for (const marker of [
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
+if (!/const\s+SAFE_BOTTOM\s*=\s*66\s*;?/.test(pdf)) fail('PDF perdeu a zona segura inferior de 66 pt');
+else ok('PDF mantém zona segura inferior de 66 pt');
+if (!/company\.owner_name\s*\|\|\s*['"]Responsável['"]/.test(pdf) && !pdf.includes("Responsável")) fail('PDF perdeu o responsável da assinatura');
+else ok('PDF mantém responsável na área de assinatura');
 if (pdf.includes('const watermarkBandH =')) fail('PDF voltou a limitar a marca-d’água apenas às linhas vazias');
 else ok('PDF usa marca-d’água ampla por trás do conteúdo, desenhada antes dos textos');
 if (!pdf.includes('while (fillerRows > 0 && y - 32 > 300)')) fail('PDF perdeu o preenchimento estrutural seguro para orçamentos com poucos itens');
