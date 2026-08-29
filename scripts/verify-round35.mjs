@@ -7,13 +7,14 @@ const need = (text, label) => { if (!app.includes(text)) failures.push(label); }
 
 for (const [text,label] of [
   ['CALCULADORA DE MARGEM SOBRE CUSTO','calculadora completa de produto ausente'],
+  ['CALCULADORA RAPIDA DE MARGEM','calculadora no cadastro rápido ausente'],
   ['const precoComAcrescimo =','helper de cálculo de acréscimo ausente'],
   ['const acrescimoSobreCusto =','helper de percentual atual ausente'],
-  ['Acréscimo sobre custo (%)','campo percentual no cadastro completo ausente'],
+  ['Acréscimo sobre custo (%)','campo percentual de acréscimo ausente'],
   ['Ex.: R$ 80 + 45% = R$ 116','exemplo de cálculo ausente'],
   ['Lucro bruto por unidade','resumo de lucro bruto ausente'],
+  ['Lucro bruto/un.','resumo de lucro do cadastro rápido ausente'],
   ['Preço calculado','resultado calculado ausente'],
-  ['Acréscimo (%)','calculadora no cadastro rápido ausente'],
   ['margemPct','estado temporário do cálculo ausente'],
 ]) need(text,label);
 
