@@ -13,11 +13,6 @@ const requireOnce = (needle, replacement, label) => {
   if (count !== 1) throw new Error(`Round 3.5 ${label}: expected 1 marker, got ${count}`);
   src = src.replace(needle, replacement);
 };
-const requireRegexOnce = (pattern, replacement, label) => {
-  const matches = [...src.matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))];
-  if (matches.length !== 1) throw new Error(`Round 3.5 ${label}: expected 1 regex marker, got ${matches.length}`);
-  src = src.replace(pattern, replacement);
-};
 
 requireOnce(
 `const num = (v) => { const n = parseFloat(String(v).replace(",", ".")); return Number.isFinite(n) ? n : 0; };`,
@@ -84,30 +79,8 @@ requireOnce(
 'quick catalog defaults',
 );
 
-requireOnce(
-`      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>`,
-`      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>`,
-'quick pricing grid',
-);
-
-requireRegexOnce(
-/<Field label="Preço de venda"><Input[^>]*value=\{f\.preco\}[\s\S]{0,500}?<\/Field>/,
-`<Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => {
-          const preco = num(e.target.value);
-          setF((s) => ({ ...s, preco, ...(!serv && verCusto && s.custo > 0 ? { margemPct: acrescimoSobreCusto(s.custo, preco) } : {}) }));
-        }} /></Field>`,
-'quick sale price',
-);
-
-requireRegexOnce(
-/<Field label="Custo" hint="Uso interno\."><Input[^>]*value=\{f\.custo\}[\s\S]{0,500}?<\/Field>/,
-`<Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => {
-            const custo = num(e.target.value);
-            setF((s) => ({ ...s, custo, ...(!serv && s.margemPct !== "" ? { preco: precoComAcrescimo(custo, s.margemPct) } : {}) }));
-          }} /></Field>`,
-'quick cost field',
-);
-
+// No cadastro rápido preservamos os campos atuais de custo/preço e adicionamos
+// um card independente. Digitar o percentual já atualiza f.preco automaticamente.
 requireOnce(
 `      {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,`,
 `      {/* CALCULADORA RAPIDA DE MARGEM */}
