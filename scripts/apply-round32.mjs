@@ -114,7 +114,7 @@ if (!pdfAlreadyApplied) {
       let yy = y;
       for (const l of desc) { txt(l, col.desc, yy, 9.2, normal, ink); yy -= 12; }
       for (const l of notes) { txt(l, col.desc, yy, 7.5, normal, muted); yy -= 9; }
-      const qtdTxt = `${qty.toLocaleString('pt-BR')} ${clean(item.unit || '')}`.trim();
+      const qtdTxt = (qty.toLocaleString('pt-BR') + ' ' + clean(item.unit || '')).trim();
       txtRight(qtdTxt, col.qtyRight, y, 8.5, normal, muted);
       txtRight(money(unit), col.unitRight, y, 8.5, normal, ink);
       txtRight(money(total), col.totalRight, y, 8.5, bold, ink);
