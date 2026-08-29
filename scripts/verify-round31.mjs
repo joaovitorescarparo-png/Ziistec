@@ -37,15 +37,21 @@ else ok('dataApi usa atualização de deleted_at e mantém escopo por empresa');
 const app = read('src/legacy/ZiisTecApp.jsx');
 for (const marker of [
   'menuExpandido',
-  'Mostrar nomes das funções',
+  'menuTouchX',
+  'style={{ touchAction: "pan-y" }}',
+  'onTouchStart=',
+  'onTouchMove=',
+  'Menu lateral: arraste para abrir ou recolher',
   'excluirRegistroDB',
   'Somente o proprietário pode excluir registros.',
   'papel === "proprietario"',
   'Remover da agenda?',
   'desagendarOS(os.id)',
 ]) {
-  if (!app.includes(marker)) fail(`UI Round 3.1 perdeu marcador: ${marker}`);
+  if (!app.includes(marker)) fail(`UI Round 3.2 perdeu marcador: ${marker}`);
 }
+if (app.includes('Mostrar nomes das funções')) fail('UI Round 3.2 reintroduziu a setinha/botão lateral que deve ser substituída pelo gesto');
+else ok('Barra lateral usa a faixa azul inteira como gaveta por gesto, sem setinha dedicada');
 if (!app.includes('excluidoEm')) fail('UI não diferencia clientes arquivados para preservar histórico');
 else ok('UI oculta/identifica arquivados sem destruir histórico');
 
@@ -58,9 +64,16 @@ for (const marker of [
   'const sigW = 190',
   "company.owner_name || 'Responsável'",
   'ZiisTec ·',
+  'const txtRight =',
+  'Tabela com grade visual consistente e números alinhados pela direita.',
+  'qtyRight',
+  'unitRight',
+  'totalRight',
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
+if (pdf.includes('drawWatermark(page)')) fail('PDF reintroduziu a imagem completa da logo como marca-d’água gigante');
+else ok('PDF mantém a logo no cabeçalho sem marca-d’água invasiva');
 if ((pdf.match(/page\.drawLine\(\{ start:/g) || []).length < 2) fail('PDF premium perdeu as linhas de assinatura/estrutura visual');
 else ok('PDF premium mantém áreas de assinatura para responsável e cliente');
 const quoteItemsLine = pdf.split('\n').find((line) => line.includes('/rest/v1/quote_items?')) || '';
@@ -68,9 +81,9 @@ if (/unit_cost|\bcost\b|margin|margem/i.test(quoteItemsLine)) fail('PDF premium 
 else ok('PDF premium mantém custos internos fora do documento do cliente');
 
 if (failures.length) {
-  console.error('\nROUND 3.1 SECURITY/UX CHECK: FAIL\n');
+  console.error('\nROUND 3.2 SECURITY/UX CHECK: FAIL\n');
   failures.forEach((message, index) => console.error(`${index + 1}. ${message}`));
   process.exit(1);
 }
 
-console.log('\nROUND 3.1 SECURITY/UX CHECK: OK');
+console.log('\nROUND 3.2 SECURITY/UX CHECK: OK');
