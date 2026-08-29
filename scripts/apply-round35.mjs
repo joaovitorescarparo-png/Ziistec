@@ -13,6 +13,11 @@ const requireOnce = (needle, replacement, label) => {
   if (count !== 1) throw new Error(`Round 3.5 ${label}: expected 1 marker, got ${count}`);
   src = src.replace(needle, replacement);
 };
+const requireRegexOnce = (pattern, replacement, label) => {
+  const matches = [...src.matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))];
+  if (matches.length !== 1) throw new Error(`Round 3.5 ${label}: expected 1 regex marker, got ${matches.length}`);
+  src = src.replace(pattern, replacement);
+};
 
 requireOnce(
 `const num = (v) => { const n = parseFloat(String(v).replace(",", ".")); return Number.isFinite(n) ? n : 0; };`,
@@ -81,23 +86,22 @@ requireOnce(
 
 requireOnce(
 `      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>`,
-`      {/* CALCULADORA RAPIDA DE MARGEM */}
-      <div className={cx("grid gap-5", verCusto && !serv ? "sm:grid-cols-2 lg:grid-cols-4" : verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>`,
+`      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>`,
 'quick pricing grid',
 );
 
-requireOnce(
-`        <Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => set("preco", num(e.target.value))} /></Field>`,
-`        <Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => {
+requireRegexOnce(
+/<Field label="Preço de venda"><Input[^>]*value=\{f\.preco\}[\s\S]{0,500}?<\/Field>/,
+`<Field label="Preço de venda"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => {
           const preco = num(e.target.value);
           setF((s) => ({ ...s, preco, ...(!serv && verCusto && s.custo > 0 ? { margemPct: acrescimoSobreCusto(s.custo, preco) } : {}) }));
         }} /></Field>`,
 'quick sale price',
 );
 
-requireOnce(
-`          <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => set("custo", num(e.target.value))} /></Field>`,
-`          <Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => {
+requireRegexOnce(
+/<Field label="Custo" hint="Uso interno\."><Input[^>]*value=\{f\.custo\}[\s\S]{0,500}?<\/Field>/,
+`<Field label="Custo" hint="Uso interno."><Input type="number" min="0" step="0.01" value={f.custo} onChange={(e) => {
             const custo = num(e.target.value);
             setF((s) => ({ ...s, custo, ...(!serv && s.margemPct !== "" ? { preco: precoComAcrescimo(custo, s.margemPct) } : {}) }));
           }} /></Field>`,
@@ -105,28 +109,29 @@ requireOnce(
 );
 
 requireOnce(
-`        )}
-      </div>
-
-      {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,`,
-`        )}
-        {!serv && verCusto && (
-          <Field label="Acréscimo (%)" hint="R$ 80 + 45% = R$ 116"><Input type="number" min="0" step="0.01" value={f.margemPct ?? ""} placeholder="45" onChange={(e) => {
-            const raw = e.target.value;
-            const margemPct = raw === "" ? "" : num(raw);
-            setF((s) => ({ ...s, margemPct, ...(raw !== "" ? { preco: precoComAcrescimo(s.custo, margemPct) } : {}) }));
-          }} /></Field>
-        )}
-      </div>
+`      {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,`,
+`      {/* CALCULADORA RAPIDA DE MARGEM */}
       {!serv && verCusto && (
-        <div className="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 px-4 py-3 flex items-center justify-between gap-4 flex-wrap text-[13px]">
-          <span className="text-emerald-800">Preço calculado: <b className="tabular-nums">{brl(f.preco)}</b></span>
-          <span className="text-emerald-700">Lucro bruto/un.: <b className="tabular-nums">{brl(Math.max(0, num(f.preco) - num(f.custo)))}</b></span>
+        <div className="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 p-4 space-y-3">
+          <div className="grid sm:grid-cols-2 gap-4 items-end">
+            <Field label="Acréscimo sobre custo (%)" hint="Ex.: R$ 80 + 45% = R$ 116">
+              <Input type="number" min="0" step="0.01" value={f.margemPct ?? ""} placeholder="45" onChange={(e) => {
+                const raw = e.target.value;
+                const margemPct = raw === "" ? "" : num(raw);
+                setF((s) => ({ ...s, margemPct, ...(raw !== "" ? { preco: precoComAcrescimo(s.custo, margemPct) } : {}) }));
+              }} />
+            </Field>
+            <div className="pb-1">
+              <p className="text-[12px] text-emerald-700">Preço calculado</p>
+              <p className="text-[20px] font-semibold text-emerald-900 tabular-nums">{brl(f.preco)}</p>
+              <p className="text-[12px] text-emerald-700">Lucro bruto/un.: {brl(Math.max(0, num(f.preco) - num(f.custo)))}</p>
+            </div>
+          </div>
         </div>
       )}
 
       {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,`,
-'quick margin field and summary',
+'quick calculator card',
 );
 
 writeFileSync(file, src, 'utf8');
