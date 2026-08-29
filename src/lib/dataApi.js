@@ -14,7 +14,7 @@ export const fromClient = (x) => ({
   id:x.id, empresaId:x.company_id, tipo:x.person_type, nome:x.name, fantasia:x.trade_name||'', documento:x.tax_id||'',
   responsavel:x.contact_name||'', telefone:x.phone||'', whatsapp:x.whatsapp||'', endereco:x.address||'', obs:x.notes||'',
   googlePlaceId:x.google_place_id||null, latitude:x.latitude==null?null:Number(x.latitude), longitude:x.longitude==null?null:Number(x.longitude),
-  mapsUrl:x.maps_url||null,
+  mapsUrl:x.maps_url||null, excluidoEm:x.deleted_at||null,
 });
 export const toClient = (x, companyId) => ({
   company_id:companyId, person_type:x.tipo||'PF', name:x.nome?.trim(), trade_name:x.fantasia||null, tax_id:x.documento||null,
@@ -35,7 +35,7 @@ const toProduct = (x, companyId) => ({
   unit:x.unidade||'unidade', cost:n(x.custo), price:n(x.preco), warranty_months:Number(x.garantiaMeses||0), active:x.ativo!==false,
   ...(Object.prototype.hasOwnProperty.call(x,'imagemPath')?{image_path:x.imagemPath||null}:{}),
   ...(Object.prototype.hasOwnProperty.call(x,'vendaHabilitada')?{sale_enabled:x.vendaHabilitada!==false}:{}),
-  ...(Object.prototype.hasOwnProperty.call(x,'controlaEstoque')?{track_stock:Boolean(x.controlaEstoque)}:{}),
+  ...(Object.prototype.hasOwnProperty.call(x,'controlaEstoque')?{track_stock:Boolean(x.track_stock)}:{}),
   ...(Object.prototype.hasOwnProperty.call(x,'estoque')?{stock_qty:Math.max(0,n(x.estoque))}:{}),
   ...(Object.prototype.hasOwnProperty.call(x,'estoqueMinimo')?{low_stock_threshold:Math.max(0,n(x.estoqueMinimo))}:{}),
 });
@@ -113,13 +113,13 @@ async function carregarOSCompletaDB(id) {
 export async function carregarDadosEmpresa(companyId) {
   const reqs = await Promise.all([
     supabase.from('clients').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('services').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('products').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('quotes').select(QUOTE_SELECT).eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('work_orders').select(WO_SELECT).eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('financial_entries').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('purchases').select(PURCHASE_SELECT).eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('warranties').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
+    supabase.from('services').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('products').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('quotes').select(QUOTE_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('work_orders').select(WO_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('financial_entries').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('purchases').select(PURCHASE_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('warranties').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
   ]);
   const firstError=reqs.find(r=>r.error)?.error; if(firstError) throw firstError;
   const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(companyId);
@@ -139,7 +139,7 @@ export async function salvarOrcamentoDB(x, companyId, userId){
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_quote_idempotent',{p_company:companyId,p_quote:x.id||null,p_request:req,p_row:row,p_items:items}));
   const id=check(response);
-  const full=check(await supabase.from('quotes').select(QUOTE_SELECT).eq('id',id).single());
+  const full=check(await supabase.from('quotes').select(QUOTE_SELECT).eq('id',id).is('deleted_at',null).single());
   return fromQuote(full);
 }
 export async function salvarOSDB(x, companyId, userId){
@@ -178,7 +178,32 @@ export async function salvarLancamentoDB(x,companyId){
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_manual_financial_entry',{p_company:companyId,p_entry:x.id||null,p_request:req,p_row:row}));
   const id=check(response);
-  return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',id).single()));
+  return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',id).is('deleted_at',null).single()));
 }
-export async function baixarLancamentoDB(x, forma){ const r=await supabase.rpc('zt_set_financial_paid',{p_entry:x.id,p_paid:!x.pago,p_method:x.pago?null:forma}); check(r); return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',x.id).single())); }
+export async function baixarLancamentoDB(x, forma){ const r=await supabase.rpc('zt_set_financial_paid',{p_entry:x.id,p_paid:!x.pago,p_method:x.pago?null:forma}); check(r); return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',x.id).is('deleted_at',null).single())); }
 export async function recarregarSeguro(companyId){ try{return {data:await carregarDadosEmpresa(companyId),error:null};}catch(e){return {data:null,error:mensagemErro(e)};} }
+
+const SOFT_DELETE_TABLES = Object.freeze({
+  cliente: 'clients',
+  servico: 'services',
+  produto: 'products',
+  orcamento: 'quotes',
+  os: 'work_orders',
+  compra: 'purchases',
+  financeiro: 'financial_entries',
+  garantia: 'warranties',
+});
+
+export async function excluirRegistroDB(tipo, id, companyId) {
+  const table = SOFT_DELETE_TABLES[tipo];
+  if (!table || !id || !companyId) throw new Error('Registro inválido para exclusão.');
+  const r = await supabase
+    .from(table)
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('company_id', companyId)
+    .select('id')
+    .single();
+  check(r);
+  return true;
+}
