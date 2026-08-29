@@ -21,11 +21,11 @@ requireOnce(
     // Depois que a logo é normalizada no frontend, o JPG/PNG antigo vira uma PNG recortada e transparente.
     const drawPageWatermark = () => {
       if (!logo) return;
-      const wmW = 285;
-      const wmH = 205;
-      const wmX = (A4[0] - wmW) / 2 + 34;
-      const wmY = 176;
-      drawLogoFit(page, logo, wmX, wmY, wmW, wmH, 0.052);
+      const wmW = 390;
+      const wmH = 280;
+      const wmX = (A4[0] - wmW) / 2 + 42;
+      const wmY = 128;
+      drawLogoFit(page, logo, wmX, wmY, wmW, wmH, 0.05);
     };
 
     const newPage = (continuacao = false) => {
