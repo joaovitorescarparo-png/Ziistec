@@ -9,7 +9,7 @@ if (round32.status !== 0) {
 if (round32.stdout) process.stdout.write(round32.stdout);
 
 const file = 'src/legacy/ZiisTecApp.jsx';
-const expected = '91edc5619d96a8ece1b6172b084d2426a128baa1a7334c3c5ebe2f6cb5bdefd4';
+const expected = '91703a73ba189664e01af2bcb899eb72cc2fc5fb5f896248416b4725fbf62d24';
 const content = readFileSync(file);
 const actual = createHash('sha256').update(content).digest('hex');
 if (actual !== expected) {
