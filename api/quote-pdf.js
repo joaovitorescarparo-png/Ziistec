@@ -49,6 +49,14 @@ function wrapText(text, font, size, maxWidth) {
   return out;
 }
 
+function fitText(text, font, size, maxWidth) {
+  const original = clean(text);
+  if (font.widthOfTextAtSize(original, size) <= maxWidth) return original;
+  let value = original;
+  while (value.length > 3 && font.widthOfTextAtSize(`${value}...`, size) > maxWidth) value = value.slice(0, -1);
+  return `${value.trim()}...`;
+}
+
 async function carregarLogo(company, auth, pdf) {
   if (!company?.logo_path) return null;
   try {
@@ -127,7 +135,7 @@ export default async function handler(req, res) {
     const margin = 38;
     const contentW = A4[0] - margin * 2;
     const FOOTER_H = 34;
-    const SAFE_BOTTOM = 66;
+    const SAFE_BOTTOM = 72;
     const navy = rgb(0.035, 0.075, 0.13);
     const teal = rgb(0.04, 0.52, 0.46);
     const ink = rgb(0.10, 0.13, 0.17);
@@ -170,29 +178,23 @@ export default async function handler(req, res) {
 
     newPage(false);
 
-    // Cabeçalho premium com a identidade cadastrada pelo proprietário.
+    // Cabeçalho premium com logo direta, sem caixa branca rígida.
     const headerH = 126;
     page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: headerH, color: navy });
     page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: 4, color: teal });
-    if (logo) {
-      page.drawRectangle({ x: margin, y: A4[1] - 101, width: 132, height: 70, color: white });
-      drawLogoFit(page, logo, margin + 8, A4[1] - 94, 116, 56, 1);
-    } else {
-      txt(companyName, margin, A4[1] - 64, 20, bold, white);
-    }
-    if (logo) {
-      const companyLines = wrapText(companyName, bold, 13, 180).slice(0, 2);
-      let companyY = A4[1] - 52;
-      for (const l of companyLines) { txt(l, margin + 148, companyY, 13, bold, white); companyY -= 16; }
-      if (company.owner_name) txt(company.owner_name, margin + 148, companyY - 2, 8.5, normal, rgb(0.72, 0.78, 0.84));
-    }
+    const companyTextX = logo ? margin + 116 : margin;
+    if (logo) drawLogoFit(page, logo, margin, A4[1] - 94, 102, 54, 0.98);
+    const companyLines = wrapText(companyName, bold, logo ? 12.5 : 18, logo ? 195 : 290).slice(0, 2);
+    let companyY = A4[1] - 54;
+    for (const l of companyLines) { txt(l, companyTextX, companyY, logo ? 12.5 : 18, bold, white); companyY -= logo ? 15 : 20; }
+    if (company.owner_name) txt(fitText(company.owner_name, normal, 8.2, 195), companyTextX, companyY - 1, 8.2, normal, rgb(0.72, 0.78, 0.84));
     txtRight('ORÇAMENTO', A4[0] - margin, A4[1] - 58, 24, bold, white);
     txtRight(quote.number, A4[0] - margin, A4[1] - 78, 10.5, bold, rgb(0.40, 0.95, 0.85));
     txtRight(`Emissão ${dateBR(quote.issue_date)}`, A4[0] - margin, A4[1] - 96, 8.5, normal, rgb(0.78, 0.82, 0.86));
     if (quote.valid_until) txtRight(`Validade ${dateBR(quote.valid_until)}`, A4[0] - margin, A4[1] - 110, 8.5, normal, rgb(0.78, 0.82, 0.86));
     y = A4[1] - headerH - 24;
 
-    // Bloco do cliente e local com altura calculada: nada invade o conteúdo seguinte.
+    // Bloco do cliente e local com altura realmente calculada.
     const clientLines = wrapText(nomeCliente, bold, 13.5, 238).slice(0, 2);
     const clientMeta = [
       client.tax_id && `Documento: ${client.tax_id}`,
@@ -202,8 +204,9 @@ export default async function handler(req, res) {
     ].filter(Boolean);
     const local = [quote.service_place, quote.address || client.address].filter(Boolean).join(' · ') || 'Não informado';
     const localLines = wrapText(local, normal, 8.8, 235).slice(0, 5);
-    const clientBlockRows = Math.max(clientLines.length + clientMeta.length, localLines.length, 2);
-    const clientBlockH = Math.max(72, 35 + clientBlockRows * 12);
+    const leftContentH = 34 + clientLines.length * 16 + clientMeta.length * 11 + 10;
+    const rightContentH = 34 + Math.max(1, localLines.length) * 12 + 10;
+    const clientBlockH = Math.max(78, leftContentH, rightContentH);
     page.drawRectangle({ x: margin, y: y - clientBlockH, width: contentW, height: clientBlockH, color: soft, borderColor: line, borderWidth: 0.6 });
     txt('CLIENTE', margin + 12, y - 18, 8, bold, teal);
     txt('LOCAL / REFERÊNCIA', margin + 292, y - 18, 8, bold, teal);
@@ -238,7 +241,7 @@ export default async function handler(req, res) {
       const desc = wrapText(item.name || 'Item', normal, 9.2, 270);
       const notes = item.notes ? wrapText(item.notes, normal, 7.5, 270) : [];
       const rowH = Math.max(40, desc.length * 12 + notes.length * 9 + 15);
-      if (y - rowH < SAFE_BOTTOM + 185) {
+      if (y - rowH < SAFE_BOTTOM + 205) {
         newPage(true);
         drawTableHeader();
       }
@@ -255,20 +258,38 @@ export default async function handler(req, res) {
       rowIndex += 1;
     }
 
-    // Quando há poucos itens, completa a grade com linhas vazias como numa proposta comercial.
-    // Isso ocupa a página de forma organizada sem inventar itens nem esticar textos.
-    const minVisibleRows = 5;
+    // Grade vazia estruturada; a marca-d'água só ocupa essa área sem texto.
+    const minVisibleRows = 6;
+    const fillerTop = y;
     let fillerRows = Math.max(0, minVisibleRows - (items || []).length);
-    while (fillerRows > 0 && y - 32 > 310) {
+    while (fillerRows > 0 && y - 32 > 300) {
       if (rowIndex % 2 === 1) page.drawRectangle({ x: margin, y: y - 25, width: contentW, height: 32, color: soft });
       y -= 32;
       page.drawLine({ start: { x: margin, y: y + 7 }, end: { x: tableRight, y: y + 7 }, thickness: 0.45, color: line });
       rowIndex += 1;
       fillerRows -= 1;
     }
+    const fillerBottom = y;
+    const watermarkBandH = fillerTop - fillerBottom;
+    if (logo && watermarkBandH >= 64) {
+      const wmW = 130;
+      const wmH = Math.min(78, watermarkBandH - 10);
+      const wmY = fillerBottom + (watermarkBandH - wmH) / 2 + 3;
+      drawLogoFit(page, logo, tableRight - wmW - 14, wmY, wmW, wmH, 0.055);
+    }
 
+    // Calcula o bloco inferior antes de desenhar: total, informações e assinaturas ficam juntos.
+    const payment = quote.payment_terms || 'A combinar com o cliente.';
+    const paymentLines = wrapText(payment, normal, 8.4, 285);
+    const noteLines = quote.notes ? wrapText(quote.notes, normal, 8.3, contentW - 24) : [];
+    const leftInfoH = 35 + Math.max(1, paymentLines.length) * 11;
+    const rightInfoH = 72;
+    const notesH = noteLines.length ? 26 + noteLines.length * 11 : 0;
+    const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 20;
+    const lowerBlockH = 50 + infoCardH + 28 + 66;
     y -= 6;
-    ensure(125);
+    if (y - lowerBlockH < SAFE_BOTTOM) newPage(true);
+
     const discount = Number(quote.discount || 0);
     const surcharge = Number(quote.surcharge || 0);
     const grand = Math.max(0, subtotal - discount + surcharge);
@@ -283,16 +304,7 @@ export default async function handler(req, res) {
     txtRight(money(grand), A4[0] - margin - 14, y - 4, 15, bold, white);
     y -= 50;
 
-    // Informações finais em card único para reduzir vazios e impedir sobreposição.
-    const payment = quote.payment_terms || 'A combinar com o cliente.';
-    const paymentLines = wrapText(payment, normal, 8.4, 285);
-    const noteLines = quote.notes ? wrapText(quote.notes, normal, 8.3, contentW - 24) : [];
-    const leftInfoH = 35 + Math.max(1, paymentLines.length) * 11;
-    const rightInfoH = 72;
-    const notesH = noteLines.length ? 26 + noteLines.length * 11 : 0;
-    const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 20;
-    ensure(infoCardH + 90);
-
+    // Card inferior com altura dinâmica e sem cruzar a área de assinatura.
     const cardTop = y;
     const cardBottom = cardTop - infoCardH;
     page.drawRectangle({ x: margin, y: cardBottom, width: contentW, height: infoCardH, color: soft, borderColor: line, borderWidth: 0.6 });
@@ -317,26 +329,33 @@ export default async function handler(req, res) {
       let noteY = dividerY - 34;
       for (const l of noteLines) { txt(l, margin + 12, noteY, 8.3, normal, muted); noteY -= 11; }
     }
-    y = cardBottom - 26;
+    y = cardBottom - 28;
 
-    // Assinaturas sempre acima da área segura do rodapé.
-    const signatureH = 46;
+    // Assinaturas com rótulo e nome em área própria; nunca invadem rodapé ou card.
+    const signatureH = 66;
     if (y - signatureH < SAFE_BOTTOM) newPage(true);
     const sigW = 190;
     const sigY = y - 8;
     page.drawLine({ start: { x: margin + 8, y: sigY }, end: { x: margin + 8 + sigW, y: sigY }, thickness: 0.8, color: ink });
     page.drawLine({ start: { x: A4[0] - margin - sigW - 8, y: sigY }, end: { x: A4[0] - margin - 8, y: sigY }, thickness: 0.8, color: ink });
-    txt(company.owner_name || 'Responsável', margin + 8, sigY - 14, 8.2, bold, muted);
-    txt(nomeCliente, A4[0] - margin - sigW - 8, sigY - 14, 8.2, bold, muted);
+    txt('Responsável', margin + 8, sigY - 14, 7.2, normal, muted);
+    txt('Cliente', A4[0] - margin - sigW - 8, sigY - 14, 7.2, normal, muted);
+    const ownerSigLines = wrapText(company.owner_name || companyName, bold, 8.1, sigW).slice(0, 2);
+    const clientSigLines = wrapText(nomeCliente, bold, 8.1, sigW).slice(0, 2);
+    let ownerSigY = sigY - 28;
+    for (const l of ownerSigLines) { txt(l, margin + 8, ownerSigY, 8.1, bold, ink); ownerSigY -= 10; }
+    let clientSigY = sigY - 28;
+    for (const l of clientSigLines) { txt(l, A4[0] - margin - sigW - 8, clientSigY, 8.1, bold, ink); clientSigY -= 10; }
 
-    // Rodapé é desenhado por último e possui uma zona protegida de 66 pt acima dele.
+    // Rodapé é desenhado por último e mantém largura reservada para paginação.
     const pages = pdf.getPages();
     pages.forEach((targetPage, index) => {
       targetPage.drawRectangle({ x: 0, y: 0, width: A4[0], height: FOOTER_H, color: navy });
-      const info = [company.tax_id, company.phone, company.whatsapp, company.email].filter(Boolean).join(' · ');
-      targetPage.drawText(clean(info).slice(0, 95), { x: margin, y: 13, size: 6.8, font: normal, color: rgb(0.78, 0.82, 0.86) });
       const footerRight = `ZiisTec · ${index + 1}/${pages.length}`;
       const footerWidth = normal.widthOfTextAtSize(footerRight, 6.8);
+      const infoMaxW = contentW - footerWidth - 24;
+      const info = fitText([company.tax_id, company.phone, company.whatsapp, company.email].filter(Boolean).join(' · '), normal, 6.8, infoMaxW);
+      targetPage.drawText(info, { x: margin, y: 13, size: 6.8, font: normal, color: rgb(0.78, 0.82, 0.86) });
       targetPage.drawText(footerRight, { x: A4[0] - margin - footerWidth, y: 13, size: 6.8, font: normal, color: rgb(0.50, 0.58, 0.64) });
     });
 
