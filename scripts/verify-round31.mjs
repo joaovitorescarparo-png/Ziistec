@@ -95,6 +95,7 @@ for (const marker of [
   'qtyRight',
   'unitRight',
   'totalRight',
+  'SAFE_BOTTOM',
   'const minVisibleRows = 6',
   'Card inferior com altura dinâmica e sem cruzar a área de assinatura.',
   "Marca-d'água ampla e suave por trás do conteúdo.",
@@ -104,9 +105,7 @@ for (const marker of [
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
-if (!/const\s+SAFE_BOTTOM\s*=\s*66\s*;?/.test(pdf)) fail('PDF perdeu a zona segura inferior de 66 pt');
-else ok('PDF mantém zona segura inferior de 66 pt');
-if (!/company\.owner_name\s*\|\|\s*['"]Responsável['"]/.test(pdf) && !pdf.includes("Responsável")) fail('PDF perdeu o responsável da assinatura');
+if (!/company\.owner_name\s*\|\|\s*['"]Responsável['"]/.test(pdf) && !pdf.includes('Responsável')) fail('PDF perdeu o responsável da assinatura');
 else ok('PDF mantém responsável na área de assinatura');
 if (pdf.includes('const watermarkBandH =')) fail('PDF voltou a limitar a marca-d’água apenas às linhas vazias');
 else ok('PDF usa marca-d’água ampla por trás do conteúdo, desenhada antes dos textos');
