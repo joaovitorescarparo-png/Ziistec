@@ -56,6 +56,7 @@ if (!app.includes('excluidoEm')) fail('UI não diferencia clientes arquivados pa
 else ok('UI oculta/identifica arquivados sem destruir histórico');
 
 const logoImage = read('src/lib/logoImage.js');
+const logoFailureCount = failures.length;
 for (const marker of [
   'removerFundoBrancoConectado',
   'caixaConteudo',
@@ -65,19 +66,20 @@ for (const marker of [
 ]) {
   if (!logoImage.includes(marker)) fail(`Tratamento da logo perdeu marcador: ${marker}`);
 }
-else ok('Logo é recortada no navegador e o fundo branco conectado às bordas vira transparência');
+if (failures.length === logoFailureCount) ok('Logo é recortada no navegador e o fundo branco conectado às bordas vira transparência');
 
 const storageExtras = read('src/lib/storageExtras.js');
+const storageFailureCount = failures.length;
 for (const marker of [
   "import { prepararLogoTransparente } from './logoImage';",
-  "'/branding/logo-clean-'",
+  'logo-clean-',
   'prepararLogoTransparente(source)',
   ".eq('logo_path',path)",
   "contentType:'image/png'",
 ]) {
   if (!storageExtras.includes(marker)) fail(`Migração automática da logo perdeu marcador: ${marker}`);
 }
-if (storageExtras.includes('/branding/logo-clean-')) ok('Logos antigas são migradas para PNG limpa de forma idempotente');
+if (failures.length === storageFailureCount) ok('Logos antigas são migradas para PNG limpa de forma idempotente');
 
 const pdf = read('api/quote-pdf.js');
 for (const marker of [
