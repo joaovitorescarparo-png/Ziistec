@@ -149,4 +149,11 @@ applyBase64Patch({
   outputHash: 'ce1523f036d2db33d6bfe24631907ef2bf3d2aca144366c1fc64fbdb0a5e9104',
 });
 
+// Rodada 3.1 é aplicada por codemod UTF-8 normal (sem novos artefatos Base64).
+const round31 = spawnSync(process.execPath, ['scripts/apply-round31.mjs'], { encoding: 'utf8' });
+if (round31.status !== 0) {
+  throw new Error(`Could not apply Round 3.1 readable codemod: ${round31.stderr || round31.stdout || 'unknown error'}`);
+}
+if (round31.stdout) process.stdout.write(round31.stdout);
+
 ensureQuotePdfProjectionGuard();
