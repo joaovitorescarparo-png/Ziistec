@@ -7,7 +7,8 @@
 -- 3) orçamento arquivado não vira nova OS;
 -- 4) produto arquivado não pode ser vendido/adicionado a uma OS;
 -- 5) caminho ativo equivalente continua funcionando;
--- 6) technician não pode alterar deleted_at.
+-- 6) documento histórico criado antes do archive preserva seu snapshot ao regravar;
+-- 7) technician não altera deleted_at (erro explícito OU RLS atualizando zero linhas).
 
 begin;
 
@@ -21,25 +22,28 @@ create temp table zt_f05_test(
   archived_product uuid,
   active_product uuid,
   archived_quote uuid,
+  history_quote uuid,
   open_wo uuid,
   archived_client_visible boolean default false,
   archived_refs_blocked boolean default false,
   archived_quote_blocked boolean default false,
   archived_product_blocked boolean default false,
   active_quote_created boolean default false,
+  history_resave_ok boolean default false,
   technician_soft_delete_blocked boolean default false,
   archived_refs_error text,
   archived_quote_error text,
-  archived_product_error text
+  archived_product_error text,
+  history_error text
 ) on commit drop;
 
 grant select,update on zt_f05_test to authenticated;
 
 insert into zt_f05_test(
   user_id,company_id,archived_client,active_client,archived_service,active_service,
-  archived_product,active_product,archived_quote,open_wo
+  archived_product,active_product,archived_quote,history_quote,open_wo
 )
-select m.user_id,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid()
+select m.user_id,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid()
 from public.company_members m
 where m.role='owner' and m.status='active'
 limit 1;
@@ -56,34 +60,48 @@ select company_id,'trial'::public.zt_sub_status,current_date,current_date+14 fro
 insert into public.company_members(company_id,user_id,role,status)
 select company_id,user_id,'owner'::public.zt_role,'active'::public.zt_member_status from zt_f05_test;
 
-insert into public.clients(id,company_id,name,deleted_at)
-select archived_client,company_id,'__F05_ARCHIVED_CLIENT__',now() from zt_f05_test;
+insert into public.clients(id,company_id,name)
+select archived_client,company_id,'__F05_ARCHIVED_CLIENT__' from zt_f05_test;
 insert into public.clients(id,company_id,name)
 select active_client,company_id,'__F05_ACTIVE_CLIENT__' from zt_f05_test;
 
-insert into public.services(id,company_id,name,unit,price,cost,active,deleted_at)
-select archived_service,company_id,'__F05_ARCHIVED_SERVICE__','unidade',100,10,true,now() from zt_f05_test;
+insert into public.services(id,company_id,name,unit,price,cost,active)
+select archived_service,company_id,'__F05_ARCHIVED_SERVICE__','unidade',100,10,true from zt_f05_test;
 insert into public.services(id,company_id,name,unit,price,cost,active)
 select active_service,company_id,'__F05_ACTIVE_SERVICE__','unidade',100,10,true from zt_f05_test;
 
-insert into public.products(id,company_id,name,unit,price,cost,active,sale_enabled,track_stock,stock_qty,low_stock_threshold,deleted_at)
-select archived_product,company_id,'__F05_ARCHIVED_PRODUCT__','unidade',200,20,true,true,false,5,0,now() from zt_f05_test;
+insert into public.products(id,company_id,name,unit,price,cost,active,sale_enabled,track_stock,stock_qty,low_stock_threshold)
+select archived_product,company_id,'__F05_ARCHIVED_PRODUCT__','unidade',200,20,true,true,false,5,0 from zt_f05_test;
 insert into public.products(id,company_id,name,unit,price,cost,active,sale_enabled,track_stock,stock_qty,low_stock_threshold)
 select active_product,company_id,'__F05_ACTIVE_PRODUCT__','unidade',200,20,true,true,false,5,0 from zt_f05_test;
 
-insert into public.quotes(id,company_id,number,client_id,status,issue_date,deleted_at,created_by)
-select archived_quote,company_id,'__F05-ARCHIVED-QUOTE__',active_client,'approved'::public.zt_quote_status,current_date,now(),user_id from zt_f05_test;
+-- Quote que será arquivada DEPOIS do snapshot inicial.
+insert into public.quotes(id,company_id,number,client_id,status,issue_date,created_by)
+select archived_quote,company_id,'__F05-ARCHIVED-QUOTE__',active_client,'approved'::public.zt_quote_status,current_date,user_id from zt_f05_test;
 insert into public.quote_items(quote_id,company_id,kind,service_id,name,unit,quantity,unit_price,unit_cost,position)
 select archived_quote,company_id,'service'::public.zt_item_kind,active_service,'__F05_ACTIVE_SERVICE__','unidade',1,100,10,0 from zt_f05_test;
 
+-- Documento histórico que já referenciava o serviço antes de ele ser arquivado.
+insert into public.quotes(id,company_id,number,client_id,status,issue_date,created_by)
+select history_quote,company_id,'__F05-HISTORY-QUOTE__',active_client,'draft'::public.zt_quote_status,current_date,user_id from zt_f05_test;
+insert into public.quote_items(quote_id,company_id,kind,service_id,name,unit,quantity,unit_price,unit_cost,position)
+select history_quote,company_id,'service'::public.zt_item_kind,archived_service,'__F05_ARCHIVED_SERVICE__','unidade',1,100,10,0 from zt_f05_test;
+
 insert into public.work_orders(id,company_id,number,client_id,assigned_to,status,created_by)
 select open_wo,company_id,'__F05-OPEN-WO__',active_client,user_id,'in_progress'::public.zt_wo_status,user_id from zt_f05_test;
+
+-- clock_timestamp() é realmente posterior ao created_at default now() dentro desta mesma transação.
+update public.clients c set deleted_at=clock_timestamp() from zt_f05_test t where c.id=t.archived_client;
+update public.services s set deleted_at=clock_timestamp() from zt_f05_test t where s.id=t.archived_service;
+update public.products p set deleted_at=clock_timestamp() from zt_f05_test t where p.id=t.archived_product;
+update public.quotes q set deleted_at=clock_timestamp() from zt_f05_test t where q.id=t.archived_quote;
 
 set local role authenticated;
 
 update zt_f05_test t
 set archived_client_visible = exists(
-  select 1 from public.clients c where c.id=t.archived_client and c.company_id=t.company_id and c.deleted_at is not null
+  select 1 from public.clients c
+  where c.id=t.archived_client and c.company_id=t.company_id and c.deleted_at is not null
 );
 
 do $$
@@ -98,21 +116,18 @@ begin
         jsonb_build_object('kind','product','product_id',(select archived_product from zt_f05_test),'name','Archived product','unit','unidade','quantity',1,'unit_price',200)
       )
     ) into v_id;
-    update zt_f05_test set archived_refs_blocked=false;
   exception when others then
     update zt_f05_test set archived_refs_blocked=true,archived_refs_error=sqlstate||':'||sqlerrm;
   end;
 
   begin
     select public.zt_create_work_order_from_quote((select archived_quote from zt_f05_test),null,null,null) into v_id;
-    update zt_f05_test set archived_quote_blocked=false;
   exception when others then
     update zt_f05_test set archived_quote_blocked=true,archived_quote_error=sqlstate||':'||sqlerrm;
   end;
 
   begin
     select public.zt_sell_product_on_work_order((select open_wo from zt_f05_test),(select archived_product from zt_f05_test),1,'__F05_TEST__') into v_id;
-    update zt_f05_test set archived_product_blocked=false;
   exception when others then
     update zt_f05_test set archived_product_blocked=true,archived_product_error=sqlstate||':'||sqlerrm;
   end;
@@ -130,21 +145,40 @@ begin
   exception when others then
     update zt_f05_test set active_quote_created=false;
   end;
+
+  begin
+    select public.zt_save_quote_idempotent(
+      (select company_id from zt_f05_test),(select history_quote from zt_f05_test),gen_random_uuid(),
+      jsonb_build_object('client_id',(select active_client from zt_f05_test),'status','draft','issue_date',current_date),
+      jsonb_build_array(
+        jsonb_build_object('kind','service','service_id',(select archived_service from zt_f05_test),'name','Archived service','unit','unidade','quantity',1,'unit_price',100)
+      )
+    ) into v_id;
+    update zt_f05_test set history_resave_ok=(v_id=(select history_quote from zt_f05_test));
+  exception when others then
+    update zt_f05_test set history_resave_ok=false,history_error=sqlstate||':'||sqlerrm;
+  end;
 end $$;
 
 reset role;
 
--- Muda apenas a membership temporária para technician e prova que deleted_at continua owner-only.
+-- Muda apenas a membership TEMPORÁRIA para technician e prova que deleted_at continua owner-only.
 update public.company_members m set role='technician'::public.zt_role
 from zt_f05_test t where m.company_id=t.company_id and m.user_id=t.user_id;
 
 set local role authenticated;
 do $$
+declare v_count integer:=0;
 begin
   begin
-    update public.clients c set deleted_at=null
-    from zt_f05_test t where c.id=t.archived_client and c.company_id=t.company_id;
-    update zt_f05_test set technician_soft_delete_blocked=false;
+    with changed as (
+      update public.clients c set deleted_at=null
+      from zt_f05_test t
+      where c.id=t.archived_client and c.company_id=t.company_id
+      returning c.id
+    )
+    select count(*) into v_count from changed;
+    update zt_f05_test set technician_soft_delete_blocked=(v_count=0);
   exception when sqlstate '42501' then
     update zt_f05_test set technician_soft_delete_blocked=true;
   end;
@@ -158,15 +192,18 @@ select
   archived_quote_blocked,
   archived_product_blocked,
   active_quote_created,
+  history_resave_ok,
   technician_soft_delete_blocked,
   archived_refs_error,
   archived_quote_error,
   archived_product_error,
+  history_error,
   (archived_client_visible
    and archived_refs_blocked
    and archived_quote_blocked
    and archived_product_blocked
    and active_quote_created
+   and history_resave_ok
    and technician_soft_delete_blocked) as passed
 from zt_f05_test;
 
@@ -179,6 +216,7 @@ begin
       and archived_quote_blocked
       and archived_product_blocked
       and active_quote_created
+      and history_resave_ok
       and technician_soft_delete_blocked
   ) then
     raise exception 'F05_SOFT_DELETE_REFERENCE_GUARD_FAILED';
