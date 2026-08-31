@@ -16,21 +16,24 @@ test('F05: clientes arquivados continuam na carga histórica', () => {
   );
 });
 
-test('F05: novos vínculos de cliente filtram registros arquivados', () => {
+test('F05: catálogo de IA e pickers de novos vínculos não oferecem clientes arquivados', () => {
   assert.match(
     app,
     /clientes\.filter\(\s*\(c\)\s*=>\s*!c\.excluidoEm\s*\)\.map\(\(c\)\s*=>\s*\(\{\s*id:\s*c\.id,\s*nome:/,
     'o catálogo de clientes enviado à IA ainda inclui arquivados',
   );
 
-  const archivedSafePickerCount = (
-    app.match(/clientes\.filter\(\s*\(c\)\s*=>\s*!c\.excluidoEm\s*\)\.map\(\(c\)\s*=>\s*<option/g) || []
-  ).length + (
-    app.match(/clientes\.filter\(\s*\(x\)\s*=>\s*!x\.excluidoEm\s*\)\.map\(\(x\)\s*=>\s*<option/g) || []
-  ).length;
+  const quotePicker = /clientes\.filter\(\s*\(x\)\s*=>\s*!x\.excluidoEm\s*\|\|\s*x\.id\s*===\s*d\.clienteId\s*\)\.map/;
+  const workOrderPicker = /clientes\.filter\(\s*\(c\)\s*=>\s*!c\.excluidoEm\s*\|\|\s*c\.id\s*===\s*f\.clienteId\s*\)\.map/;
+  const manualIncomePicker = /clientes\.filter\(\s*\(c\)\s*=>\s*!c\.excluidoEm\s*\|\|\s*c\.id\s*===\s*form\.clienteId\s*\)\.map/;
 
-  assert.ok(
-    archivedSafePickerCount >= 3,
-    `esperava pelo menos 3 pickers de novo documento filtrando arquivados; encontrei ${archivedSafePickerCount}`,
+  assert.match(app, quotePicker, 'novo orçamento ainda oferece cliente arquivado');
+  assert.match(app, workOrderPicker, 'nova OS ainda oferece cliente arquivado');
+  assert.match(app, manualIncomePicker, 'novo lançamento manual ainda oferece cliente arquivado');
+
+  assert.match(
+    app,
+    /filtro\.clienteId[\s\S]{0,260}\{clientes\.map\(\(c\)\s*=>\s*<option/,
+    'o filtro histórico do financeiro deve continuar conhecendo clientes arquivados',
   );
 });
