@@ -3,82 +3,14 @@
 -- Regras:
 -- * registros arquivados continuam legíveis conforme as RLS existentes;
 -- * novos documentos/vínculos não podem apontar para cliente/serviço/produto/orçamento arquivado;
--- * regravação interna de um documento criado ANTES do arquivamento pode preservar
---   um item histórico já representado pelo snapshot do documento;
--- * Data API direta nunca pode criar um novo vínculo para catálogo arquivado;
+-- * regravação interna de documento criado ANTES do arquivamento pode preservar
+--   item histórico já representado pelo snapshot do documento;
+-- * Data API direta é fail-closed para catálogo arquivado;
 -- * deleted_at continua protegido pelo guard owner-only da 0066.
 
-create or replace function zt_private.zt_reference_deleted_at(
-  p_kind text,
-  p_company uuid,
-  p_id uuid
-)
-returns timestamptz
-language plpgsql
-stable
-security definer
-set search_path = ''
-as $$
-declare
-  v_deleted timestamptz;
-begin
-  if p_id is null then return null; end if;
-
-  case p_kind
-    when 'client' then
-      select c.deleted_at into v_deleted
-      from public.clients c
-      where c.id=p_id and c.company_id=p_company;
-    when 'service' then
-      select s.deleted_at into v_deleted
-      from public.services s
-      where s.id=p_id and s.company_id=p_company;
-    when 'product' then
-      select p.deleted_at into v_deleted
-      from public.products p
-      where p.id=p_id and p.company_id=p_company;
-    when 'quote' then
-      select q.deleted_at into v_deleted
-      from public.quotes q
-      where q.id=p_id and q.company_id=p_company;
-    else
-      raise exception 'Tipo de referência inválido' using errcode='22023';
-  end case;
-
-  if not found then
-    raise exception 'Referência não pertence à empresa' using errcode='23503';
-  end if;
-
-  return v_deleted;
-end;
-$$;
-
-revoke all on function zt_private.zt_reference_deleted_at(text,uuid,uuid) from public, anon, authenticated;
-
-create or replace function zt_private.zt_assert_unarchived_reference(
-  p_kind text,
-  p_company uuid,
-  p_id uuid
-)
-returns void
-language plpgsql
-stable
-security definer
-set search_path = ''
-as $$
-begin
-  if p_id is null then return; end if;
-  if zt_private.zt_reference_deleted_at(p_kind,p_company,p_id) is not null then
-    raise exception 'Registro arquivado não pode ser usado em novo documento'
-      using errcode='23514';
-  end if;
-end;
-$$;
-
-revoke all on function zt_private.zt_assert_unarchived_reference(text,uuid,uuid) from public, anon, authenticated;
-
--- Guarda referências no cabeçalho dos documentos. Em UPDATE, uma referência histórica
--- que não mudou é preservada; trocar para um registro arquivado é bloqueado.
+-- Cabeçalhos: INSERT sempre exige referência disponível. UPDATE só revalida quando
+-- a referência muda, portanto um documento histórico continua editável sem perder
+-- o cliente/orçamento antigo que foi arquivado depois.
 create or replace function zt_private.zt_guard_unarchived_document_references()
 returns trigger
 language plpgsql
@@ -98,7 +30,12 @@ begin
     v_ref := nullif(v_new->>'client_id','')::uuid;
     v_old_ref := nullif(v_old->>'client_id','')::uuid;
     if v_ref is not null and (tg_op='INSERT' or v_ref is distinct from v_old_ref) then
-      perform zt_private.zt_assert_unarchived_reference('client',v_company,v_ref);
+      if not exists(
+        select 1 from public.clients c
+        where c.id=v_ref and c.company_id=v_company and c.deleted_at is null
+      ) then
+        raise exception 'Cliente arquivado ou indisponível não pode ser usado em novo documento' using errcode='23514';
+      end if;
     end if;
   end if;
 
@@ -106,7 +43,12 @@ begin
     v_ref := nullif(v_new->>'quote_id','')::uuid;
     v_old_ref := nullif(v_old->>'quote_id','')::uuid;
     if v_ref is not null and (tg_op='INSERT' or v_ref is distinct from v_old_ref) then
-      perform zt_private.zt_assert_unarchived_reference('quote',v_company,v_ref);
+      if not exists(
+        select 1 from public.quotes q
+        where q.id=v_ref and q.company_id=v_company and q.deleted_at is null
+      ) then
+        raise exception 'Orçamento arquivado ou indisponível não pode originar novo documento' using errcode='23514';
+      end if;
     end if;
   end if;
 
@@ -114,7 +56,12 @@ begin
     v_ref := nullif(v_new->>'service_id','')::uuid;
     v_old_ref := nullif(v_old->>'service_id','')::uuid;
     if v_ref is not null and (tg_op='INSERT' or v_ref is distinct from v_old_ref) then
-      perform zt_private.zt_assert_unarchived_reference('service',v_company,v_ref);
+      if not exists(
+        select 1 from public.services s
+        where s.id=v_ref and s.company_id=v_company and s.deleted_at is null
+      ) then
+        raise exception 'Serviço arquivado ou indisponível não pode ser usado em novo documento' using errcode='23514';
+      end if;
     end if;
   end if;
 
@@ -122,7 +69,12 @@ begin
     v_ref := nullif(v_new->>'product_id','')::uuid;
     v_old_ref := nullif(v_old->>'product_id','')::uuid;
     if v_ref is not null and (tg_op='INSERT' or v_ref is distinct from v_old_ref) then
-      perform zt_private.zt_assert_unarchived_reference('product',v_company,v_ref);
+      if not exists(
+        select 1 from public.products p
+        where p.id=v_ref and p.company_id=v_company and p.deleted_at is null
+      ) then
+        raise exception 'Produto arquivado ou indisponível não pode ser usado em novo documento' using errcode='23514';
+      end if;
     end if;
   end if;
 
@@ -132,9 +84,10 @@ $$;
 
 revoke all on function zt_private.zt_guard_unarchived_document_references() from public, anon, authenticated;
 
--- Itens são regravados por algumas RPCs legadas. Para não quebrar histórico, uma
--- regravação privilegiada de documento criado antes do arquivamento pode manter o
--- snapshot antigo. INSERT direto via authenticated continua fail-closed.
+-- Algumas RPCs legadas substituem todas as linhas de itens ao salvar. Para não
+-- destruir histórico, a regravação privilegiada de um documento criado antes do
+-- arquivamento pode manter o snapshot antigo. INSERT direto como authenticated
+-- não recebe essa exceção.
 create or replace function zt_private.zt_guard_unarchived_catalog_item_references()
 returns trigger
 language plpgsql
@@ -171,7 +124,7 @@ begin
   end if;
 
   if v_parent is null or v_parent_created is null then
-    raise exception 'Documento pai inválido' using errcode='23503';
+    raise exception 'Documento pai inválido ou indisponível' using errcode='23503';
   end if;
   if v_parent_deleted is not null then
     raise exception 'Documento arquivado não aceita novos vínculos' using errcode='23514';
@@ -181,10 +134,15 @@ begin
     v_ref := nullif(v_new->>'service_id','')::uuid;
     v_old_ref := nullif(v_old->>'service_id','')::uuid;
     if v_ref is not null and (tg_op='INSERT' or v_ref is distinct from v_old_ref) then
-      v_deleted := zt_private.zt_reference_deleted_at('service',v_company,v_ref);
-      if v_deleted is not null
-         and (current_user='authenticated' or v_parent_created >= v_deleted) then
-        raise exception 'Serviço arquivado não pode ser usado em novo vínculo' using errcode='23514';
+      select s.deleted_at into v_deleted
+      from public.services s where s.id=v_ref and s.company_id=v_company;
+      if not found then
+        raise exception 'Serviço não pertence à empresa ou está indisponível' using errcode='23503';
+      end if;
+      if v_deleted is not null then
+        if current_user='authenticated' or v_parent_created >= v_deleted then
+          raise exception 'Serviço arquivado não pode ser usado em novo vínculo' using errcode='23514';
+        end if;
       end if;
     end if;
   end if;
@@ -193,10 +151,15 @@ begin
     v_ref := nullif(v_new->>'product_id','')::uuid;
     v_old_ref := nullif(v_old->>'product_id','')::uuid;
     if v_ref is not null and (tg_op='INSERT' or v_ref is distinct from v_old_ref) then
-      v_deleted := zt_private.zt_reference_deleted_at('product',v_company,v_ref);
-      if v_deleted is not null
-         and (current_user='authenticated' or v_parent_created >= v_deleted) then
-        raise exception 'Produto arquivado não pode ser usado em novo vínculo' using errcode='23514';
+      select p.deleted_at into v_deleted
+      from public.products p where p.id=v_ref and p.company_id=v_company;
+      if not found then
+        raise exception 'Produto não pertence à empresa ou está indisponível' using errcode='23503';
+      end if;
+      if v_deleted is not null then
+        if current_user='authenticated' or v_parent_created >= v_deleted then
+          raise exception 'Produto arquivado não pode ser usado em novo vínculo' using errcode='23514';
+        end if;
       end if;
     end if;
   end if;
@@ -327,7 +290,7 @@ $$;
 revoke all on function public.zt_sell_product_on_work_order(uuid,uuid,numeric,text) from public, anon;
 grant execute on function public.zt_sell_product_on_work_order(uuid,uuid,numeric,text) to authenticated, service_role;
 
--- Ajuste de estoque também é operação nova sobre catálogo e não deve reativar produto arquivado.
+-- Ajuste de estoque é operação nova e não deve reativar produto arquivado.
 create or replace function public.zt_adjust_product_stock(p_company uuid, p_product uuid, p_delta numeric, p_notes text default null)
 returns numeric
 language plpgsql
