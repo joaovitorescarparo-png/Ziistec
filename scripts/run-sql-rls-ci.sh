@@ -17,9 +17,6 @@ apply_sql() {
   exit 1
 }
 
-# The production baseline contains historical migration names that were later
-# renamed or consolidated into canonical repository files. Keep those aliases
-# explicit so replay follows schema_migrations order instead of filename sort.
 declare -A baseline_alias=(
   ["0001_ziistec_fundacao_final"]="supabase/0001_ziistec_fundacao_FINAL.sql"
   ["0002_ziistec_storage_final"]="supabase/0002_ziistec_storage_FINAL.sql"
@@ -39,57 +36,35 @@ bootstrap_applied=0
 
 resolve_baseline_file() {
   local name="$1"
-
   if [[ -n "${baseline_alias[$name]:-}" ]]; then
     printf '%s\n' "${baseline_alias[$name]}"
     return 0
   fi
-
   local matches=()
   mapfile -t matches < <(find supabase -maxdepth 1 -type f -name "[0-9][0-9][0-9][0-9]_${name}.sql" | sort)
-
   if [[ ${#matches[@]} -ne 1 ]]; then
     echo "CI_SQL_RLS: baseline migration '$name' resolved to ${#matches[@]} canonical files" >&2
-    if [[ ${#matches[@]} -gt 0 ]]; then
-      printf '  %s\n' "${matches[@]}" >&2
-    fi
+    if [[ ${#matches[@]} -gt 0 ]]; then printf '  %s\n' "${matches[@]}" >&2; fi
     return 1
   fi
-
   printf '%s\n' "${matches[0]}"
 }
 
-# Replay the historical production baseline in the exact recorded order.
-# The local-only RLS/private-schema bootstrap belongs between 0001 and 0002.
 while IFS=',' read -r version name statements_md5; do
-  if [[ "$version" == "version" ]]; then
-    continue
-  fi
-  [[ -n "$version" && -n "$name" ]] || {
-    echo "CI_SQL_RLS: malformed baseline manifest row" >&2
-    exit 1
-  }
-
+  if [[ "$version" == "version" ]]; then continue; fi
+  [[ -n "$version" && -n "$name" ]] || { echo "CI_SQL_RLS: malformed baseline manifest row" >&2; exit 1; }
   sql="$(resolve_baseline_file "$name")"
-
   if [[ "$sql" == "__RECONCILE_AFTER_BASELINE__" ]]; then
     echo "CI_SQL_RLS baseline: $name -> deferred reconciliation"
     continue
   fi
-
-  [[ -f "$sql" ]] || {
-    echo "CI_SQL_RLS: resolved file does not exist for '$name': $sql" >&2
-    exit 1
-  }
-
+  [[ -f "$sql" ]] || { echo "CI_SQL_RLS: resolved file does not exist for '$name': $sql" >&2; exit 1; }
   if [[ -n "${applied_baseline_files[$sql]:-}" ]]; then
     echo "CI_SQL_RLS baseline: $name -> consolidated in already applied $sql"
     continue
   fi
-
   apply_sql "$sql"
   applied_baseline_files[$sql]="$name"
-
   if [[ "$name" == "0001_ziistec_fundacao_final" ]]; then
     apply_sql supabase/tests/ci_local_bootstrap.sql
     bootstrap_applied=1
@@ -101,8 +76,6 @@ if [[ "$bootstrap_applied" -ne 1 ]]; then
   exit 1
 fi
 
-# Reproduce the historical migration that intentionally has no canonical SQL
-# file anymore. This file is staging/CI-only and must remain before Product V2.
 apply_sql supabase/staging/production_baseline_reconciliation.sql
 
 mapfile -t v2_migrations < <(find supabase -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]*.sql' | sort)
@@ -110,9 +83,7 @@ for sql in "${v2_migrations[@]}"; do
   base="$(basename "$sql")"
   prefix="${base%%_*}"
   num=$((10#$prefix))
-  if (( num >= 50 )); then
-    apply_sql "$sql"
-  fi
+  if (( num >= 50 )); then apply_sql "$sql"; fi
 done
 
 apply_sql supabase/tests/ci_local_seed.sql
@@ -128,6 +99,7 @@ regressions=(
   supabase/tests/v2_f06_warranty_retry_rollback.sql
   supabase/tests/v2_f07_documents_history_after_subscription_rollback.sql
   supabase/tests/v2_technician_sale_rollback_smoke.sql
+  supabase/tests/v2_field_sale_rollback_smoke.sql
 )
 
 for sql in "${regressions[@]}"; do
