@@ -7,14 +7,16 @@ insert into auth.users (
 ) values
   ('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000001','authenticated','authenticated','ci-owner-a@example.invalid','',now(),'{}'::jsonb,'{}'::jsonb,now(),now()),
   ('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000002','authenticated','authenticated','ci-owner-b@example.invalid','',now(),'{}'::jsonb,'{}'::jsonb,now(),now()),
-  ('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000003','authenticated','authenticated','ci-tech-a@example.invalid','',now(),'{}'::jsonb,'{}'::jsonb,now(),now())
+  ('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000003','authenticated','authenticated','ci-tech-a@example.invalid','',now(),'{}'::jsonb,'{}'::jsonb,now(),now()),
+  ('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000004','authenticated','authenticated','ci-external@example.invalid','',now(),'{}'::jsonb,'{}'::jsonb,now(),now())
 on conflict (id) do nothing;
 
 insert into public.profiles(id,full_name,email)
 values
   ('10000000-0000-0000-0000-000000000001','CI Owner A','ci-owner-a@example.invalid'),
   ('10000000-0000-0000-0000-000000000002','CI Owner B','ci-owner-b@example.invalid'),
-  ('10000000-0000-0000-0000-000000000003','CI Technician A','ci-tech-a@example.invalid')
+  ('10000000-0000-0000-0000-000000000003','CI Technician A','ci-tech-a@example.invalid'),
+  ('10000000-0000-0000-0000-000000000004','CI External User','ci-external@example.invalid')
 on conflict (id) do nothing;
 
 insert into public.companies(id,name,has_team)
