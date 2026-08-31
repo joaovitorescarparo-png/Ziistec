@@ -110,8 +110,11 @@ set local role authenticated;
 update zt_f07_test t set owner_suspended_read=exists(select 1 from storage.objects o where o.id=t.object_a);
 reset role;
 
--- expirada: status nominalmente active, porém período terminou ontem.
-update public.subscriptions s set status='active'::public.zt_sub_status,current_period_end=current_date-1
+-- expirada: status nominalmente active, com todo o período encerrado no passado.
+update public.subscriptions s
+set status='active'::public.zt_sub_status,
+    current_period_start=current_date-30,
+    current_period_end=current_date-1
 from zt_f07_test t where s.company_id=t.company_a;
 set local role authenticated;
 update zt_f07_test t set owner_expired_read=exists(select 1 from storage.objects o where o.id=t.object_a);
