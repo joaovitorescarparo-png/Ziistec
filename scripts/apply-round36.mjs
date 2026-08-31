@@ -41,7 +41,7 @@ requireOnce(
                 {["rascunho", "enviado"].includes(o.status) && (
                   <button
                     type="button"
-                    aria-label={\`Aprovar ${o.numero}\`}
+                    aria-label={\`Aprovar \${o.numero}\`}
                     title="Aprovar orçamento"
                     onClick={() => mudarStatusOrc(o.id, "aprovado")}
                     className="self-center shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[12px] font-semibold text-emerald-800 ring-1 ring-emerald-200 transition hover:bg-emerald-100 active:scale-[0.98]"
