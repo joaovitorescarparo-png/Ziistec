@@ -4,9 +4,9 @@ import { resolverConfigSupabase } from "./supabaseConfig";
 /*
   Separação de ambientes:
   - Produção usa somente o Supabase principal nos hosts oficiais da main.
-  - A branch Product V2 usa somente o Supabase de homologação no alias fixo da PR.
-  - Qualquer outro preview/localhost sem env própria falha fechado.
-  - Se uma env parcial ou um preview tentar apontar para produção, a conexão é recusada.
+  - Previews de homologação allowlisted usam somente o Supabase de staging.
+  - Development aceita staging apenas quando configurado explicitamente.
+  - Par parcial, project ref/key incompatível ou preview desconhecido falha fechado.
 
   As chaves abaixo são publishable e podem existir no bundle. Service role/secret key
   jamais entra no frontend. A autorização real continua sendo feita pela RLS.
@@ -17,6 +17,7 @@ const STAGING_URL = "https://xadoktssibuuebzzjrhv.supabase.co";
 const STAGING_PUBLISHABLE_KEY = "sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e";
 
 const runtimeConfig = resolverConfigSupabase({
+  deploymentEnv: import.meta.env.VITE_VERCEL_ENV,
   host: typeof window !== "undefined" ? window.location.hostname : "",
   envUrl: import.meta.env.VITE_SUPABASE_URL,
   envKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
