@@ -11,12 +11,38 @@ if [[ ${#migrations[@]} -lt 2 ]]; then
   exit 1
 fi
 
-for sql in "${migrations[@]}"; do
+apply_sql() {
+  local sql="$1"
   echo "CI_SQL_RLS migration: $sql"
   psql -X -v ON_ERROR_STOP=1 "$DB_URL" -f "$sql" >/dev/null
+}
+
+# O staging real foi bootstrapado em fases: 0001, helper rls_auto_enable,
+# baseline restante, reconciliação histórica e só então Product V2+.
+apply_sql supabase/0001_ziistec_fundacao_FINAL.sql
+apply_sql supabase/tests/ci_local_bootstrap.sql
+
+for sql in "${migrations[@]}"; do
+  base="$(basename "$sql")"
+  prefix="${base%%_*}"
+  num=$((10#$prefix))
+  if (( num >= 2 && num <= 49 )); then
+    apply_sql "$sql"
+  fi
 done
 
-psql -X -v ON_ERROR_STOP=1 "$DB_URL" -f supabase/tests/ci_local_seed.sql >/dev/null
+apply_sql supabase/staging/production_baseline_reconciliation.sql
+
+for sql in "${migrations[@]}"; do
+  base="$(basename "$sql")"
+  prefix="${base%%_*}"
+  num=$((10#$prefix))
+  if (( num >= 50 )); then
+    apply_sql "$sql"
+  fi
+done
+
+apply_sql supabase/tests/ci_local_seed.sql
 
 regressions=(
   supabase/tests/v2_ci_cross_tenant_rls_canary.sql
