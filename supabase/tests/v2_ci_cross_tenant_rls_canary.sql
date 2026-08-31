@@ -1,10 +1,18 @@
 -- Disposable/local CI canary. If client RLS becomes permissive across companies, this test fails.
 begin;
 
+-- Create each tenant fixture through the same authenticated owner path used by the app.
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+set local role authenticated;
 insert into public.clients(id,company_id,name)
-values
-  ('30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','CI Client A'),
-  ('30000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002','CI Client B');
+values ('30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','CI Client A');
+reset role;
+
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
+set local role authenticated;
+insert into public.clients(id,company_id,name)
+values ('30000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002','CI Client B');
+reset role;
 
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
 set local role authenticated;
@@ -22,7 +30,7 @@ end $$;
 
 reset role;
 
--- A membership disabled deve perder imediatamente a visão de tenant.
+-- A disabled membership must immediately lose tenant visibility.
 update public.company_members
 set status='disabled'
 where company_id='20000000-0000-0000-0000-000000000001'
