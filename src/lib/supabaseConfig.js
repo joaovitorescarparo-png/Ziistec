@@ -11,6 +11,7 @@ export const STAGING_SUPABASE_HOSTS = Object.freeze([
 ]);
 
 export function resolverConfigSupabase({
+  deploymentEnv = "",
   host = "",
   envUrl = "",
   envKey = "",
@@ -19,6 +20,7 @@ export function resolverConfigSupabase({
   stagingUrl = "",
   stagingKey = "",
 } = {}) {
+  const cleanEnv = String(deploymentEnv || "").trim().toLowerCase();
   const cleanHost = String(host || "").trim().toLowerCase();
   const cleanEnvUrl = String(envUrl || "").trim().replace(/\/+$/, "");
   const cleanEnvKey = String(envKey || "").trim();
@@ -33,63 +35,46 @@ export function resolverConfigSupabase({
   const envIncompleto = temEnvUrl !== temEnvKey;
   const hostProducao = PROD_SUPABASE_HOSTS.includes(cleanHost);
   const hostStaging = STAGING_SUPABASE_HOSTS.includes(cleanHost);
-  const envApontaProducaoEmPreview = envCompleto && !hostProducao && cleanEnvUrl === cleanProdUrl;
-  const usarFallbackProducao = !temEnvUrl && !temEnvKey && hostProducao;
-  const usarFallbackStaging = !temEnvUrl && !temEnvKey && hostStaging && cleanStagingUrl && cleanStagingKey;
+  const inferredEnv = hostProducao ? "production" : hostStaging ? "preview" : "development";
+  const effectiveEnv = cleanEnv || inferredEnv;
+  const productionContext = effectiveEnv === "production" && hostProducao;
+  const previewContext = effectiveEnv === "preview" && hostStaging;
+  const developmentContext = effectiveEnv === "development" && !hostProducao && !hostStaging;
+  const exactProdPair = cleanEnvUrl === cleanProdUrl && cleanEnvKey === cleanProdKey;
+  const exactStagingPair = cleanEnvUrl === cleanStagingUrl && cleanEnvKey === cleanStagingKey;
 
-  if (envIncompleto) {
-    return {
-      url: "",
-      anonKey: "",
-      configurado: false,
-      hostProducao,
-      hostStaging,
-      envIncompleto: true,
-      origem: "invalid-env",
-    };
-  }
-
-  if (envApontaProducaoEmPreview) {
-    return {
-      url: "",
-      anonKey: "",
-      configurado: false,
-      hostProducao,
-      hostStaging,
-      envIncompleto: false,
-      origem: "production-blocked-in-preview",
-    };
-  }
-
-  const url = envCompleto
-    ? cleanEnvUrl
-    : usarFallbackProducao
-      ? cleanProdUrl
-      : usarFallbackStaging
-        ? cleanStagingUrl
-        : "";
-  const anonKey = envCompleto
-    ? cleanEnvKey
-    : usarFallbackProducao
-      ? cleanProdKey
-      : usarFallbackStaging
-        ? cleanStagingKey
-        : "";
-  const configurado = Boolean(url && anonKey && !url.includes("SEU-PROJETO"));
-
-  return {
-    url,
-    anonKey,
-    configurado,
+  const fail = (origem, incomplete = false) => ({
+    url: "",
+    anonKey: "",
+    configurado: false,
     hostProducao,
     hostStaging,
-    envIncompleto: false,
-    origem: envCompleto
-      ? "env"
-      : usarFallbackProducao
-        ? "production-fallback"
-        : usarFallbackStaging
-          ? "staging-fallback"
-          : "unconfigured",
-  };
+    envIncompleto: incomplete,
+    origem,
+  });
+
+  if (envIncompleto) return fail("invalid-env", true);
+
+  if (envCompleto) {
+    if (productionContext) {
+      return exactProdPair
+        ? { url: cleanProdUrl, anonKey: cleanProdKey, configurado: true, hostProducao, hostStaging, envIncompleto: false, origem: "env-production" }
+        : fail("environment-project-mismatch");
+    }
+    if (previewContext || developmentContext) {
+      return exactStagingPair
+        ? { url: cleanStagingUrl, anonKey: cleanStagingKey, configurado: true, hostProducao, hostStaging, envIncompleto: false, origem: developmentContext ? "env-development-staging" : "env-staging" }
+        : fail("environment-project-mismatch");
+    }
+    return fail("environment-project-mismatch");
+  }
+
+  if (productionContext && cleanProdUrl && cleanProdKey) {
+    return { url: cleanProdUrl, anonKey: cleanProdKey, configurado: true, hostProducao, hostStaging, envIncompleto: false, origem: "production-fallback" };
+  }
+  if (previewContext && cleanStagingUrl && cleanStagingKey) {
+    return { url: cleanStagingUrl, anonKey: cleanStagingKey, configurado: true, hostProducao, hostStaging, envIncompleto: false, origem: "staging-fallback" };
+  }
+
+  return fail("unconfigured");
 }
