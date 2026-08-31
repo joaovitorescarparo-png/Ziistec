@@ -1,6 +1,6 @@
 -- Disposable Supabase CI only.
--- Reproduces the staging bootstrap migration `reconcile_missing_rls_auto_enable`
--- before the remaining historical ZiisTec migrations are applied.
+-- Reproduces bootstrap state that exists in staging but is not fully represented
+-- by the historical root migration files.
 
 create or replace function public.rls_auto_enable()
 returns event_trigger
@@ -39,3 +39,7 @@ begin
   end if;
 end
 $$;
+
+create schema if not exists zt_private authorization postgres;
+revoke all on schema zt_private from public, anon, authenticated;
+grant usage on schema zt_private to service_role;
