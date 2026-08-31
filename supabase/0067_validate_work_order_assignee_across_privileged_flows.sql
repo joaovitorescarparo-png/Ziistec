@@ -15,6 +15,7 @@ set search_path = ''
 as $$
 declare
   v_uid uuid := auth.uid();
+  v_check_assignee boolean := false;
 begin
   -- Preserva o hardening já existente para escritas diretas pela Data API.
   if current_user = 'authenticated' then
@@ -43,18 +44,23 @@ begin
   -- uma nova restrição operacional. Para qualquer chamada de usuário autenticado,
   -- inclusive RPC SECURITY DEFINER, uma nova atribuição precisa apontar para um
   -- membro ativo da MESMA empresa.
-  if v_uid is not null
-     and (tg_op = 'INSERT' or new.assigned_to is distinct from old.assigned_to)
-     and new.assigned_to is not null
-     and not exists (
-       select 1
-         from public.company_members m
-         join public.profiles p on p.id = m.user_id
-        where m.company_id = new.company_id
-          and m.user_id = new.assigned_to
-          and m.status = 'active'
-          and m.role in ('owner','technician')
-     ) then
+  if v_uid is not null and new.assigned_to is not null then
+    if tg_op = 'INSERT' then
+      v_check_assignee := true;
+    elsif tg_op = 'UPDATE' then
+      v_check_assignee := new.assigned_to is distinct from old.assigned_to;
+    end if;
+  end if;
+
+  if v_check_assignee and not exists (
+    select 1
+      from public.company_members m
+      join public.profiles p on p.id = m.user_id
+     where m.company_id = new.company_id
+       and m.user_id = new.assigned_to
+       and m.status = 'active'
+       and m.role in ('owner','technician')
+  ) then
     raise exception 'Responsável precisa ser membro ativo da empresa' using errcode='23503';
   end if;
 
