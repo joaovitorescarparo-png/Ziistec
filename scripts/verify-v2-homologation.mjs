@@ -110,40 +110,56 @@ requireText('supabase/tests/v2_technician_sale_rollback_smoke.sql', [
   'rollback;',
 ]);
 
-// 5) Preview/staging jamais pode cair silenciosamente no Supabase de produção.
+// 5) Production/preview/development só aceitam o project ref e a key autorizados.
 const prodUrl = 'https://prod-ref.supabase.co';
 const prodKey = 'sb_publishable_prod_test';
 const stagingUrl = 'https://staging-ref.supabase.co';
 const stagingKey = 'sb_publishable_staging_test';
-const mainConfig = resolverConfigSupabase({ host: PROD_SUPABASE_HOSTS[0], prodUrl, prodKey });
+const stagingHost = 'ziistec-git-product-v2-review-js-connect.vercel.app';
+
+const mainConfig = resolverConfigSupabase({ deploymentEnv:'production', host:PROD_SUPABASE_HOSTS[0], prodUrl, prodKey, stagingUrl, stagingKey });
 if (!mainConfig.configurado || mainConfig.origem !== 'production-fallback' || mainConfig.url !== prodUrl) {
   fail('Supabase env isolation: host oficial da main perdeu fallback controlado');
 } else ok('Host oficial da main mantém fallback público controlado');
 
-const previewConfig = resolverConfigSupabase({
-  host: 'ziistec-git-product-v2-review-js-connect.vercel.app', prodUrl, prodKey,
-});
-if (previewConfig.configurado || previewConfig.origem !== 'unconfigured' || previewConfig.url || previewConfig.anonKey) {
-  fail('Supabase env isolation: preview sem env tentou usar credencial de produção');
-} else ok('Preview sem env falha fechado e não recebe Supabase de produção');
+const previewConfig = resolverConfigSupabase({ deploymentEnv:'preview', host:stagingHost, prodUrl, prodKey, stagingUrl, stagingKey });
+if (!previewConfig.configurado || previewConfig.origem !== 'staging-fallback' || previewConfig.url !== stagingUrl) {
+  fail('Supabase env isolation: preview allowlisted perdeu fallback de staging');
+} else ok('Preview allowlisted recebe somente o fallback de staging');
 
 const stagingConfig = resolverConfigSupabase({
-  host: 'ziistec-git-product-v2-review-js-connect.vercel.app',
-  envUrl: stagingUrl, envKey: stagingKey, prodUrl, prodKey,
+  deploymentEnv:'preview', host:stagingHost,
+  envUrl:stagingUrl, envKey:stagingKey, prodUrl, prodKey, stagingUrl, stagingKey,
 });
-if (!stagingConfig.configurado || stagingConfig.origem !== 'env' || stagingConfig.url !== stagingUrl || stagingConfig.anonKey !== stagingKey) {
-  fail('Supabase env isolation: preview com env própria não ficou isolado no staging');
-} else ok('Preview com env própria usa somente o Supabase de staging');
+if (!stagingConfig.configurado || stagingConfig.origem !== 'env-staging' || stagingConfig.url !== stagingUrl || stagingConfig.anonKey !== stagingKey) {
+  fail('Supabase env isolation: preview com par exato não ficou isolado no staging');
+} else ok('Preview com par exato usa somente o Supabase de staging');
+
+const wrongPreview = resolverConfigSupabase({
+  deploymentEnv:'preview', host:stagingHost,
+  envUrl:'https://wrong.supabase.co', envKey:'sb_publishable_wrong', prodUrl, prodKey, stagingUrl, stagingKey,
+});
+if (wrongPreview.configurado || wrongPreview.origem !== 'environment-project-mismatch' || wrongPreview.url || wrongPreview.anonKey) {
+  fail('Supabase env isolation: preview aceitou projeto não autorizado');
+} else ok('Preview rejeita project ref/key não autorizados');
+
+const unknownPreview = resolverConfigSupabase({
+  deploymentEnv:'preview', host:'preview-desconhecido.vercel.app',
+  envUrl:stagingUrl, envKey:stagingKey, prodUrl, prodKey, stagingUrl, stagingKey,
+});
+if (unknownPreview.configurado || unknownPreview.url || unknownPreview.anonKey) {
+  fail('Supabase env isolation: preview desconhecido aceitou staging explicitamente');
+} else ok('Preview desconhecido falha fechado');
 
 const partialConfig = resolverConfigSupabase({
-  host: PROD_SUPABASE_HOSTS[0], envUrl: stagingUrl, prodUrl, prodKey,
+  deploymentEnv:'production', host:PROD_SUPABASE_HOSTS[0], envUrl:stagingUrl, prodUrl, prodKey, stagingUrl, stagingKey,
 });
 if (partialConfig.configurado || partialConfig.origem !== 'invalid-env' || partialConfig.url || partialConfig.anonKey) {
-  fail('Supabase env isolation: configuração parcial misturou staging com produção');
+  fail('Supabase env isolation: configuração parcial misturou ambientes');
 } else ok('Env parcial falha fechado e nunca mistura credenciais entre ambientes');
 
 requireText('src/lib/supabase.js', [
-  'resolverConfigSupabase', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'PROD_PUBLISHABLE_KEY',
+  'resolverConfigSupabase', 'VITE_VERCEL_ENV', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'PROD_PUBLISHABLE_KEY',
 ]);
 
 // 6) Invariantes de segurança dos endpoints públicos/serverless.
@@ -179,7 +195,6 @@ if (app.includes('if (!configurado) return comConexao(<Login />);')) {
   fail('src/App.jsx: preview sem banco voltou a parecer login normal');
 } else ok('Preview sem banco mostra estado protegido e não um login enganoso');
 
-// O legado ainda contém seeds históricos, mas o fluxo real só pode montá-lo após contexto real existir.
 for (const marker of [
   'if (!contexto || s.trocandoEmpresa) return',
   '<ZiisTecApp key={contexto.chave} contexto={contexto} />',
@@ -190,7 +205,6 @@ if (/<ZiisTecApp\s*\/>/.test(app) || /<ZiisTecApp[^>]*contexto=\{null\}/.test(ap
   fail('src/App.jsx: legado pode ser montado sem contexto real');
 } else ok('Legado só é montado pela aplicação real com contexto Supabase explícito');
 
-// Branding oficial da revisão.
 const workspaceHome = read('src/screens/v2/WorkspaceV2Home.jsx');
 if (!workspaceHome.includes('ZiisTec V2')) fail('Workspace V2 perdeu o nome oficial ZiisTec V2');
 if (workspaceHome.includes('ZiisTec Stack V2')) fail('Workspace V2 reintroduziu o nome antigo ZiisTec Stack V2');
