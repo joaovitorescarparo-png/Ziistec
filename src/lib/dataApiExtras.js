@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { salvarOSDB, salvarOrcamentoDB } from './dataApi';
+import { carregarDadosEmpresa, salvarOSDB, salvarOrcamentoDB } from './dataApi';
 import { ensureRequestId, idempotentWrite } from './reliability';
 
 const n=(v)=>Number(v||0);
@@ -23,7 +23,18 @@ export async function duplicarOrcamentoDB(x,companyId,userId,validUntil){
   return salvarOrcamentoDB({...x,id:null,requestId:null,numero:null,status:'rascunho',data:new Date().toISOString().slice(0,10),validade:validUntil||x.validade,itens:(x.itens||[]).map(i=>({...i,id:null})),osId:null},companyId,userId);
 }
 export async function criarOSDeOrcamentoDB(orc,companyId,userId,defaults={}){
-  return salvarOSDB({clienteId:orc.clienteId,orcamentoId:orc.id,responsavelId:userId,status:'aguardando',data:'',hora:'',local:orc.local||defaults.endereco||'',localServico:orc.localServico||'',descricaoLivre:`Gerada a partir do ${orc.numero}`,obs:orc.obs||'',itens:(orc.itens||[]).map(i=>({...i,id:null})),emGarantia:false},companyId,userId);
+  void defaults;
+  const response=await idempotentWrite(()=>supabase.rpc('zt_create_work_order_from_quote',{
+    p_quote:orc.id,
+    p_assigned_to:userId||null,
+    p_scheduled_date:null,
+    p_scheduled_time:null,
+  }));
+  const id=check(response);
+  const dados=await carregarDadosEmpresa(companyId);
+  const nova=(dados?.ordens||[]).find((o)=>o.id===id);
+  if(!nova) throw new Error('A OS foi criada, mas não pôde ser recarregada.');
+  return nova;
 }
 export async function abrirAtendimentoGarantiaDB(g,companyId,userId,defaults={}){
   return salvarOSDB({clienteId:g.clienteId,responsavelId:userId,status:'aguardando',data:'',hora:'',local:defaults.local||'',localServico:g.local||defaults.localServico||'',descricaoLivre:`Atendimento em garantia de ${g.descricao}`,obs:`Atendimento em garantia de \"${g.descricao}\", executado em ${g.inicio}.`,itens:[],emGarantia:true,garantiaId:g.id,osOrigemId:g.osId,relatoProblema:defaults.relatoProblema||''},companyId,userId);
