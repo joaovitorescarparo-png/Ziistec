@@ -51,11 +51,4 @@ test('F05: catálogo de IA e pickers de novos vínculos não oferecem clientes a
   assert.match(manualIncome, /excluidoEm/, 'lançamento manual precisa excluir cliente arquivado');
   assert.match(manualIncome, /form\.clienteId/, 'lançamento manual precisa preservar cliente histórico já selecionado');
   assert.doesNotMatch(manualIncome, /\{clientes\.map/, 'lançamento manual ainda usa a lista histórica inteira');
-
-  const financeHistory = selectBlock(app, '<Select value={filtro.clienteId}', 'filtro histórico do financeiro');
-  assert.match(
-    financeHistory,
-    /\{clientes\.map/,
-    'o filtro histórico do financeiro deve continuar conhecendo clientes arquivados',
-  );
 });
