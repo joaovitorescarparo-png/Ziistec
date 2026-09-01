@@ -100,6 +100,7 @@ regressions=(
   supabase/tests/v2_f07_documents_history_after_subscription_rollback.sql
   supabase/tests/v2_technician_sale_rollback_smoke.sql
   supabase/tests/v2_field_sale_rollback_smoke.sql
+  supabase/tests/v2_field_sales_consistency_rollback.sql
 )
 
 for sql in "${regressions[@]}"; do
