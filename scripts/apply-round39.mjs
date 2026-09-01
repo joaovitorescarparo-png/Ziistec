@@ -12,12 +12,6 @@ const once=(needle,replacement,label)=>{
 };
 
 once(
-  '{ id: "produtos", label: `Produtos para venda · ${(produtos || []).filter((p) => p.ativo && p.vendaHabilitada).length}` },',
-  '{ id: "produtos", label: `Produtos e vendas · ${(produtos || []).filter((p) => p.ativo && p.vendaHabilitada).length}` },',
-  'products tab label',
-);
-
-once(
   '{aba === "produtos" && (\n        <Panel className="divide-y divide-slate-100 overflow-hidden">',
   '{aba === "produtos" && (\n        <Panel className="divide-y divide-slate-100 overflow-hidden">\n          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">\n            <div><p className="font-medium text-slate-900">Vendas, recebimentos e histórico</p><p className="text-[13px] text-slate-500 mt-1">Veja o que cada técnico vendeu, configure Pix/dinheiro/cartão e consulte o histórico por cliente ou condomínio.</p></div>\n            <Btn icon={ShoppingCart} onClick={() => { const url = new URL(window.location.href); url.searchParams.set("v2", "venda-os"); window.location.assign(`${url.pathname}${url.search}${url.hash}`); }}>Abrir gestão</Btn>\n          </div>',
   'owner field sales admin entry',
