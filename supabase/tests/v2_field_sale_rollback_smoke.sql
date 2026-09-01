@@ -34,8 +34,12 @@ end $$;
 
 select set_config('request.jwt.claim.sub',(select user_id::text from zt_field_sale_test),true);
 
-insert into public.companies(id,name,has_team)
-select company_id,'__V2_FIELD_SALE_COMPANY__',true from zt_field_sale_test;
+insert into public.companies(
+  id,name,has_team,pix_key,pix_receiver_name,pix_receiver_city,
+  field_sales_allow_pix,field_sales_allow_cash,field_sales_allow_card
+)
+select company_id,'__V2_FIELD_SALE_COMPANY__',true,'teste@example.invalid','ZIISTEC TESTE','ITAPEMA',true,true,true
+from zt_field_sale_test;
 
 insert into public.subscriptions(company_id,status,current_period_start,current_period_end)
 select company_id,'trial'::public.zt_sub_status,current_date,current_date+14 from zt_field_sale_test;
@@ -52,7 +56,7 @@ from zt_field_sale_test;
 
 set local role authenticated;
 update zt_field_sale_test set sale_id=public.zt_sell_product_direct(company_id,product_id,2,'Pix','__V2_FIELD_OK__',request_id);
-update zt_field_sale_test set retry_id=public.zt_sell_product_direct(company_id,product_id,2,'Pix','__V2_FIELD_RETRY__',request_id);
+update zt_field_sale_test set retry_id=public.zt_sell_product_direct(company_id,product_id,2,'PIX','__V2_FIELD_RETRY__',request_id);
 reset role;
 
 update zt_field_sale_test t set
@@ -71,7 +75,7 @@ do $$ begin
     perform public.zt_sell_product_direct(
       (select company_id from zt_field_sale_test),
       (select product_id from zt_field_sale_test),
-      1,'Pix','__V2_FIELD_MUST_FAIL__',
+      1,'pix','__V2_FIELD_MUST_FAIL__',
       (select blocked_request_id from zt_field_sale_test)
     );
   exception when sqlstate 'P0002' then
@@ -99,7 +103,7 @@ select
     and financial_count=1
     and financial_amount=200
     and financial_paid=true
-    and financial_method='Pix'
+    and financial_method='pix'
     and disabled_blocked=true
   ) as passed
 from zt_field_sale_test;
