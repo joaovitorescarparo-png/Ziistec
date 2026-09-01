@@ -45,11 +45,15 @@ set payment_method = case lower(trim(payment_method))
   else 'other'
 end;
 
+-- O guard de assinatura é obrigatório no runtime, mas uma migration privilegiada não
+-- possui auth.uid(). Suspende somente este trigger durante o backfill e reativa logo após.
+alter table public.financial_entries disable trigger trg_subscription_write_guard;
 update public.financial_entries f
 set payment_method = s.payment_method
 from public.field_sales s
 where s.financial_entry_id=f.id
   and f.payment_method is distinct from s.payment_method;
+alter table public.financial_entries enable trigger trg_subscription_write_guard;
 
 alter table public.field_sales alter column payment_method drop not null;
 
