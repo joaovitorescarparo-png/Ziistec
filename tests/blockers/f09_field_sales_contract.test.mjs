@@ -65,7 +65,7 @@ test('F09 backend API: frontend não envia preço e retry usa client_request_id 
 test('F09 banco: métodos canônicos, origem e preço autoritativo permanecem protegidos na 0075', () => {
   assert.match(migration75, /payment_method in \('pix','cash','card','transfer','other'\)/);
   assert.match(migration75, /origin in \('quick','work_order'\)/);
-  assert.match(migration75, /v_total := round\(v_product\.price \* p_quantity, ?2\)/);
+  assert.match(migration75, /v_total := round\(v_product\.price\s*\*\s*p_quantity\s*,\s*2\)/);
   assert.match(migration75, /v_product\.price/);
   assert.match(migration75, /pg_advisory_xact_lock/);
   assert.match(migration75, /client_request_id/);
