@@ -49,7 +49,8 @@ test('F09 Pix: QR local produz matriz Model 2 válida em tamanho esperado e SVG 
   assert.equal(matrix[0][0], true);
   assert.equal(matrix[1][1], false);
   assert.equal(matrix[3][3], true);
-  assert.equal(matrix[48][48], true);
+  assert.equal(matrix[0][48], true);
+  assert.equal(matrix[48][0], true);
 
   const uri = pixQrSvgDataUri(expectedPayload);
   assert.match(uri, /^data:image\/svg\+xml;charset=utf-8,/);
