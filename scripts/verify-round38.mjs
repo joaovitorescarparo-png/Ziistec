@@ -19,9 +19,11 @@ must(legacy.includes('vendaHabilitada: !p.vendaHabilitada'),'sale_enabled toggle
 must(sales.includes('Venda rápida'),'quick field sale UI missing');
 must(sales.includes('Venda em uma OS'),'OS sale mode missing');
 must(sales.includes('venderProdutoDiretoDB'),'direct sale API not connected');
-must(sales.includes('venderProdutoNaOSDB'),'OS sale API not preserved');
+must(sales.includes('venderProdutoNaOSCampoDB'),'idempotent OS sale API not connected');
 must(!sales.includes('selectedProduct?.custo') && !sales.includes('selectedProduct.custo'),'technician UI must not render product cost');
 must(api.includes("supabase.rpc('zt_sell_product_direct'"),'direct sale must call hardened RPC');
+must(api.includes("supabase.rpc('zt_sell_product_on_work_order'"),'OS sale must call hardened RPC');
+must(api.includes('p_request:req'),'OS sale must include client_request_id');
 
 must(migration.includes('create table if not exists public.field_sales'),'field sales audit table missing');
 must(migration.includes('sale_enabled=true'),'direct sale must honor owner availability flag');
