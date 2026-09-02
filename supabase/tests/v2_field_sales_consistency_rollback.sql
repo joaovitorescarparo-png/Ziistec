@@ -25,6 +25,7 @@ create temp table zt_fs75 (
   tech_context_count integer,
   tech_hidden_context_count integer,
   tech_sale_count integer,
+  tech_b_sale_count integer,
   owner_a_sale_count integer,
   owner_b_sale_count integer
 ) on commit drop;
@@ -42,6 +43,16 @@ set pix_key='ci-pix@example.invalid',
     field_sales_allow_transfer=false,
     field_sales_allow_other=false
 where id='20000000-0000-0000-0000-000000000001';
+
+-- O usuário externo vira um segundo técnico somente dentro desta transação de teste.
+insert into public.company_members(company_id,user_id,role,status,job_title)
+values(
+  '20000000-0000-0000-0000-000000000001',
+  '10000000-0000-0000-0000-000000000004',
+  'technician','active','CI Technician B'
+)
+on conflict (company_id,user_id) do update
+set role='technician',status='active',job_title='CI Technician B';
 
 insert into public.clients(id,company_id,name)
 select client_id,'20000000-0000-0000-0000-000000000001','CI Condomínio Permitido' from zt_fs75;
@@ -194,6 +205,13 @@ update zt_fs75 set tech_sale_count=(
 );
 reset role;
 
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000004',true);
+set local role authenticated;
+update zt_fs75 set tech_b_sale_count=(
+  select count(*) from public.field_sales where company_id='20000000-0000-0000-0000-000000000001'
+);
+reset role;
+
 -- ---------------------------------------------------------------- assertions privileged
 select
   'V2_FIELD_SALES_CONSISTENCY_OK' as result,
@@ -209,6 +227,7 @@ select
   t.tech_context_count,
   t.tech_hidden_context_count,
   t.tech_sale_count,
+  t.tech_b_sale_count,
   t.owner_a_sale_count,
   t.owner_b_sale_count,
   (
@@ -224,6 +243,7 @@ select
     and t.tech_context_count=1
     and t.tech_hidden_context_count=0
     and t.tech_sale_count=2
+    and t.tech_b_sale_count=0
     and t.owner_a_sale_count=3
     and t.owner_b_sale_count=0
     and (select count(*) from public.field_sales s where s.id=t.quick_sale_id and s.origin='quick' and s.payment_method='pix' and s.client_id=t.client_id and s.financial_entry_id is not null)=1
