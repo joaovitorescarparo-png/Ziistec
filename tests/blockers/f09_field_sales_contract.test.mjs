@@ -1,16 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 
 const root = new URL('../../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
-const [admin, technician, api, migration75, migration76] = await Promise.all([
+async function collectSourceFiles(dirUrl) {
+  const entries = await readdir(dirUrl, { withFileTypes:true });
+  const files = [];
+  for (const entry of entries) {
+    const url = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, dirUrl);
+    if (entry.isDirectory()) files.push(...await collectSourceFiles(url));
+    else if (/\.(?:js|jsx|mjs|ts|tsx)$/.test(entry.name)) files.push(url);
+  }
+  return files;
+}
+
+const [admin, technician, api, v2Api, migration75, migration76, migration77] = await Promise.all([
   read('src/screens/v2/FieldSalesAdminV2.jsx'),
   read('src/screens/v2/TechnicianSalesV2.jsx'),
   read('src/lib/fieldSalesApi.js'),
+  read('src/lib/v2Api.js'),
   read('supabase/0075_field_sales_consistency_and_work_order_trace.sql'),
   read('supabase/0076_remove_legacy_static_pix_qr.sql'),
+  read('supabase/0077_remove_legacy_field_sale_rpc_overloads.sql'),
 ]);
 
 test('F09 owner: FieldSalesAdmin sobrevive ao reassemble/codemods e mostra o contrato administrativo completo', () => {
@@ -60,6 +73,23 @@ test('F09 backend API: frontend não envia preço e retry usa client_request_id 
   assert.match(api, /zt_sell_product_on_work_order/);
   assert.match(api, /zt_field_sale_client_contexts/);
   assert.match(api, /origin,work_order_id,work_order_item_id,financial_entry_id/);
+  assert.match(v2Api, /p_request:requestId\|\|crypto\.randomUUID\(\)/);
+});
+
+test('F09 código: nenhuma chamada de venda volta às assinaturas RPC legadas', async () => {
+  const files = await collectSourceFiles(new URL('src/', root));
+  for (const url of files) {
+    const source = await readFile(url, 'utf8');
+    if (source.includes("supabase.rpc('zt_sell_product_direct'")) {
+      assert.match(source, /p_client\s*:/, `${url.pathname} precisa enviar p_client explicitamente`);
+      assert.match(source, /p_service_place\s*:/, `${url.pathname} precisa enviar p_service_place explicitamente`);
+    }
+    if (source.includes("supabase.rpc('zt_sell_product_on_work_order'")) {
+      assert.match(source, /p_request\s*:/, `${url.pathname} precisa enviar p_request explicitamente`);
+    }
+  }
+  assert.match(migration77, /drop function if exists public\.zt_sell_product_direct\(uuid,uuid,numeric,text,text,uuid\)/);
+  assert.match(migration77, /drop function if exists public\.zt_sell_product_on_work_order\(uuid,uuid,numeric,text\)/);
 });
 
 test('F09 banco: métodos canônicos, origem e preço autoritativo permanecem protegidos na 0075', () => {
