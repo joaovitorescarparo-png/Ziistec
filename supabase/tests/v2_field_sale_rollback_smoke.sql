@@ -55,8 +55,8 @@ select product_id,company_id,'__V2_FIELD_PRODUCT__','ZiisTec','unidade',30,100,1
 from zt_field_sale_test;
 
 set local role authenticated;
-update zt_field_sale_test set sale_id=public.zt_sell_product_direct(company_id,product_id,2,'Pix','__V2_FIELD_OK__',request_id);
-update zt_field_sale_test set retry_id=public.zt_sell_product_direct(company_id,product_id,2,'PIX','__V2_FIELD_RETRY__',request_id);
+update zt_field_sale_test set sale_id=public.zt_sell_product_direct(company_id,product_id,2,'Pix','__V2_FIELD_OK__',request_id,null,null);
+update zt_field_sale_test set retry_id=public.zt_sell_product_direct(company_id,product_id,2,'PIX','__V2_FIELD_RETRY__',request_id,null,null);
 reset role;
 
 update zt_field_sale_test t set
@@ -76,7 +76,7 @@ do $$ begin
       (select company_id from zt_field_sale_test),
       (select product_id from zt_field_sale_test),
       1,'pix','__V2_FIELD_MUST_FAIL__',
-      (select blocked_request_id from zt_field_sale_test)
+      (select blocked_request_id from zt_field_sale_test),null,null
     );
   exception when sqlstate 'P0002' then
     update zt_field_sale_test set disabled_blocked=true;
