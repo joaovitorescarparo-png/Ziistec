@@ -127,8 +127,14 @@ begin
   end;
 
   begin
-    select public.zt_sell_product_on_work_order((select open_wo from zt_f05_test),(select archived_product from zt_f05_test),1,'__F05_TEST__') into v_id;
-  exception when others then
+    select public.zt_sell_product_on_work_order(
+      (select open_wo from zt_f05_test),
+      (select archived_product from zt_f05_test),
+      1,
+      '__F05_TEST__',
+      gen_random_uuid()
+    ) into v_id;
+  exception when sqlstate 'P0002' then
     update zt_f05_test set archived_product_blocked=true,archived_product_error=sqlstate||':'||sqlerrm;
   end;
 
