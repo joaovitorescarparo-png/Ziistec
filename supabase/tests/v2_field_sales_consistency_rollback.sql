@@ -32,6 +32,10 @@ create temp table zt_fs75 (
 insert into zt_fs75 default values;
 grant select,update on zt_fs75 to authenticated;
 
+-- Os fixtures operacionais também passam pelos guards reais. Autentica o owner A
+-- antes de criá-los; depois cada trecho troca explicitamente para o usuário que testa.
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+
 -- ---------------------------------------------------------------- fixtures
 update public.companies
 set pix_key='ci-pix@example.invalid',
