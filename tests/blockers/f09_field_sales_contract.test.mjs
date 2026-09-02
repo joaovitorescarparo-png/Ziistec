@@ -16,7 +16,7 @@ async function collectSourceFiles(dirUrl) {
   return files;
 }
 
-const [admin, technician, api, v2Api, migration75, migration76, migration77] = await Promise.all([
+const [admin, technician, api, v2Api, migration75, migration76, migration77, migration78] = await Promise.all([
   read('src/screens/v2/FieldSalesAdminV2.jsx'),
   read('src/screens/v2/TechnicianSalesV2.jsx'),
   read('src/lib/fieldSalesApi.js'),
@@ -24,6 +24,7 @@ const [admin, technician, api, v2Api, migration75, migration76, migration77] = a
   read('supabase/0075_field_sales_consistency_and_work_order_trace.sql'),
   read('supabase/0076_remove_legacy_static_pix_qr.sql'),
   read('supabase/0077_remove_legacy_field_sale_rpc_overloads.sql'),
+  read('supabase/0078_fix_field_sale_subscription_guard.sql'),
 ]);
 
 test('F09 owner: FieldSalesAdmin sobrevive ao reassemble/codemods e mostra o contrato administrativo completo', () => {
@@ -92,7 +93,7 @@ test('F09 código: nenhuma chamada de venda volta às assinaturas RPC legadas', 
   assert.match(migration77, /drop function if exists public\.zt_sell_product_on_work_order\(uuid,uuid,numeric,text\)/);
 });
 
-test('F09 banco: métodos canônicos, origem e preço autoritativo permanecem protegidos na 0075', () => {
+test('F09 banco: métodos canônicos, origem, preço e guard de assinatura permanecem autoritativos', () => {
   assert.match(migration75, /payment_method in \('pix','cash','card','transfer','other'\)/);
   assert.match(migration75, /origin in \('quick','work_order'\)/);
   assert.match(migration75, /v_total := round\(v_product\.price\s*\*\s*p_quantity\s*,\s*2\)/);
@@ -100,4 +101,6 @@ test('F09 banco: métodos canônicos, origem e preço autoritativo permanecem pr
   assert.match(migration75, /pg_advisory_xact_lock/);
   assert.match(migration75, /client_request_id/);
   assert.match(migration75, /zt_field_sale_client_contexts/);
+  assert.match(migration78, /zt_private\.assert_operational_write_allowed\(v_wo\.company_id\)/);
+  assert.doesNotMatch(migration78, /public\.zt_assert_subscription_write/);
 });
