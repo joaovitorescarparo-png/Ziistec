@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { carregarDadosEmpresa, salvarOSDB, salvarOrcamentoDB } from './dataApi';
 import { ensureRequestId, idempotentWrite } from './reliability';
+import { redirectAuthAtual } from './authRedirect';
 
 const n=(v)=>Number(v||0);
 const check=(r)=>{if(r?.error) throw r.error; return r?.data;};
@@ -51,12 +52,25 @@ export async function carregarEquipeDB(companyId){
   return {usuarios,membresias};
 }
 export async function convidarColaboradorDB(x,companyId,userId){
+  const redirectTo=redirectAuthAtual();
+  if(!redirectTo) throw new Error('Este endereço não está autorizado para enviar convites da ZiisTec.');
   const email=x.email.trim().toLowerCase();
   const existing=await supabase.from('company_invites').select('id').eq('company_id',companyId).ilike('email',email).is('accepted_at',null).maybeSingle();
   if(existing.error) throw existing.error;
   const payload={company_id:companyId,email,role:papelToDb[x.papel]||'technician',job_title:x.funcao||null,invited_by:userId||null,name:x.nome||null,phone:x.telefone||null};
-  if(existing.data) check(await supabase.from('company_invites').update(payload).eq('id',existing.data.id));else check(await supabase.from('company_invites').insert(payload));
-  return carregarEquipeDB(companyId);
+  let inviteId=existing.data?.id||null;
+  if(inviteId){check(await supabase.from('company_invites').update(payload).eq('id',inviteId));}
+  else{
+    const created=check(await supabase.from('company_invites').insert(payload).select('id').single());
+    inviteId=created.id;
+  }
+  let emailDelivery={ok:false,sent:false,reason:'delivery_failed'};
+  try{
+    const delivery=await supabase.functions.invoke('team-invite-email',{body:{invite_id:inviteId,redirect_to:redirectTo}});
+    if(!delivery.error&&delivery.data) emailDelivery=delivery.data;
+  }catch{}
+  const equipe=await carregarEquipeDB(companyId);
+  return {...equipe,emailDelivery};
 }
 export async function alternarColaboradorDB(m){
   if(m.inviteId){if(m.ativo) check(await supabase.from('company_invites').delete().eq('id',m.inviteId));return;}
