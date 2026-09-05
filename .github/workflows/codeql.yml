@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, ui-v1-v2-merge]
   schedule:
     - cron: '17 6 * * 1'
 
@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
       - uses: actions/setup-node@v4
@@ -30,4 +30,36 @@ jobs:
         run: npm ci --ignore-scripts --no-fund
       - name: Build
         run: npm run build
-      - uses: github/codeql-action/analyze@v3
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          output: codeql-results
+      - name: Summarize CodeQL findings
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const dir = path.resolve('codeql-results');
+          if (!fs.existsSync(dir)) {
+            console.log('CODEQL_SUMMARY: no SARIF directory found');
+            process.exit(0);
+          }
+          const files = fs.readdirSync(dir).filter((name) => name.endsWith('.sarif'));
+          let count = 0;
+          for (const file of files) {
+            const sarif = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+            for (const run of sarif.runs || []) {
+              for (const result of run.results || []) {
+                const loc = result.locations?.[0]?.physicalLocation;
+                const uri = loc?.artifactLocation?.uri || 'unknown';
+                const line = loc?.region?.startLine || 0;
+                const level = result.level || 'warning';
+                console.log(`CODEQL_FINDING rule=${result.ruleId || 'unknown'} level=${level} file=${uri} line=${line}`);
+                count += 1;
+              }
+            }
+          }
+          console.log(`CODEQL_SUMMARY: ${count} findings in SARIF`);
+          NODE

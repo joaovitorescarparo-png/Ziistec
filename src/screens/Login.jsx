@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { supabase, mensagemErro, configurado } from "../lib/supabase";
+import { redirectAuthAtual } from "../lib/authRedirect";
+import { ZiisTecLogo } from "../components/ZiisTecBrand";
 
 const anel = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50";
 const campo = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-600";
@@ -35,6 +37,12 @@ export default function Login() {
   const [erro, setErro] = useState(null);
   const [aviso, setAviso] = useState(null);
 
+  const redirectSeguro = () => {
+    const redirectTo = redirectAuthAtual();
+    if (!redirectTo) setErro("Este endereço não está autorizado para autenticação da ZiisTec.");
+    return redirectTo;
+  };
+
   const entrar = async () => {
     if (!email.trim() || !senha) return;
     setOcupado(true); setErro(null);
@@ -46,19 +54,26 @@ export default function Login() {
   const criarConta = async () => {
     if (senha.length < 8) { setErro("Use uma senha com pelo menos 8 caracteres."); return; }
     setOcupado(true); setErro(null); setAviso(null);
+    const emailRedirectTo = redirectSeguro();
+    if (!emailRedirectTo) { setOcupado(false); return; }
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(), password: senha,
-      options: { data: { full_name: nome.trim() } },
+      options: {
+        emailRedirectTo,
+        data: { full_name: nome.trim(), ziistec_account_flow: "owner_signup" },
+      },
     });
     if (error) setErro(mensagemErro(error));
-    else if (!data.session) setAviso("Conta criada. Confirme o e-mail que enviamos e entre em seguida.");
+    else if (!data.session) setAviso("Conta criada. Confirme o e-mail oficial da ZiisTec e entre em seguida.");
     setOcupado(false);
   };
 
   const google = async () => {
     setOcupado(true); setErro(null);
+    const redirectTo = redirectSeguro();
+    if (!redirectTo) { setOcupado(false); return; }
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google", options: { redirectTo: window.location.origin },
+      provider: "google", options: { redirectTo },
     });
     if (error) setErro(mensagemErro(error));
     setOcupado(false);
@@ -66,7 +81,10 @@ export default function Login() {
 
   const recuperar = async () => {
     if (!email.trim()) { setErro("Informe seu e-mail para receber o link."); return; }
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+    setErro(null); setAviso(null);
+    const redirectTo = redirectSeguro();
+    if (!redirectTo) return;
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
     if (error) setErro(mensagemErro(error));
     else setAviso("Se existir uma conta com esse e-mail, enviaremos as instruções de recuperação.");
   };
@@ -75,11 +93,10 @@ export default function Login() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 font-sans">
         <div className="max-w-md text-center">
+          <ZiisTecLogo className="h-11 w-auto mx-auto mb-6" />
           <h1 className="text-xl font-semibold text-slate-900">Configuração pendente</h1>
           <p className="text-[15px] text-slate-600 mt-3 leading-relaxed">
-            Crie um arquivo <span className="font-medium">.env</span> na raiz do projeto com
-            <span className="font-medium"> VITE_SUPABASE_URL</span> e
-            <span className="font-medium"> VITE_SUPABASE_ANON_KEY</span>, e reinicie o servidor.
+            Este ambiente da ZiisTec não recebeu uma configuração Supabase válida. Por segurança, o acesso foi bloqueado.
           </p>
         </div>
       </div>
@@ -93,11 +110,9 @@ export default function Login() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-teal-500 flex items-center justify-center mx-auto mb-4">
-            <span className="text-slate-900 font-bold text-2xl leading-none">Z</span>
-          </div>
+          <ZiisTecLogo className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
-            {criando ? "Criar conta no ZiisTec" : "Entre na sua conta"}
+            {criando ? "Criar conta na ZiisTec" : "Entre na sua conta"}
           </h1>
           <p className="text-[14px] text-slate-500 mt-1.5">Gestão de serviços para quem trabalha em campo.</p>
         </div>
@@ -144,8 +159,7 @@ export default function Login() {
         </div>
 
         <p className="text-[12px] text-slate-400 text-center mt-5 leading-relaxed">
-          Se você foi convidado por uma empresa, entre com o mesmo e-mail do convite:
-          o acesso é liberado automaticamente.
+          Foi convidado por uma empresa? Use o e-mail do convite. A confirmação do seu próprio e-mail acontece antes de qualquer acesso à equipe.
         </p>
       </div>
     </div>

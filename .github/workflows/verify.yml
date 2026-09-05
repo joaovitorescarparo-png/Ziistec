@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, ui-v1-v2-merge]
 
 permissions:
   contents: read
@@ -28,6 +28,9 @@ jobs:
           node scripts/verify-consolidated-source.mjs
           echo "80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd  supabase/0001_ziistec_fundacao_FINAL.sql" | sha256sum -c -
 
+      - name: Verify V2 homologation guards
+        run: npm run verify:v2
+
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund
 
@@ -36,3 +39,29 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  sql-rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+
+      - name: Start disposable Supabase stack
+        run: supabase start
+
+      - name: Apply repository migrations and run SQL/RLS regressions
+        run: bash scripts/run-sql-rls-ci.sh
+
+      - name: Stop disposable Supabase stack
+        if: always()
+        run: supabase stop --no-backup

@@ -1,5 +1,7 @@
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://diztevlpbcfqleizswxr.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw';
+import { supabaseServidor } from './_supabaseServerConfig.js';
+import { paidAiAtivo } from './_paidFeatures.js';
+
+const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 
 const jsonHeaders = {
   'Cache-Control': 'no-store',
@@ -7,6 +9,12 @@ const jsonHeaders = {
   'Cross-Origin-Resource-Policy': 'same-origin',
 };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_BODY_BYTES = 32 * 1024;
+
+function parseOwnerValue(text) {
+  try { return JSON.parse(text) === true; }
+  catch { return String(text || '').trim() === 'true'; }
+}
 
 export default async function handler(req, res) {
   Object.entries(jsonHeaders).forEach(([k, v]) => res.setHeader(k, v));
@@ -14,37 +22,73 @@ export default async function handler(req, res) {
   if (!String(req.headers['content-type'] || '').toLowerCase().includes('application/json')) {
     return res.status(415).json({ error: 'Conteúdo inválido.' });
   }
+  const declaredLength = Number(req.headers['content-length'] || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+    return res.status(413).json({ error: 'Solicitação grande demais.' });
+  }
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'Solicitação inválida.' });
+  }
 
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Sessão necessária.' });
+  if (!supabaseServidor.configurado) {
+    return res.status(503).json({ error: 'Ambiente de API sem banco de homologação configurado.' });
+  }
 
   const verify = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers: { Authorization: auth, apikey: SUPABASE_PUBLISHABLE_KEY },
-  });
-  if (!verify.ok) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!verify?.ok) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
 
-  const prompt = String(req.body?.prompt || '').trim();
-  const companyId = String(req.body?.companyId || '').trim();
+  if (typeof req.body.prompt !== 'string' || typeof req.body.companyId !== 'string') {
+    return res.status(400).json({ error: 'Solicitação de IA inválida.' });
+  }
+  const prompt = req.body.prompt.trim();
+  const companyId = req.body.companyId.trim();
   if (!prompt || prompt.length > 10000) return res.status(400).json({ error: 'Solicitação de IA inválida.' });
   if (!UUID_RE.test(companyId)) return res.status(400).json({ error: 'Empresa ativa inválida.' });
+
+  const rpcHeaders = {
+    Authorization: auth,
+    apikey: SUPABASE_PUBLISHABLE_KEY,
+    'content-type': 'application/json',
+  };
+
+  // A interpretação comercial de orçamento é owner-only. O botão escondido na UI não é a barreira:
+  // a própria API valida o papel antes de consumir quota ou chamar o provedor de IA.
+  const owner = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_is_owner`, {
+    method: 'POST',
+    headers: rpcHeaders,
+    body: JSON.stringify({ target: companyId }),
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!owner?.ok || !parseOwnerValue(await owner.text())) {
+    return res.status(owner ? 403 : 502).json({
+      error: owner ? 'Somente o proprietário pode usar a interpretação comercial com IA.' : 'Não foi possível validar a permissão agora.',
+    });
+  }
+
+  // Fail-closed de custo: mesmo com chave configurada, não chama provedor pago sem liberação explícita.
+  if (!paidAiAtivo) {
+    return res.status(503).json({ error: 'IA paga temporariamente desativada nesta fase do ZiisTec.' });
+  }
 
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return res.status(503).json({ error: 'IA ainda não configurada no servidor.' });
 
-  // O banco não confia no companyId do navegador: valida membership ativa, assinatura e limites.
+  // A quota continua vinculada ao tenant e à assinatura, mas só é consumida após owner + cost gates.
   const quota = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_ai_quota`, {
     method: 'POST',
-    headers: {
-      Authorization: auth,
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      'content-type': 'application/json',
-    },
+    headers: rpcHeaders,
     body: JSON.stringify({ p_company: companyId }),
-  });
-  if (!quota.ok) {
-    const detail = await quota.json().catch(() => ({}));
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!quota?.ok) {
+    const detail = quota ? await quota.json().catch(() => ({})) : {};
     const message = detail?.message || 'IA indisponível para esta conta.';
-    const status = quota.status === 401 ? 401 : quota.status === 403 ? 403 : 429;
+    const status = quota?.status === 401 ? 401 : quota?.status === 403 ? 403 : quota ? 429 : 502;
     return res.status(status).json({ error: message });
   }
 
@@ -61,6 +105,7 @@ export default async function handler(req, res) {
         max_tokens: 1200,
         messages: [{ role: 'user', content: prompt }],
       }),
+      signal: AbortSignal.timeout(30000),
     });
     if (!upstream.ok) {
       const body = await upstream.text();
@@ -69,7 +114,7 @@ export default async function handler(req, res) {
     }
     const data = await upstream.json();
     const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-    return res.status(200).json({ text });
+    return res.status(200).json({ text: String(text || '').slice(0, 20000) });
   } catch (error) {
     console.error('AI proxy error', error instanceof Error ? error.message : 'unknown');
     return res.status(502).json({ error: 'Serviço de interpretação indisponível.' });
