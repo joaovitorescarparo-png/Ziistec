@@ -1,4 +1,4 @@
-import { PROD_SUPABASE_HOSTS, STAGING_SUPABASE_HOSTS } from "./supabaseConfig";
+import { PROD_SUPABASE_HOSTS, STAGING_SUPABASE_HOSTS } from "./supabaseConfig.js";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
