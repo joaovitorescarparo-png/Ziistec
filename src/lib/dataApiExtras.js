@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
-import { salvarOSDB, salvarOrcamentoDB } from './dataApi';
+import { carregarDadosEmpresa, salvarOSDB, salvarOrcamentoDB } from './dataApi';
 import { ensureRequestId, idempotentWrite } from './reliability';
+import { redirectAuthAtual } from './authRedirect';
 
 const n=(v)=>Number(v||0);
 const check=(r)=>{if(r?.error) throw r.error; return r?.data;};
@@ -23,7 +24,18 @@ export async function duplicarOrcamentoDB(x,companyId,userId,validUntil){
   return salvarOrcamentoDB({...x,id:null,requestId:null,numero:null,status:'rascunho',data:new Date().toISOString().slice(0,10),validade:validUntil||x.validade,itens:(x.itens||[]).map(i=>({...i,id:null})),osId:null},companyId,userId);
 }
 export async function criarOSDeOrcamentoDB(orc,companyId,userId,defaults={}){
-  return salvarOSDB({clienteId:orc.clienteId,orcamentoId:orc.id,responsavelId:userId,status:'aguardando',data:'',hora:'',local:orc.local||defaults.endereco||'',localServico:orc.localServico||'',descricaoLivre:`Gerada a partir do ${orc.numero}`,obs:orc.obs||'',itens:(orc.itens||[]).map(i=>({...i,id:null})),emGarantia:false},companyId,userId);
+  void defaults;
+  const response=await idempotentWrite(()=>supabase.rpc('zt_create_work_order_from_quote',{
+    p_quote:orc.id,
+    p_assigned_to:userId||null,
+    p_scheduled_date:null,
+    p_scheduled_time:null,
+  }));
+  const id=check(response);
+  const dados=await carregarDadosEmpresa(companyId);
+  const nova=(dados?.ordens||[]).find((o)=>o.id===id);
+  if(!nova) throw new Error('A OS foi criada, mas não pôde ser recarregada.');
+  return nova;
 }
 export async function abrirAtendimentoGarantiaDB(g,companyId,userId,defaults={}){
   return salvarOSDB({clienteId:g.clienteId,responsavelId:userId,status:'aguardando',data:'',hora:'',local:defaults.local||'',localServico:g.local||defaults.localServico||'',descricaoLivre:`Atendimento em garantia de ${g.descricao}`,obs:`Atendimento em garantia de \"${g.descricao}\", executado em ${g.inicio}.`,itens:[],emGarantia:true,garantiaId:g.id,osOrigemId:g.osId,relatoProblema:defaults.relatoProblema||''},companyId,userId);
@@ -40,12 +52,25 @@ export async function carregarEquipeDB(companyId){
   return {usuarios,membresias};
 }
 export async function convidarColaboradorDB(x,companyId,userId){
+  const redirectTo=redirectAuthAtual();
+  if(!redirectTo) throw new Error('Este endereço não está autorizado para enviar convites da ZiisTec.');
   const email=x.email.trim().toLowerCase();
   const existing=await supabase.from('company_invites').select('id').eq('company_id',companyId).ilike('email',email).is('accepted_at',null).maybeSingle();
   if(existing.error) throw existing.error;
   const payload={company_id:companyId,email,role:papelToDb[x.papel]||'technician',job_title:x.funcao||null,invited_by:userId||null,name:x.nome||null,phone:x.telefone||null};
-  if(existing.data) check(await supabase.from('company_invites').update(payload).eq('id',existing.data.id));else check(await supabase.from('company_invites').insert(payload));
-  return carregarEquipeDB(companyId);
+  let inviteId=existing.data?.id||null;
+  if(inviteId){check(await supabase.from('company_invites').update(payload).eq('id',inviteId));}
+  else{
+    const created=check(await supabase.from('company_invites').insert(payload).select('id').single());
+    inviteId=created.id;
+  }
+  let emailDelivery={ok:false,sent:false,reason:'delivery_failed'};
+  try{
+    const delivery=await supabase.functions.invoke('team-invite-email',{body:{invite_id:inviteId,redirect_to:redirectTo}});
+    if(!delivery.error&&delivery.data) emailDelivery=delivery.data;
+  }catch{}
+  const equipe=await carregarEquipeDB(companyId);
+  return {...equipe,emailDelivery};
 }
 export async function alternarColaboradorDB(m){
   if(m.inviteId){if(m.ativo) check(await supabase.from('company_invites').delete().eq('id',m.inviteId));return;}

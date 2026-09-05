@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { supabase, mensagemErro } from "../lib/supabase";
+import { ZiisTecLogo } from "../components/ZiisTecBrand";
 
 const campo = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-600";
 
@@ -23,9 +24,7 @@ export default function NovaSenha({ aoConcluir }) {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-teal-500 flex items-center justify-center mx-auto mb-4">
-            <span className="text-slate-900 font-bold text-2xl leading-none">Z</span>
-          </div>
+          <ZiisTecLogo className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Crie uma nova senha</h1>
           <p className="text-[14px] text-slate-500 mt-1.5">Escolha uma senha nova e exclusiva para sua conta ZiisTec.</p>
         </div>
