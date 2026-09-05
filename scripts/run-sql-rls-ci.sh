@@ -98,6 +98,7 @@ regressions=(
   supabase/tests/v2_f05_soft_delete_reference_guard_rollback.sql
   supabase/tests/v2_f06_warranty_retry_rollback.sql
   supabase/tests/v2_f07_documents_history_after_subscription_rollback.sql
+  supabase/tests/v2_f11_invite_confirmed_email_rollback.sql
   supabase/tests/v2_technician_sale_rollback_smoke.sql
   supabase/tests/v2_field_sale_rollback_smoke.sql
   supabase/tests/v2_field_sales_consistency_rollback.sql
