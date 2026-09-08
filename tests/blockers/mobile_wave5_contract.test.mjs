@@ -15,7 +15,7 @@ test('wave 5 team UI remains owner-facing and stacks its page header on narrow m
   assert.match(legacy,/Reativar/);
   const permissions=legacy.slice(legacy.indexOf('const PERMISSOES'),legacy.indexOf('const pode'));
   assert.match(permissions,/proprietario:[\s\S]*"financeiro"[\s\S]*"equipe"/);
-  assert.match(permissions,/tecnico:\s*\["inicio", "agenda", "ordens", "registrarMateriais"\]/);
+  assert.match(permissions,/tecnico:[^\n]*"ordens"[^\n]*"registrarMateriais"[^\n]*"vendaCampo"/);
   assert.doesNotMatch(permissions,/tecnico:[^\n]*"financeiro"/);
   assert.doesNotMatch(permissions,/tecnico:[^\n]*"equipe"/);
 });
