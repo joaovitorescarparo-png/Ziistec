@@ -34,7 +34,8 @@ test('email templates keep Supabase authority and mobile-safe structure',()=>{
     const html=read(file);
     assert.match(html,/max-width:600px/);
     assert.match(html,/<table role="presentation"/);
-    assert.match(html,/https:\/\//);
+    assert.doesNotMatch(html,/<img\b[^>]*\bsrc=["']https?:\/\//i);
+    assert.doesNotMatch(html,/href=["']https?:\/\//i);
     assert.doesNotMatch(html,/base64/i);
     assert.doesNotMatch(html,/<script/i);
     assert.doesNotMatch(html,/fonts\.googleapis|@font-face/i);
