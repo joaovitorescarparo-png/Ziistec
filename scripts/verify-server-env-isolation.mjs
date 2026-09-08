@@ -1,6 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PROD_SUPABASE_URL, STAGING_BRANCH, STAGING_SUPABASE_URL, resolverSupabaseServidor } from '../api/_supabaseServerConfig.js';
+import {
+  PROD_SUPABASE_URL,
+  STAGING_BRANCH,
+  STAGING_SUPABASE_URL,
+  STAGING_PUBLISHABLE_KEY,
+  resolverSupabaseServidor,
+} from '../api/_supabaseServerConfig.js';
 
 const root = process.cwd();
 const failures = [];
@@ -21,20 +27,28 @@ const previewProd = resolverSupabaseServidor({
   SUPABASE_URL: PROD_SUPABASE_URL,
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_prod_test',
 });
-ok(!previewProd.configurado && previewProd.origem === 'production-blocked-in-preview' && !previewProd.url, 'Preview conseguiu apontar explicitamente para produção.');
+ok(!previewProd.configurado && !previewProd.url, 'Preview conseguiu apontar explicitamente para produção.');
 
 const previewStage = resolverSupabaseServidor({
   VERCEL_ENV: 'preview',
   VERCEL_GIT_COMMIT_REF: STAGING_BRANCH,
-  SUPABASE_URL: 'https://staging-test.supabase.co/',
-  SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_staging_test',
+  SUPABASE_URL: STAGING_SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY: STAGING_PUBLISHABLE_KEY,
 });
-ok(previewStage.configurado && previewStage.origem === 'env' && previewStage.url === 'https://staging-test.supabase.co', 'Preview com staging próprio por env não foi aceito corretamente.');
+ok(previewStage.configurado && previewStage.url === STAGING_SUPABASE_URL, 'Preview allowlisted não aceitou o par exato do staging.');
+
+const previewUnknownExplicit = resolverSupabaseServidor({
+  VERCEL_ENV: 'preview',
+  VERCEL_GIT_COMMIT_REF: 'outra-branch',
+  SUPABASE_URL: STAGING_SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY: STAGING_PUBLISHABLE_KEY,
+});
+ok(!previewUnknownExplicit.configurado && !previewUnknownExplicit.url, 'Preview desconhecido aceitou staging explicitamente.');
 
 const partial = resolverSupabaseServidor({
   VERCEL_ENV: 'preview',
   VERCEL_GIT_COMMIT_REF: STAGING_BRANCH,
-  SUPABASE_URL: 'https://staging-test.supabase.co',
+  SUPABASE_URL: STAGING_SUPABASE_URL,
 });
 ok(!partial.configurado && partial.origem === 'invalid-env', 'Env parcial do serverless não falhou fechado.');
 
@@ -80,10 +94,9 @@ if (failures.length) {
 }
 
 console.log('\nSERVER ENV ISOLATION CHECK: OK');
-console.log('✓ Product V2 preview usa somente o staging isolado');
-console.log('✓ Outros previews sem staging falham fechado');
-console.log('✓ Preview não aceita Supabase de produção nem por env explícita');
-console.log('✓ Produção mantém fallback público controlado');
-console.log('✓ AI, Finance AI e PDF têm body limit + timeout + isolamento compartilhado');
+console.log('✓ Production aceita somente o project ref autorizado');
+console.log('✓ Preview allowlisted aceita somente o staging autorizado');
+console.log('✓ Preview desconhecido e env parcial falham fechado');
+console.log('✓ AI, Finance AI e PDF usam o resolver compartilhado com body limit + timeout');
 console.log('✓ IA comercial valida owner antes de consumir quota ou chamar o provedor');
 console.log('✓ IA paga permanece fail-closed antes de quota/provedor em Orçamento e Financeiro');

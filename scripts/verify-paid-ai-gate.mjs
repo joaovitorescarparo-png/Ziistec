@@ -11,8 +11,9 @@ const parseTarget = (input) => {
 };
 
 process.env.VERCEL_ENV = 'preview';
-process.env.SUPABASE_URL = 'https://staging-paid-ai-test.supabase.co';
-process.env.SUPABASE_PUBLISHABLE_KEY = runtimeSecret();
+process.env.VERCEL_GIT_COMMIT_REF = 'hardening-v2-staging';
+process.env.SUPABASE_URL = 'https://xadoktssibuuebzzjrhv.supabase.co';
+process.env.SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e';
 process.env.ANTHROPIC_API_KEY = runtimeSecret();
 delete process.env.ENABLE_PAID_AI;
 

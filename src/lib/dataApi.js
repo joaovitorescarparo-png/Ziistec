@@ -14,7 +14,7 @@ export const fromClient = (x) => ({
   id:x.id, empresaId:x.company_id, tipo:x.person_type, nome:x.name, fantasia:x.trade_name||'', documento:x.tax_id||'',
   responsavel:x.contact_name||'', telefone:x.phone||'', whatsapp:x.whatsapp||'', endereco:x.address||'', obs:x.notes||'',
   googlePlaceId:x.google_place_id||null, latitude:x.latitude==null?null:Number(x.latitude), longitude:x.longitude==null?null:Number(x.longitude),
-  mapsUrl:x.maps_url||null,
+  mapsUrl:x.maps_url||null, excluidoEm:x.deleted_at||null,
 });
 export const toClient = (x, companyId) => ({
   company_id:companyId, person_type:x.tipo||'PF', name:x.nome?.trim(), trade_name:x.fantasia||null, tax_id:x.documento||null,
@@ -40,7 +40,7 @@ const toProduct = (x, companyId) => ({
   ...(Object.prototype.hasOwnProperty.call(x,'estoqueMinimo')?{low_stock_threshold:Math.max(0,n(x.estoqueMinimo))}:{}),
 });
 
-const fromItem = (x) => ({ id:x.id, tipo:itemKindFromDb[x.kind]||'livre', catalogoId:x.service_id||x.product_id||null, nome:x.name, unidade:x.unit||'unidade', qtd:n(x.quantity)||1, preco:n(x.unit_price), custo:n(x.unit_cost), obs:x.notes||'', adicional:Boolean(x.is_extra), aguardandoValor:Boolean(x.price_pending) });
+const fromItem = (x) => ({ id:x.id, tipo:itemKindFromDb[x.kind]||'livre', catalogoId:x.service_id||x.product_id||null, nome:x.name, unidade:x.unit||'unidade', qtd:n(x.quantity)||1, preco:n(x.unit_price), custo:n(x.unit_cost), obs:x.notes||'', adicional:Boolean(x.is_extra), aguardandoValor:Boolean(x.price_pending), garantiaPolitica:x.warranty_policy||'catalog', garantiaDiasOverride:x.warranty_override_days==null?null:Number(x.warranty_override_days), garantiaMesesOverride:x.warranty_override_months==null?null:Number(x.warranty_override_months) });
 const fromMaterial = (x) => ({ id:x.id, produtoId:x.product_id||null, nome:x.name||'Material', qtd:n(x.quantity)||1, custo:n(x.unit_cost), serie:x.serial_number||'' });
 const toItem = (x, companyId, parentKey, parentId, pos=0, workOrder=false) => ({
   [parentKey]:parentId, company_id:companyId, kind:itemKindToDb[x.tipo]||'free', service_id:x.tipo==='servico'?x.catalogoId||null:null, product_id:x.tipo==='produto'?x.catalogoId||null:null,
@@ -56,7 +56,9 @@ const fromFinancial = (x) => ({ id:x.id, requestId:x.client_request_id||null, em
 const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.client_id, osId:x.work_order_id, tipo:x.kind==='service'?'servico':'produto', servicoId:x.service_id, produtoId:x.product_id, descricao:x.description, local:x.service_place||'', inicio:x.starts_on, ate:x.ends_on, serie:x.serial_number||'', origem:x.source||'work_order', obs:x.notes||'' });
 const fromPurchase = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, fornecedor:x.supplier_name, data:x.purchase_date, forma:x.payment_method||'', vencimento:x.due_date||'', obs:x.notes||'', lancamentoId:x.entry_id, itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)})) });
 
-const WO_SELECT='*, work_order_items(*), work_order_materials(*)';
+const QUOTE_SELECT='*, quote_items:quote_items!quote_items_quote_company_fkey(*)';
+const WO_SELECT='*, work_order_items:work_order_items!wo_items_work_order_company_fkey(*), work_order_materials:work_order_materials!wo_materials_work_order_company_fkey(*)';
+const PURCHASE_SELECT='*, purchase_items:purchase_items!purchase_items_purchase_company_fkey(*)';
 
 const aplicarCustosPrivados = (rows, itemCosts=[], materialCosts=[], workOrderCosts=[]) => {
   const itemMap = new Map((itemCosts||[]).map((x)=>[x.work_order_item_id,n(x.unit_cost)]));
@@ -111,13 +113,13 @@ async function carregarOSCompletaDB(id) {
 export async function carregarDadosEmpresa(companyId) {
   const reqs = await Promise.all([
     supabase.from('clients').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('services').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('products').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('quotes').select('*, quote_items(*)').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('work_orders').select(WO_SELECT).eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('financial_entries').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('purchases').select('*, purchase_items(*)').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('warranties').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
+    supabase.from('services').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('products').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('quotes').select(QUOTE_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('work_orders').select(WO_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('financial_entries').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('purchases').select(PURCHASE_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    supabase.from('warranties').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
   ]);
   const firstError=reqs.find(r=>r.error)?.error; if(firstError) throw firstError;
   const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(companyId);
@@ -137,7 +139,7 @@ export async function salvarOrcamentoDB(x, companyId, userId){
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_quote_idempotent',{p_company:companyId,p_quote:x.id||null,p_request:req,p_row:row,p_items:items}));
   const id=check(response);
-  const full=check(await supabase.from('quotes').select('*, quote_items(*)').eq('id',id).single());
+  const full=check(await supabase.from('quotes').select(QUOTE_SELECT).eq('id',id).is('deleted_at',null).single());
   return fromQuote(full);
 }
 export async function salvarOSDB(x, companyId, userId){
@@ -155,7 +157,7 @@ export async function atualizarOSDB(id, patch){
   return fromWorkOrder(await carregarOSCompletaDB(id));
 }
 export async function finalizarOSDB(id, extras={}){
-  const r=await supabase.rpc('zt_finalize_work_order_atomic',{
+  const r=await supabase.rpc('zt_finalize_work_order_with_warranty_overrides',{
     p_wo:id,
     p_report:extras.relato||extras.relatorio||null,
     p_pending:extras.pendencia||null,
@@ -163,19 +165,45 @@ export async function finalizarOSDB(id, extras={}){
     p_due_days:7,
     p_materials:extras.materiaisDB||[],
     p_additions:extras.adicionaisDB||[],
+    p_warranty_overrides:Array.isArray(extras.garantiaOverrides)?extras.garantiaOverrides:null,
   });
   check(r);
   return true;
 }
 export async function resolverPrecificacaoOSDB(id,itens,dueDays=7){ const precos=(itens||[]).filter(i=>i.aguardandoValor).map(i=>({id:i.id,price:n(i.preco)})); const r=await supabase.rpc('zt_resolve_work_order_pricing',{p_wo:id,p_prices:precos,p_due_days:dueDays}); check(r); return true; }
-export async function atualizarStatusOrcamentoDB(id,status){ const r=await supabase.from('quotes').update({status:qStatusToDb[status]||'draft'}).eq('id',id).select('*, quote_items(*)').single(); return fromQuote(check(r)); }
+export async function atualizarStatusOrcamentoDB(id,status){ const r=await supabase.from('quotes').update({status:qStatusToDb[status]||'draft'}).eq('id',id).select(QUOTE_SELECT).single(); return fromQuote(check(r)); }
 
 export async function salvarLancamentoDB(x,companyId){
   const row={kind:x.tipo==='receita'?'income':'expense',description:x.descricao?.trim(),amount:n(x.valor),due_date:x.vencimento||new Date().toISOString().slice(0,10),paid:Boolean(x.pago),paid_at:x.pago?(x.pagoEm||new Date().toISOString().slice(0,10)):null,payment_method:x.pago?(x.forma||null):null,category:x.categoria||null,client_id:x.tipo==='receita'?(x.clienteId||null):null};
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_manual_financial_entry',{p_company:companyId,p_entry:x.id||null,p_request:req,p_row:row}));
   const id=check(response);
-  return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',id).single()));
+  return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',id).is('deleted_at',null).single()));
 }
-export async function baixarLancamentoDB(x, forma){ const r=await supabase.rpc('zt_set_financial_paid',{p_entry:x.id,p_paid:!x.pago,p_method:x.pago?null:forma}); check(r); return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',x.id).single())); }
+export async function baixarLancamentoDB(x, forma){ const r=await supabase.rpc('zt_set_financial_paid',{p_entry:x.id,p_paid:!x.pago,p_method:x.pago?null:forma}); check(r); return fromFinancial(check(await supabase.from('financial_entries').select('*').eq('id',x.id).is('deleted_at',null).single())); }
 export async function recarregarSeguro(companyId){ try{return {data:await carregarDadosEmpresa(companyId),error:null};}catch(e){return {data:null,error:mensagemErro(e)};} }
+
+const SOFT_DELETE_TABLES = Object.freeze({
+  cliente: 'clients',
+  servico: 'services',
+  produto: 'products',
+  orcamento: 'quotes',
+  os: 'work_orders',
+  compra: 'purchases',
+  financeiro: 'financial_entries',
+  garantia: 'warranties',
+});
+
+export async function excluirRegistroDB(tipo, id, companyId) {
+  const table = SOFT_DELETE_TABLES[tipo];
+  if (!table || !id || !companyId) throw new Error('Registro inválido para exclusão.');
+  const r = await supabase
+    .from(table)
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('company_id', companyId)
+    .select('id')
+    .single();
+  check(r);
+  return true;
+}

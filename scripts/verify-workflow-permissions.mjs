@@ -38,6 +38,21 @@ for (const name of files) {
 
 if (!files.length) failures.push('Nenhum workflow GitHub encontrado para validar.');
 
+const codeqlPath = path.join(workflowDir, 'codeql.yml');
+if (!fs.existsSync(codeqlPath)) {
+  failures.push('.github/workflows/codeql.yml: workflow CodeQL ausente.');
+} else {
+  const codeql = fs.readFileSync(codeqlPath, 'utf8');
+  const pushBranches = codeql.match(/push:\s*\n\s*branches:\s*\[([^\]]+)\]/)?.[1]
+    ?.split(',').map((x) => x.trim()) || [];
+  const prBranches = codeql.match(/pull_request:\s*\n\s*branches:\s*\[([^\]]+)\]/)?.[1]
+    ?.split(',').map((x) => x.trim()) || [];
+  if (!pushBranches.includes('main')) failures.push('CodeQL precisa continuar analisando push em main.');
+  for (const target of ['main', 'ui-v1-v2-merge']) {
+    if (!prBranches.includes(target)) failures.push(`CodeQL precisa analisar PR com destino ${target}.`);
+  }
+}
+
 if (failures.length) {
   console.error('\nWORKFLOW PERMISSIONS CHECK: FAIL\n');
   failures.forEach((failure, index) => console.error(`${index + 1}. ${failure}`));
@@ -47,4 +62,5 @@ if (failures.length) {
 console.log('\nWORKFLOW PERMISSIONS CHECK: OK');
 console.log(`✓ ${files.length} workflows verificados`);
 console.log('✓ Sem workflow com escrita em conteúdo, push automático ou credencial persistida');
+console.log('✓ CodeQL cobre PRs para main e ui-v1-v2-merge');
 console.log('✓ security-events: write permanece permitido apenas para o CodeQL publicar resultados');

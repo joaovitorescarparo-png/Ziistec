@@ -84,9 +84,13 @@ export async function ajustarEstoqueDB(companyId, productId, delta, notes='') {
   return n(check(await supabase.rpc('zt_adjust_product_stock',{p_company:companyId,p_product:productId,p_delta:n(delta),p_notes:notes||null})));
 }
 
-export async function venderProdutoNaOSDB(workOrderId, productId, quantidade=1, notes='') {
+export async function venderProdutoNaOSDB(workOrderId, productId, quantidade=1, notes='', requestId=null) {
   return check(await supabase.rpc('zt_sell_product_on_work_order',{
-    p_wo:workOrderId,p_product:productId,p_quantity:n(quantidade),p_notes:notes||null,
+    p_wo:workOrderId,
+    p_product:productId,
+    p_quantity:n(quantidade),
+    p_notes:notes||null,
+    p_request:requestId||crypto.randomUUID(),
   }));
 }
 

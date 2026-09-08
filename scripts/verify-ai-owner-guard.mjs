@@ -11,8 +11,9 @@ const parseTarget = (input) => {
 };
 
 process.env.VERCEL_ENV = 'preview';
-process.env.SUPABASE_URL = 'https://staging-owner-guard-test.supabase.co';
-process.env.SUPABASE_PUBLISHABLE_KEY = runtimeSecret();
+process.env.VERCEL_GIT_COMMIT_REF = 'hardening-v2-staging';
+process.env.SUPABASE_URL = 'https://xadoktssibuuebzzjrhv.supabase.co';
+process.env.SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e';
 process.env.ANTHROPIC_API_KEY = runtimeSecret();
 
 const calls = [];
@@ -30,7 +31,6 @@ globalThis.fetch = async (input) => {
   }
 
   if (target.pathname === '/rest/v1/rpc/zt_is_owner') {
-    // Simula usuário autenticado/membro técnico: sessão válida, mas não proprietário.
     return new Response('false', {
       status: 200,
       headers: { 'content-type': 'application/json' },

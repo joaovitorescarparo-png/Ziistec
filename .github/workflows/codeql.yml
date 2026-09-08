@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, ui-v1-v2-merge]
   schedule:
     - cron: '17 6 * * 1'
 

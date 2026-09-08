@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, ui-v1-v2-merge]
 
 permissions:
   contents: read
@@ -39,3 +39,29 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  sql-rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+
+      - name: Start disposable Supabase stack
+        run: supabase start
+
+      - name: Apply repository migrations and run SQL/RLS regressions
+        run: bash scripts/run-sql-rls-ci.sh
+
+      - name: Stop disposable Supabase stack
+        if: always()
+        run: supabase stop --no-backup

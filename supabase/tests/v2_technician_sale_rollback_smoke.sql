@@ -96,7 +96,8 @@ set sold_item_id = public.zt_sell_product_on_work_order(
   assigned_wo_id,
   product_id,
   2,
-  '__V2_TECH_SALE_OK__'
+  '__V2_TECH_SALE_OK__',
+  gen_random_uuid()
 );
 
 update zt_technician_sale_test t
@@ -118,7 +119,8 @@ begin
       (select unassigned_wo_id from zt_technician_sale_test),
       (select product_id from zt_technician_sale_test),
       1,
-      '__V2_TECH_SALE_MUST_FAIL__'
+      '__V2_TECH_SALE_MUST_FAIL__',
+      gen_random_uuid()
     );
     update zt_technician_sale_test set unassigned_blocked=false;
   exception when sqlstate '42501' then

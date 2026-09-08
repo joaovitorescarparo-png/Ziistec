@@ -1,8 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+
+const round32 = spawnSync(process.execPath, ['scripts/apply-round32.mjs'], { encoding: 'utf8' });
+if (round32.status !== 0) {
+  throw new Error(`Could not apply Round 3.2 readable codemod: ${round32.stderr || round32.stdout || 'unknown error'}`);
+}
+if (round32.stdout) process.stdout.write(round32.stdout);
 
 const file = 'src/legacy/ZiisTecApp.jsx';
-const expected = 'f0a107774cacce85418cfe1ebbf2d4a3f9654fd430841e1b21f7e04e45cbf4f6';
+const expected = '91703a73ba189664e01af2bcb899eb72cc2fc5fb5f896248416b4725fbf62d24';
 const content = readFileSync(file);
 const actual = createHash('sha256').update(content).digest('hex');
 if (actual !== expected) {
