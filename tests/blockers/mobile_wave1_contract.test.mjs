@@ -35,3 +35,24 @@ test('V2 workspace home preserves touch targets and mobile width',()=>{
   assert.match(src,/min-h-11 min-w-11/);
   assert.match(src,/focus-visible:ring-2/);
 });
+
+test('client and quote V2 screens use dynamic viewport and touch-safe actions',()=>{
+  const clients=read('src/screens/v2/ClientLocationsV2.jsx');
+  assert.match(clients,/MOBILE HOMOLOGATION · clients · wave 2/);
+  assert.match(clients,/min-h-\[100dvh\] overflow-x-hidden/);
+  assert.match(clients,/min-h-11 min-w-11/);
+  assert.match(clients,/min-h-11 flex-1 items-center justify-center/);
+
+  const authoring=read('src/screens/v2/QuoteAIV2.jsx');
+  assert.match(authoring,/MOBILE HOMOLOGATION · quote authoring · wave 2/);
+  assert.match(authoring,/max-h-\[92dvh\]/);
+  assert.match(authoring,/min-h-11 items-center justify-center/);
+  assert.doesNotMatch(authoring,/\bmin-h-screen\b/);
+
+  const management=read('src/screens/v2/QuotesManagementV2.jsx');
+  assert.match(management,/MOBILE HOMOLOGATION · quote management · wave 2/);
+  assert.match(management,/max-h-\[92dvh\]/);
+  assert.match(management,/min-h-11 rounded-xl/);
+  assert.doesNotMatch(management,/max-h-\[92vh\]/);
+  assert.doesNotMatch(management,/\bmin-h-screen\b/);
+});
