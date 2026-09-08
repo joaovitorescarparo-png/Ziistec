@@ -34,15 +34,15 @@ export default function Onboarding({ perfil, aoCriar, sair }) {
 
   const atual = passos[passo];
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased">
+    <div className="min-h-[100dvh] bg-slate-50 flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 font-sans antialiased overflow-x-hidden">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
+        <div className="text-center mb-6 sm:mb-8">
           <ZiisTecLogo className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Vamos configurar sua empresa</h1>
           <p className="text-[14px] text-slate-500 mt-1.5">Leva menos de um minuto. O resto você completa depois.</p>
         </div>
 
-        <div className="bg-white rounded-2xl ring-1 ring-slate-200/70 p-6 space-y-5">
+        <div className="bg-white rounded-2xl ring-1 ring-slate-200/70 p-5 sm:p-6 space-y-5">
           <div className="flex items-center gap-1.5">
             {[0, 1, 2].map((i) => (
               <span key={i} className={`h-1 flex-1 rounded-full ${i <= passo ? "bg-teal-600" : "bg-slate-200"}`} />
@@ -59,10 +59,10 @@ export default function Onboarding({ perfil, aoCriar, sair }) {
           ) : (
             <div>
               <p className="text-[13px] font-medium text-slate-600 mb-3">Como você trabalha?</p>
-              <div className="flex gap-2">
+              <div className="grid gap-2 min-[390px]:grid-cols-2">
                 {[[false, "Trabalho sozinho"], [true, "Tenho equipe"]].map(([v, label]) => (
                   <button key={label} onClick={() => setF({ ...f, temEquipe: v })}
-                    className={`flex-1 py-3.5 rounded-xl text-[15px] font-medium transition-colors ${anel} ${
+                    className={`min-h-11 py-3.5 px-3 rounded-xl text-[15px] font-medium transition-colors ${anel} ${
                       f.temEquipe === v ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600"}`}>
                     {label}
                   </button>
@@ -74,21 +74,21 @@ export default function Onboarding({ perfil, aoCriar, sair }) {
             </div>
           )}
 
-          {erro && <p className="text-[13px] text-rose-700 bg-rose-50 ring-1 ring-rose-200/70 rounded-xl px-3.5 py-3">{erro}</p>}
+          {erro && <p role="alert" className="text-[13px] text-rose-700 bg-rose-50 ring-1 ring-rose-200/70 rounded-xl px-3.5 py-3">{erro}</p>}
 
           <div className="flex justify-between gap-3">
             <button onClick={() => (passo === 0 ? sair() : setPasso(passo - 1))}
-              className={`text-sm px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-100 ${anel}`}>
+              className={`min-h-11 text-sm px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-100 ${anel}`}>
               {passo === 0 ? "Sair" : "Voltar"}
             </button>
             {atual ? (
               <button disabled={!f[atual.chave].trim()} onClick={() => setPasso(passo + 1)}
-                className={`text-sm px-4 py-3 rounded-xl bg-teal-700 text-white font-medium disabled:opacity-40 ${anel}`}>
+                className={`min-h-11 text-sm px-4 py-3 rounded-xl bg-teal-700 text-white font-medium disabled:opacity-40 ${anel}`}>
                 Continuar
               </button>
             ) : (
               <button disabled={ocupado} onClick={criar}
-                className={`text-sm px-4 py-3 rounded-xl bg-teal-700 text-white font-medium disabled:opacity-40 ${anel}`}>
+                className={`min-h-11 text-sm px-4 py-3 rounded-xl bg-teal-700 text-white font-medium disabled:opacity-40 ${anel}`}>
                 {ocupado ? "Criando…" : "Entrar na ZiisTec"}
               </button>
             )}

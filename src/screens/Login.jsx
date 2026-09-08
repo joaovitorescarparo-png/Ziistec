@@ -14,7 +14,7 @@ function Botao({ children, onClick, variante = "primary", className = "", disabl
   };
   return (
     <button type={tipo} onClick={onClick} disabled={disabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl font-medium text-sm px-4 py-3 transition-colors disabled:opacity-40 disabled:pointer-events-none ${estilos[variante]} ${anel} ${className}`}>
+      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl font-medium text-sm px-4 py-3 transition-colors disabled:opacity-40 disabled:pointer-events-none ${estilos[variante]} ${anel} ${className}`}>
       {children}
     </button>
   );
@@ -91,8 +91,8 @@ export default function Login() {
 
   if (!configurado) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 font-sans">
-        <div className="max-w-md text-center">
+      <div className="min-h-[100dvh] bg-slate-50 flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 font-sans overflow-x-hidden">
+        <div className="w-full max-w-md text-center">
           <ZiisTecLogo className="h-11 w-auto mx-auto mb-6" />
           <h1 className="text-xl font-semibold text-slate-900">Configuração pendente</h1>
           <p className="text-[15px] text-slate-600 mt-3 leading-relaxed">
@@ -107,9 +107,9 @@ export default function Login() {
   const pronto = email.trim() && (criando ? senha.length >= 8 && nome.trim() : Boolean(senha));
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased">
+    <div className="min-h-[100dvh] bg-slate-50 flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 font-sans antialiased overflow-x-hidden">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
+        <div className="text-center mb-6 sm:mb-8">
           <ZiisTecLogo className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
             {criando ? "Criar conta na ZiisTec" : "Entre na sua conta"}
@@ -117,7 +117,7 @@ export default function Login() {
           <p className="text-[14px] text-slate-500 mt-1.5">Gestão de serviços para quem trabalha em campo.</p>
         </div>
 
-        <div className="bg-white rounded-2xl ring-1 ring-slate-200/70 p-6 space-y-4">
+        <div className="bg-white rounded-2xl ring-1 ring-slate-200/70 p-5 sm:p-6 space-y-4">
           {criando && (
             <Campo label="Seu nome">
               <input className={campo} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" maxLength={200} />
@@ -135,8 +135,8 @@ export default function Login() {
               placeholder="Sua senha" />
           </Campo>
 
-          {erro && <p className="text-[13px] text-rose-700 bg-rose-50 ring-1 ring-rose-200/70 rounded-xl px-3.5 py-3">{erro}</p>}
-          {aviso && <p className="text-[13px] text-teal-900 bg-teal-50 ring-1 ring-teal-200/70 rounded-xl px-3.5 py-3">{aviso}</p>}
+          {erro && <p role="alert" className="text-[13px] text-rose-700 bg-rose-50 ring-1 ring-rose-200/70 rounded-xl px-3.5 py-3">{erro}</p>}
+          {aviso && <p role="status" className="text-[13px] text-teal-900 bg-teal-50 ring-1 ring-teal-200/70 rounded-xl px-3.5 py-3">{aviso}</p>}
 
           <Botao className="w-full" disabled={!pronto || ocupado} onClick={criando ? criarConta : entrar}>
             {ocupado ? "Aguarde…" : criando ? "Criar conta" : "Entrar"}
@@ -147,12 +147,12 @@ export default function Login() {
           </div>
           <Botao variante="soft" className="w-full" disabled={ocupado} onClick={google}>Entrar com Google</Botao>
 
-          <div className="flex justify-between text-[13px] pt-1">
+          <div className="flex justify-between gap-2 text-[13px] pt-1">
             {!criando
-              ? <button onClick={recuperar} className={`text-slate-500 hover:text-slate-800 ${anel}`}>Esqueci minha senha</button>
+              ? <button onClick={recuperar} className={`min-h-11 px-2 -ml-2 text-left text-slate-500 hover:text-slate-800 ${anel}`}>Esqueci minha senha</button>
               : <span />}
             <button onClick={() => { setModo(criando ? "entrar" : "criar"); setErro(null); setAviso(null); }}
-              className={`font-medium text-teal-800 hover:underline ${anel}`}>
+              className={`min-h-11 px-2 -mr-2 text-right font-medium text-teal-800 hover:underline ${anel}`}>
               {criando ? "Já tenho conta" : "Criar conta"}
             </button>
           </div>
