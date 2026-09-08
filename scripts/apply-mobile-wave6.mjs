@@ -33,15 +33,24 @@ function oneOf(src, variants, replacement, label) {
   throw new Error(`${label}: none of the accepted pipeline variants was found`);
 }
 
+function insertBeforeInSection(src, sectionStart, anchor, insertion, label) {
+  const start = src.indexOf(sectionStart);
+  if (start < 0) throw new Error(`${label}: section not found`);
+  const at = src.indexOf(anchor, start);
+  if (at < 0) throw new Error(`${label}: anchor not found inside section`);
+  return src.slice(0, at) + insertion + src.slice(at);
+}
+
 apply(
   'src/legacy/ZiisTecApp.jsx',
   'MOBILE HOMOLOGATION · history/warranty · wave 6',
   (input) => {
     let src = input;
-    src = once(
+    src = insertBeforeInSection(
       src,
-      '  const [busca, setBusca] = useState("");\n  const [form, setForm] = useState(null);\n  const lista = clientes.filter((c) => semAcento(c.nome + (c.fantasia || "") + c.documento + c.telefone).includes(semAcento(busca)));',
-      '  const [busca, setBusca] = useState("");\n  const [form, setForm] = useState(null);\n  const [localCliente, setLocalCliente] = useState("");\n  useEffect(() => setLocalCliente(""), [clienteAberto]);\n  const lista = clientes.filter((c) => semAcento(c.nome + (c.fantasia || "") + c.documento + c.telefone).includes(semAcento(busca)));',
+      'function Clientes(p) {',
+      '  if (clienteAberto) {',
+      '  const [localCliente, setLocalCliente] = useState("");\n  useEffect(() => setLocalCliente(""), [clienteAberto]);\n\n',
       'wave6 client local filter state',
     );
     src = once(
