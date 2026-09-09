@@ -41,12 +41,19 @@ select work_order_id,'20000000-0000-0000-0000-000000000001','CI-FW2-001',client_
   'Instalar e testar fechadura','Acesso autorizado pela portaria'
 from zt_fw2;
 
+-- O custo interno é fixture legítima, mas o contrato atual proíbe authenticated de
+-- gravá-lo diretamente. Usa o mesmo contexto privilegiado aceito pelo trigger de
+-- captura: ele persiste 70 no ledger privado e zera unit_cost na linha pública.
+reset role;
+set local role service_role;
 insert into public.work_order_items(
   work_order_id,company_id,kind,product_id,name,unit,quantity,unit_price,unit_cost,is_extra,price_pending,notes
 )
 select work_order_id,'20000000-0000-0000-0000-000000000001','product',product_id,
   'Fechadura Snapshot Original','unidade',1,250,70,false,false,'Item contratado'
 from zt_fw2;
+reset role;
+set local role authenticated;
 
 insert into public.attachments(
   id,company_id,bucket,path,file_name,content_type,size_bytes,category,work_order_id,uploaded_by,media_kind,media_stage,caption
