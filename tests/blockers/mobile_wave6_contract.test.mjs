@@ -24,7 +24,10 @@ test('wave 6 post-sale actions wrap and remain touch-safe',()=>{
 });
 
 test('wave 6 work-order memory preserves lookup context at 320-390px',()=>{
-  const memory=read('src/screens/v2/WorkOrderMemoryV2.jsx');
+  // Wave 4A wraps the hardened screen but copies the fully codemodded implementation
+  // into WorkOrderMemoryBaseV2 before installing its reuse UI. The previous mobile
+  // contract therefore spans wrapper + base instead of assuming one physical file.
+  const memory=read('src/screens/v2/WorkOrderMemoryV2.jsx')+'\n'+read('src/screens/v2/WorkOrderMemoryBaseV2.jsx');
   assert.match(memory,/MOBILE HOMOLOGATION · history lookup · wave 6/);
   assert.match(memory,/grid grid-cols-1 gap-2 min-\[360px\]:grid-cols-3 lg:w-\[360px\]/);
   assert.match(memory,/line-clamp-2 break-words/);
