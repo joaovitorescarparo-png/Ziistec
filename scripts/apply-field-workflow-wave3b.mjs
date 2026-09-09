@@ -9,7 +9,7 @@ function patchFile(file,marker,mutate){
     if(count!==1) throw new Error(`${file} · ${label}: expected 1 marker, got ${count}`);
     src=src.replace(needle,replacement);
   };
-  src=mutate(src,replace);
+  mutate(src,replace);
   if(src===before) throw new Error(`${file}: no Wave 3B change applied`);
   src+=`\n/* ${marker} */\n`;
   writeFileSync(file,src,'utf8');
@@ -19,7 +19,6 @@ function patchFile(file,marker,mutate){
 patchFile('src/lib/dataApi.js','FIELD WORKFLOW V1 · wave 3b · return mapping',(src,replace)=>{
   replace("pendencia:x.pending_note||'', valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit)",
     "pendencia:x.pending_note||'', precisaRetorno:Boolean(x.needs_return), valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit)",'work order needs return mapping');
-  return src;
 });
 
 patchFile('src/lib/runtimeApi.js','FIELD WORKFLOW V1 · wave 3b · checklist and return hydration',(src,replace)=>{
@@ -31,7 +30,6 @@ patchFile('src/lib/runtimeApi.js','FIELD WORKFLOW V1 · wave 3b · checklist and
     "return {...o,relato:reports.at(-1)?.body||o.relato||'',historico:[...(hist.length?hist:o.historico||[]),...retornoHist].sort((a,b)=>(a.quando||'').localeCompare(b.quando||'')),retornos,checklist,fotos,itens:",'merge return history');
   replace("return fresh.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done)}));",
     "return fresh.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done),obrigatorio:Boolean(c.required),templateId:c.source_template_id||null}));",'fresh checklist metadata');
-  return src;
 });
 
 patchFile('src/legacy/ZiisTecApp.jsx','FIELD WORKFLOW V1 · wave 3b · checklist templates and return flow',(src,replace)=>{
@@ -59,5 +57,4 @@ patchFile('src/legacy/ZiisTecApp.jsx','FIELD WORKFLOW V1 · wave 3b · checklist
 
   replace("      {finalizando && <FinalizarAtendimento os={os} onClose={() => setFinalizando(false)} servicos={servicos} produtos={produtos}\n        onSalvarParcial={(patch) => up(patch)} onFinalizar={(extras) => { finalizarOS(os.id, extras); setFinalizando(false); }} jaConcluida={os.status === \"concluida\"} verValores={verValores} />}",
     "      {finalizando && <FinalizarAtendimento os={os} onClose={() => setFinalizando(false)} servicos={servicos} produtos={produtos}\n        onSalvarParcial={(patch) => up(patch)} onFinalizar={async(extras) => {\n          if(extras.precisaRetornar){\n            try{\n              up({relato:extras.relato,fotos:extras.fotos,pendencia:extras.pendencia});\n              if(real) await marcarRetornoOSV2DB({workOrderId:os.id,reason:extras.retornoMotivo,materialNeeded:extras.retornoMaterial,notes:extras.retornoObs,priority:extras.retornoPrioridade,expectedReturnDate:extras.retornoPrevisao,requestId:extras.retornoRequestId});\n              setOrdens(l=>l.map(x=>x.id===os.id?{...x,precisaRetorno:true,pendencia:extras.pendencia||x.pendencia,historico:[...(x.historico||[]),{id:uid(),quando:HOJE,texto:`Precisa retornar · ${extras.retornoMotivo}` }]}:x));\n              setFinalizando(false);\n            }catch(e){aviso(mensagemErro(e));}\n            return;\n          }\n          finalizarOS(os.id, extras); setFinalizando(false);\n        }} jaConcluida={os.status === \"concluida\"} verValores={verValores} />}", 'route return away from finalization');
-  return src;
 });
