@@ -149,10 +149,44 @@ select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001'
 set local role authenticated;
 update public.company_members set status='active'
  where company_id='20000000-0000-0000-0000-000000000001' and user_id='10000000-0000-0000-0000-000000000003';
-update public.subscriptions set status='suspended' where company_id='20000000-0000-0000-0000-000000000001';
-do $$ begin
-  perform public.zt_register_installed_equipment((select work_order_id from zt_fw3a),(select material_id from zt_fw3a),null,'Porta social',null,'ABC123456',null,null,null);
-  raise exception 'Assinatura suspensa permitiu registro';
-exception when sqlstate '42501' then null; end $$;
+
+do $$
+declare
+  t zt_fw3a%rowtype;
+  v_canceled text;
+  v_reactivated text;
+  v_retry uuid;
+  v_equipment_count integer;
+  v_warranty_count integer;
+begin
+  select * into t from zt_fw3a;
+
+  -- Usa as mesmas RPCs públicas já cobertas pela regressão de assinatura do V2.
+  -- O fixture não ganha UPDATE direto em public.subscriptions.
+  v_canceled := public.zt_cancel_subscription('20000000-0000-0000-0000-000000000001')::text;
+  if v_canceled <> 'canceled' then raise exception 'Cancelamento de assinatura não retornou canceled'; end if;
+
+  begin
+    perform public.zt_register_installed_equipment(
+      t.work_order_id,t.material_id,null,'Porta social',null,'ABC123456',null,null,null
+    );
+    raise exception 'Assinatura cancelada permitiu registro';
+  exception when sqlstate '42501' then
+    null;
+  end;
+
+  v_reactivated := public.zt_reactivate_subscription('20000000-0000-0000-0000-000000000001')::text;
+  if v_reactivated <> 'trial' then raise exception 'Reativação não restaurou assinatura gravável'; end if;
+
+  v_retry := public.zt_register_installed_equipment(
+    t.work_order_id,t.material_id,null,'Porta social',null,'ABC123456',null,'Retry após reativação',null
+  );
+  if v_retry <> t.equipment_id then raise exception 'Reativação não restaurou o fluxo idempotente'; end if;
+
+  select count(*) into v_equipment_count from public.installed_equipment where work_order_id=t.work_order_id;
+  select count(*) into v_warranty_count from public.warranties where work_order_id=t.work_order_id;
+  if v_equipment_count <> 1 then raise exception 'Retry após reativação duplicou equipamento'; end if;
+  if v_warranty_count <> t.warranty_after then raise exception 'Retry após reativação duplicou garantia'; end if;
+end $$;
 
 rollback;
