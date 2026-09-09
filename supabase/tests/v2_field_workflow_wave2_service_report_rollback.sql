@@ -11,6 +11,7 @@ create temp table zt_fw2 (
   stock_before numeric,
   inventory_before integer,
   finance_before integer,
+  finance_after_finalize integer,
   unauthorized_tech_rows integer,
   cross_tenant_rows integer,
   authorized_tech_rows integer,
@@ -95,6 +96,12 @@ update zt_fw2 t set report_id=(
      and r.is_active
 );
 
+-- Congela a contagem financeira após a primeira finalização. A fixture não impõe que
+-- toda OS direta gere cobrança; o contrato desta Wave é que relatório/retry não dupliquem financeiro.
+update zt_fw2 t set finance_after_finalize=(
+  select count(*) from public.financial_entries f where f.work_order_id=t.work_order_id
+);
+
 -- Retry da mesma finalização: não reaplica material/garantia/financeiro nem relatório.
 select public.zt_finalize_work_order_with_warranty_overrides(
   (select work_order_id from zt_fw2),
@@ -149,8 +156,9 @@ begin
   select count(*) into v_inv from public.inventory_movements m where m.product_id=t.product_id;
   select stock_qty into v_stock from public.products where id=t.product_id;
 
-  -- A finalização normal desta OS cria uma única conta a receber. O relatório não cria outra.
-  if v_fin <> t.finance_before + 1 then raise exception 'Relatório/finalização criou quantidade financeira inesperada: %',v_fin; end if;
+  if v_fin <> t.finance_after_finalize then
+    raise exception 'Retry/relatório duplicou financeiro: antes do retry %, depois %',t.finance_after_finalize,v_fin;
+  end if;
   if v_inv <> t.inventory_before then raise exception 'Relatório movimentou estoque'; end if;
   if v_stock <> t.stock_before then raise exception 'Relatório alterou saldo de estoque'; end if;
 end $$;
