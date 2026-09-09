@@ -5,7 +5,9 @@ import test from 'node:test';
 const migration=readFileSync('supabase/0082_field_workflow_service_report.sql','utf8');
 const api=readFileSync('src/lib/workOrderMemoryV2Api.js','utf8');
 const pdf=readFileSync('src/lib/serviceReportPdf.js','utf8');
-const screen=readFileSync('src/screens/v2/WorkOrderMemoryV2.jsx','utf8');
+// Wave 4A compõe a tela endurecida anterior como Base. O contrato Wave 2 deve
+// verificar a composição inteira, não assumir que tudo continua em um único arquivo.
+const screen=readFileSync('src/screens/v2/WorkOrderMemoryV2.jsx','utf8')+'\n'+readFileSync('src/screens/v2/WorkOrderMemoryBaseV2.jsx','utf8');
 const sqlRunner=readFileSync('scripts/run-sql-rls-ci.sh','utf8');
 
 const compact=(s)=>s.replace(/\s+/g,' ');
