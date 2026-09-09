@@ -18,6 +18,7 @@ create temp table zt_fw2 (
 ) on commit drop;
 insert into zt_fw2 default values;
 grant select,update on zt_fw2 to authenticated;
+grant select on zt_fw2 to service_role;
 
 -- ---------------------------------------------------------------- fixtures: owner A
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
