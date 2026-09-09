@@ -43,7 +43,9 @@ test('client and quote V2 screens use dynamic viewport and touch-safe actions',(
   assert.match(clients,/min-h-11 min-w-11/);
   assert.match(clients,/min-h-11 flex-1 items-center justify-center/);
 
-  const authoring=read('src/screens/v2/QuoteAIV2.jsx');
+  // Wave 4A wraps the hardened quote authoring screen and keeps the previous
+  // implementation as QuoteAIBaseV2. Verify the composed screen contract.
+  const authoring=read('src/screens/v2/QuoteAIV2.jsx')+'\n'+read('src/screens/v2/QuoteAIBaseV2.jsx');
   assert.match(authoring,/MOBILE HOMOLOGATION · quote authoring · wave 2/);
   assert.match(authoring,/max-h-\[92dvh\]/);
   assert.match(authoring,/min-h-11 items-center justify-center/);
