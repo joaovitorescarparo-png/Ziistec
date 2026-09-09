@@ -120,8 +120,9 @@ apply(
       [
         'className="mt-4 grid grid-cols-2 gap-3"',
         'className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2"',
+        'className="mt-4 grid grid-cols-1 gap-3 min-[390px]:grid-cols-2"',
       ],
-      'className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2"',
+      'className="mt-4 grid grid-cols-1 gap-3 min-[390px]:grid-cols-2"',
       'wave6 evidence gallery narrow layout',
     );
     return src;
