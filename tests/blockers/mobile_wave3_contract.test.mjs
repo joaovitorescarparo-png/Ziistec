@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 const read=(p)=>readFileSync(p,'utf8');
 
 test('work-order memory remains field-safe and mobile touch-safe',()=>{
-  const src=read('src/screens/v2/WorkOrderMemoryV2.jsx');
+  // Wave 4A composes the prior hardened memory screen as WorkOrderMemoryBaseV2.
+  const src=read('src/screens/v2/WorkOrderMemoryV2.jsx')+'\n'+read('src/screens/v2/WorkOrderMemoryBaseV2.jsx');
   assert.match(src,/MOBILE HOMOLOGATION · work order memory · wave 3/);
   assert.match(src,/min-h-\[100dvh\] overflow-x-hidden/);
   assert.match(src,/min-h-11 min-w-11/);
