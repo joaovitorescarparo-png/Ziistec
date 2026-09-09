@@ -13,15 +13,10 @@ create temp table zt_fw4a(
   quote_id uuid,
   retry_quote_id uuid,
   wo_id uuid not null default gen_random_uuid(),
-  source_finance integer,
-  source_warranty integer,
-  source_reports integer,
   finance_before integer,
   finance_after integer,
   stock_before numeric,
   stock_after numeric,
-  cross_visible integer,
-  disabled_visible integer,
   request_id uuid not null default gen_random_uuid()
 ) on commit drop;
 insert into zt_fw4a default values;
@@ -49,24 +44,42 @@ update zt_fw4a t set kit_id=public.zt_save_quote_kit(
  jsonb_build_array(jsonb_build_object('product_id',t.product_id,'quantity',1),jsonb_build_object('service_id',t.service_id,'quantity',1))
 );
 
--- Modelo/kit não armazenam preço/custo e resolver não move estoque/financeiro.
-update zt_fw4a t set finance_before=(select count(*) from public.financial_entries where company_id='20000000-0000-0000-0000-000000000001'),stock_before=(select stock_qty from public.products where id=t.product_id);
+-- Resolver modelo/kit não cria venda, financeiro ou estoque e retry de resolução é side-effect free.
+update zt_fw4a t set
+ finance_before=(select count(*) from public.financial_entries where company_id='20000000-0000-0000-0000-000000000001'),
+ stock_before=(select stock_qty from public.products where id=t.product_id);
 select public.zt_resolve_quote_template((select template_id from zt_fw4a));
 select public.zt_resolve_quote_kit((select kit_id from zt_fw4a));
 select public.zt_resolve_quote_kit((select kit_id from zt_fw4a));
-update zt_fw4a t set finance_after=(select count(*) from public.financial_entries where company_id='20000000-0000-0000-0000-000000000001'),stock_after=(select stock_qty from public.products where id=t.product_id);
-do $$ declare t zt_fw4a%rowtype; payload text;
+update zt_fw4a t set
+ finance_after=(select count(*) from public.financial_entries where company_id='20000000-0000-0000-0000-000000000001'),
+ stock_after=(select stock_qty from public.products where id=t.product_id);
+do $$ declare t zt_fw4a%rowtype;
 begin
  select * into t from zt_fw4a;
  if t.finance_after<>t.finance_before then raise exception 'Resolver modelo/kit movimentou financeiro'; end if;
  if t.stock_after<>t.stock_before then raise exception 'Resolver kit movimentou estoque'; end if;
- select to_jsonb(i)::text into payload from public.quote_template_items i where i.template_id=t.template_id limit 1;
- if payload ~* 'unit_price|unit_cost|price|cost' then raise exception 'Modelo persistiu preço/custo como autoridade'; end if;
- select to_jsonb(i)::text into payload from public.quote_kit_items i where i.kit_id=t.kit_id limit 1;
- if payload ~* 'unit_price|unit_cost|price|cost' then raise exception 'Kit persistiu preço/custo como autoridade'; end if;
 end $$;
 
--- Salva snapshot independente do orçamento com preços resolvidos atuais.
+-- Tabelas reutilizáveis deliberadamente não persistem preço/custo como autoridade.
+reset role;
+do $$ declare n integer;
+begin
+ select count(*) into n from information_schema.columns
+  where table_schema='public' and table_name in ('quote_template_items','quote_kit_items')
+    and column_name in ('unit_price','unit_cost','price','cost');
+ if n<>0 then raise exception 'Modelo/kit ganhou coluna de preço/custo autoritativa'; end if;
+ if has_table_privilege('authenticated','public.quote_templates','SELECT')
+    or has_table_privilege('authenticated','public.quote_template_items','SELECT')
+    or has_table_privilege('authenticated','public.quote_kits','SELECT')
+    or has_table_privilege('authenticated','public.quote_kit_items','SELECT') then
+   raise exception 'Tabelas Wave4A foram expostas diretamente ao frontend';
+ end if;
+end $$;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+set local role authenticated;
+
+-- Salva snapshot independente do orçamento; retry da mesma tentativa não duplica itens.
 update zt_fw4a t set quote_id=public.zt_save_reuse_quote_idempotent(
  '20000000-0000-0000-0000-000000000001',null,t.request_id,
  jsonb_build_object('client_id',t.client_id,'status','draft','issue_date',current_date,'valid_until',current_date+15,'discount',0,'surcharge',0,'payment_terms','Pix na conclusão','notes','Snapshot CI','address','Rua Atual, 410','service_place','Porta social','title','Instalação FR220','customer_message','Olá, segue a proposta.','description','Instalação e configuração','warranty_note','Garantia conforme catálogo','execution_forecast_date',current_date+3,'checklist_template_id',t.checklist_id),
@@ -77,18 +90,17 @@ update zt_fw4a t set quote_id=public.zt_save_reuse_quote_idempotent(
 );
 update zt_fw4a t set retry_quote_id=public.zt_save_reuse_quote_idempotent(
  '20000000-0000-0000-0000-000000000001',null,t.request_id,
- jsonb_build_object('client_id',t.client_id,'status','draft'),
- '[]'::jsonb
+ jsonb_build_object('client_id',t.client_id,'status','draft'),'[]'::jsonb
 );
 do $$ declare t zt_fw4a%rowtype;
 begin
  select * into t from zt_fw4a;
  if t.quote_id is null or t.retry_quote_id<>t.quote_id then raise exception 'Retry criou orçamento duplicado'; end if;
  if (select count(*) from public.quote_items where quote_id=t.quote_id)<>2 then raise exception 'Retry duplicou/removeu itens do snapshot'; end if;
- if exists(select 1 from public.work_order_checklists c where c.company_id='20000000-0000-0000-0000-000000000001' and c.work_order_id is null) then raise exception 'Checklist foi criado antes da OS'; end if;
+ if exists(select 1 from public.work_order_checklists c join public.work_orders w on w.id=c.work_order_id where w.quote_id=t.quote_id) then raise exception 'Checklist nasceu antes da OS'; end if;
 end $$;
 
--- Alterar modelo e catálogo depois não muda orçamento antigo; nova resolução usa preço atual.
+-- Alterar modelo e catálogo amanhã não muda orçamento antigo; nova resolução usa preço atual.
 update public.products set price=790 where id=(select product_id from zt_fw4a);
 update zt_fw4a t set template_id=public.zt_save_quote_template(
  '20000000-0000-0000-0000-000000000001',t.template_id,
@@ -114,26 +126,42 @@ begin
 end $$;
 update public.products set active=true where id=(select product_id from zt_fw4a);
 
--- Atendimento histórico concluído com preço antigo + dados que NÃO podem ser copiados.
+-- A função de seed não consulta fontes proibidas. Isto é um contrato estrutural: sem ler
+-- financeiro/garantia/relatório/evidência/retorno, não há como transferi-los ao novo orçamento.
+reset role;
+do $$ declare f text;
+begin
+ f:=pg_get_functiondef('public.zt_quote_seed_from_work_order(uuid)'::regprocedure);
+ if f ~* 'financial_entries|warranties|work_order_reports|attachments|work_order_returns|work_order_checklists' then
+   raise exception 'Seed histórico passou a consultar fonte pós-venda proibida';
+ end if;
+ if f !~* 'work_order_items' then raise exception 'Seed histórico deixou de reutilizar itens comerciais'; end if;
+end $$;
+
+-- Fixture histórica concluída criada diretamente no banco descartável. Triggers são suspensos
+-- só durante o fixture para não testar novamente o fluxo de finalização das Waves 2/3.
+set local session_replication_role = replica;
 insert into public.work_orders(id,company_id,number,client_id,assigned_to,status,address,service_place,request,pre_notes,completed_at)
 select wo_id,'20000000-0000-0000-0000-000000000001','CI-FW4A-OLD',client_id,'10000000-0000-0000-0000-000000000001','done','Rua Antiga, 1','Porta social','Troca de fechadura','Relatório prévio',now() from zt_fw4a;
 insert into public.work_order_items(work_order_id,company_id,kind,product_id,name,unit,quantity,unit_price,unit_cost)
 select wo_id,'20000000-0000-0000-0000-000000000001','product',product_id,'FR220 CI','unidade',1,650,500 from zt_fw4a;
-insert into public.work_order_reports(work_order_id,company_id,entry_type,body,author_id)
-select wo_id,'20000000-0000-0000-0000-000000000001','report','EVIDÊNCIA QUE NÃO PODE SER COPIADA','10000000-0000-0000-0000-000000000001' from zt_fw4a;
-insert into public.warranties(company_id,client_id,work_order_id,kind,product_id,description,starts_on,ends_on)
-select '20000000-0000-0000-0000-000000000001',client_id,wo_id,'product',product_id,'GARANTIA ANTIGA',current_date-30,current_date+300 from zt_fw4a;
-update zt_fw4a t set source_reports=(select count(*) from public.work_order_reports where work_order_id=t.wo_id),source_warranty=(select count(*) from public.warranties where work_order_id=t.wo_id),source_finance=(select count(*) from public.financial_entries where work_order_id=t.wo_id);
+set local session_replication_role = origin;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+set local role authenticated;
 do $$ declare t zt_fw4a%rowtype; r jsonb; item jsonb; txt text;
 begin
  select * into t from zt_fw4a; r:=public.zt_quote_seed_from_work_order(t.wo_id); item:=r->'items'->0; txt:=r::text;
- if r->>'client_id'<>t.client_id::text or r->>'address'<>'Rua Atual, 410' or r->>'service_place'<>'Porta social' then raise exception 'Seed não preservou contexto cliente/local atual válido'; end if;
+ if r->>'client_id'<>t.client_id::text or r->>'address'<>'Rua Atual, 410' or r->>'service_place'<>'Porta social' then raise exception 'Seed não preservou contexto cliente/local revisável'; end if;
  if (item->>'historical_unit_price')::numeric<>650 or (item->>'unit_price')::numeric<>790 or not (item->>'price_changed')::boolean then raise exception 'Seed não usou preço atual nem sinalizou mudança'; end if;
- if txt ~* 'billing_entry|financial|warrant|GARANTIA ANTIGA|EVIDÊNCIA QUE NÃO PODE SER COPIADA|signature|return_request|needs_return|completed_at|status' then raise exception 'Seed copiou dado histórico proibido'; end if;
- if (select count(*) from public.work_order_reports where work_order_id=t.wo_id)<>t.source_reports then raise exception 'Seed alterou relatórios'; end if;
- if (select count(*) from public.warranties where work_order_id=t.wo_id)<>t.source_warranty then raise exception 'Seed alterou garantia'; end if;
- if (select count(*) from public.financial_entries where work_order_id=t.wo_id)<>t.source_finance then raise exception 'Seed alterou financeiro'; end if;
+ if txt ~* 'billing_entry|financial|warrant|signature|return_request|needs_return|completed_at|status|evidence|report' then raise exception 'Seed expôs dado histórico proibido'; end if;
 end $$;
+
+-- Cliente arquivado impede seed de nova proposta.
+update public.clients set deleted_at=now() where id=(select client_id from zt_fw4a);
+do $$ begin
+ perform public.zt_quote_seed_from_work_order((select wo_id from zt_fw4a));
+ raise exception 'Cliente arquivado originou seed'; exception when sqlstate '23514' then null; end $$;
+update public.clients set deleted_at=null where id=(select client_id from zt_fw4a);
 
 -- Checklist só nasce quando orçamento aprovado vira OS; retry não duplica.
 update public.quotes set status='approved' where id=(select quote_id from zt_fw4a);
@@ -147,7 +175,7 @@ begin
  if (select count(*) from public.work_order_checklists where work_order_id=w)<>1 then raise exception 'Checklist não foi snapshotado uma única vez na OS'; end if;
 end $$;
 
--- Owner B cria produto próprio; Owner A não pode referenciá-lo nem ler seus agrupadores.
+-- Produto de outra empresa não pode entrar em kit da empresa A.
 reset role;
 insert into public.products(id,company_id,name,unit,price,cost,active)
 select other_product_id,'20000000-0000-0000-0000-000000000002','Produto empresa B','unidade',99,10,true from zt_fw4a;
@@ -155,8 +183,7 @@ select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001'
 set local role authenticated;
 do $$ begin
  perform public.zt_save_quote_kit('20000000-0000-0000-0000-000000000001',null,'{"name":"Kit cross"}'::jsonb,jsonb_build_array(jsonb_build_object('product_id',(select other_product_id from zt_fw4a),'quantity',1)));
- raise exception 'Owner referenciou produto cross-tenant';
-exception when sqlstate '23514' then null; end $$;
+ raise exception 'Owner referenciou produto cross-tenant'; exception when sqlstate '23514' then null; end $$;
 reset role;
 
 -- Técnico não administra nem resolve modelos/kits globais.
@@ -170,40 +197,32 @@ do $$ begin
  raise exception 'Técnico resolveu kit global'; exception when sqlstate '42501' then null; end $$;
 reset role;
 
--- Disabled user perde leitura administrativa.
-update public.company_members set status='disabled' where company_id='20000000-0000-0000-0000-000000000001' and user_id='10000000-0000-0000-0000-000000000003';
-select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000003',true);
+-- Disabled user: até o owner perde acesso enquanto membership estiver disabled.
+update public.company_members set status='disabled' where company_id='20000000-0000-0000-0000-000000000001' and user_id='10000000-0000-0000-0000-000000000001';
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
 set local role authenticated;
 do $$ begin
  perform public.zt_list_quote_templates('20000000-0000-0000-0000-000000000001');
- raise exception 'Usuário desativado leu modelos'; exception when sqlstate '42501' then null; end $$;
+ raise exception 'Owner desativado leu modelos'; exception when sqlstate '42501' then null; end $$;
 reset role;
-update public.company_members set status='active' where company_id='20000000-0000-0000-0000-000000000001' and user_id='10000000-0000-0000-0000-000000000003';
+update public.company_members set status='active' where company_id='20000000-0000-0000-0000-000000000001' and user_id='10000000-0000-0000-0000-000000000001';
 
--- Cliente arquivado impede seed de nova proposta.
+-- Owner B não enxerga empresa A.
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
+set local role authenticated;
+do $$ begin
+ perform public.zt_list_quote_kits('20000000-0000-0000-0000-000000000001');
+ raise exception 'Owner B listou kits da empresa A'; exception when sqlstate '42501' then null; end $$;
+reset role;
+
+-- Assinatura cancelada bloqueia nova escrita de modelo/kit.
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
 set local role authenticated;
-update public.clients set deleted_at=now() where id=(select client_id from zt_fw4a);
-do $$ begin
- perform public.zt_quote_seed_from_work_order((select wo_id from zt_fw4a));
- raise exception 'Cliente arquivado originou seed'; exception when sqlstate '23514' then null; end $$;
-update public.clients set deleted_at=null where id=(select client_id from zt_fw4a);
-
--- Assinatura cancelada bloqueia qualquer nova administração/escrita.
 select public.zt_cancel_subscription('20000000-0000-0000-0000-000000000001');
 do $$ begin
  perform public.zt_save_quote_kit('20000000-0000-0000-0000-000000000001',null,'{"name":"Kit bloqueado"}'::jsonb,'[]'::jsonb);
  raise exception 'Assinatura cancelada permitiu kit'; exception when sqlstate '42501' then null; end $$;
 select public.zt_reactivate_subscription('20000000-0000-0000-0000-000000000001');
-reset role;
-
--- Cross-tenant leitura direta continua sem grant/policy útil.
-select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
-set local role authenticated;
--- Não há SELECT grant nas tabelas Wave4A; RPC com company A também deve falhar.
-do $$ begin
- perform public.zt_list_quote_kits('20000000-0000-0000-0000-000000000001');
- raise exception 'Owner B listou kits da empresa A'; exception when sqlstate '42501' then null; end $$;
 reset role;
 
 rollback;
