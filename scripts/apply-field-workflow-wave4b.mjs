@@ -50,8 +50,9 @@ function patchMemory(){
 
 function patchLegacy(){
   const path='src/legacy/ZiisTecApp.jsx';let s=read(path);if(s.includes(MARK)){console.log('Legacy shell: Wave 4B already applied');return;}
-  must(s,'import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";',path);
-  s=s.replace('import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";','import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";\nimport GlobalSearchModal from "../components/GlobalSearchModal";');
+  const importAnchor='import { mensagemErro } from "../lib/supabase";';
+  must(s,importAnchor,'legacy stable import');
+  s=s.replace(importAnchor,'import GlobalSearchModal from "../components/GlobalSearchModal";\n'+importAnchor);
   s=s.replace('Buscar cliente, orçamento, OS…','Buscar cliente, OS, produto, serial...');
   must(s,'{busca && <BuscaGlobal onClose={() => setBusca(false)} {...props} />}','legacy search render');
   s=s.replace('{busca && <BuscaGlobal onClose={() => setBusca(false)} {...props} />}','{busca && real && papel === "proprietario" ? <GlobalSearchModal companyId={empresaId} onClose={() => setBusca(false)} onClient={abrirCliente} onWorkOrder={abrirOS} onQuote={abrirOrc} onWarranty={abrirGarantia} onLocation={(item)=>{ if(item.work_order_id) abrirOS(item.work_order_id); else abrirCliente(item.client_id); return true; }} onProduct={(id)=>{ const u=new URL(window.location.href); u.searchParams.set("v2","produtos"); u.searchParams.set("product",id); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} /> : busca ? <BuscaGlobal onClose={() => setBusca(false)} {...props} /> : null}');
