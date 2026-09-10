@@ -1,5 +1,5 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Search,X,UserRound,MapPin,ClipboardList,FileText,Package,Wrench,ShieldCheck,Loader2,ChevronRight} from 'lucide-react';
+import {Search,X,UserRound,MapPin,ClipboardList,FileText,Package,Wrench,ShieldCheck,Loader2,ChevronRight,CalendarClock} from 'lucide-react';
 import {buscarGlobalV2DB} from '../lib/globalSearchV2Api';
 
 const groups=[
@@ -8,7 +8,7 @@ const groups=[
 ];
 const norm=v=>String(v||'').replace(/\D/g,'');
 
-export default function GlobalSearchModal({companyId,onClose,onClient,onWorkOrder,onQuote,onWarranty,onProduct,onLocation}){
+export default function GlobalSearchModal({companyId,onClose,onClient,onWorkOrder,onQuote,onWarranty,onProduct,onLocation,onPostSale}){
   const [query,setQuery]=useState('');
   const [items,setItems]=useState([]);
   const [loading,setLoading]=useState(false);
@@ -41,7 +41,7 @@ export default function GlobalSearchModal({companyId,onClose,onClient,onWorkOrde
   const grouped=useMemo(()=>Object.fromEntries(groups.map(([type])=>[type,items.filter(x=>x.type===type)])),[items]);
   const open=item=>{
     if(item.type==='client')return onClient?.(item.client_id||item.id);
-    if(item.type==='location')return onLocation?.(item)??onClient?.(item.client_id);
+    if(item.type==='location'){if(onLocation){onLocation(item);return;}return onClient?.(item.client_id);}
     if(item.type==='work_order')return onWorkOrder?.(item.work_order_id||item.id);
     if(item.type==='quote')return onQuote?.(item.id);
     if(item.type==='equipment')return onWorkOrder?.(item.work_order_id);
@@ -60,8 +60,9 @@ export default function GlobalSearchModal({companyId,onClose,onClient,onWorkOrde
 
   return <div className="fixed inset-0 z-[12000] flex items-end justify-center bg-slate-950/60 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Busca global" onMouseDown={e=>{if(e.target===e.currentTarget)onClose?.();}}>
     <div className="flex max-h-[92dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
-      <header className="flex min-h-16 items-center gap-3 border-b border-slate-100 p-3 sm:p-4">
+      <header className="flex min-h-16 items-center gap-2 border-b border-slate-100 p-3 sm:gap-3 sm:p-4">
         <div className="relative min-w-0 flex-1"><Search className="absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" aria-hidden="true"/><input ref={inputRef} value={query} onChange={e=>setQuery(e.target.value.slice(0,120))} placeholder="Buscar cliente, OS, produto, serial..." className="min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-base text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"/></div>
+        {onPostSale&&<button onClick={onPostSale} className="inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 text-emerald-800 hover:bg-emerald-100" aria-label="Abrir pós-venda" title="Pós-venda"><CalendarClock className="h-5 w-5"/><span className="hidden md:inline text-sm font-semibold">Pós-venda</span></button>}
         <button onClick={onClose} className="min-h-12 min-w-12 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50" aria-label="Fechar busca"><X className="mx-auto h-5 w-5"/></button>
       </header>
 
