@@ -2,9 +2,9 @@ const num=(v,fallback=0)=>{const n=Number(v);return Number.isFinite(n)?n:fallbac
 
 export function emptyReuseSeed(defaults={}){
   return {
-    sourceKind:'blank',sourceId:null,clientId:null,address:'',servicePlace:'',title:'',customerMessage:'',description:'',
-    paymentTerms:defaults.paymentTerms||'',notes:defaults.notes||'',warrantyNote:'',validityDays:num(defaults.validityDays,15)||15,
-    executionForecastDate:'',checklistTemplateId:null,items:[],discount:0,surcharge:0,showProductImages:false,
+    sourceKind:'blank',sourceId:null,clientId:null,clientLocationId:null,clientLocationName:'',clientLocationAddress:'',legacyServicePlace:'',
+    address:'',servicePlace:'',title:'',customerMessage:'',description:'',paymentTerms:defaults.paymentTerms||'',notes:defaults.notes||'',
+    warrantyNote:'',validityDays:num(defaults.validityDays,15)||15,executionForecastDate:'',checklistTemplateId:null,items:[],discount:0,surcharge:0,showProductImages:false,
   };
 }
 
@@ -43,9 +43,12 @@ export function appendKitSeed(current,resolved){
 }
 
 export function seedFromWorkOrder(resolved,defaults={}){
+  const confirmed=Boolean(resolved?.location_confirmed&&resolved?.client_location_id);
   return {...emptyReuseSeed(defaults),sourceKind:'work_order',sourceId:resolved?.source_id||null,sourceNumber:resolved?.source_number||'',
-    clientId:resolved?.client_id||null,address:resolved?.address||'',servicePlace:resolved?.service_place||'',description:resolved?.description||'',
-    items:(resolved?.items||[]).map(normalizeReuseItem)};
+    clientId:resolved?.client_id||null,clientLocationId:confirmed?resolved.client_location_id:null,
+    clientLocationName:confirmed?(resolved?.client_location_name||''):'',clientLocationAddress:confirmed?(resolved?.client_location_address||''):'',
+    legacyServicePlace:resolved?.legacy_service_place||'',address:resolved?.address||'',servicePlace:confirmed?(resolved?.client_location_name||''):'',
+    description:resolved?.description||'',items:(resolved?.items||[]).map(normalizeReuseItem)};
 }
 
 export function hasBlockingReuseItems(seed){
