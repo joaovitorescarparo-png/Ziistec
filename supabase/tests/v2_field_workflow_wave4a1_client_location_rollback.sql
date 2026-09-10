@@ -39,7 +39,9 @@ do $$ declare t zt_fw4a1%rowtype;
 begin
   select * into t from zt_fw4a1;
   if t.location_a is null or t.location_retry<>t.location_a then raise exception 'Retry de local duplicou ou trocou o vínculo'; end if;
-  if (select count(*) from public.client_locations where company_id='20000000-0000-0000-0000-000000000001' and client_id=t.client_a and location_key=zt_private.zt_normalize_location_key('Porta social'))<>1 then raise exception 'Local duplicado em retry'; end if;
+  -- O teste não executa o helper privado como authenticated: prova o resultado público esperado
+  -- mantendo zt_private corretamente selado para clientes Data API.
+  if (select count(*) from public.client_locations where company_id='20000000-0000-0000-0000-000000000001' and client_id=t.client_a and location_key='porta social')<>1 then raise exception 'Local duplicado em retry'; end if;
 end $$;
 
 reset role;
