@@ -10,6 +10,8 @@ export async function resolverModeloOrcamentoV2DB(templateId){return check(await
 export async function resolverKitOrcamentoV2DB(kitId){return check(await supabase.rpc('zt_resolve_quote_kit',{p_kit:kitId}));}
 export async function listarAtendimentosReutilizaveisV2DB(companyId){return check(await supabase.rpc('zt_list_reusable_work_orders',{p_company:companyId}))||[];}
 export async function resolverAtendimentoAnteriorV2DB(workOrderId){return check(await supabase.rpc('zt_quote_seed_from_work_order',{p_work_order:workOrderId}));}
+export async function listarLocaisClienteOrcamentoV2DB(clientId){return check(await supabase.rpc('zt_list_client_locations_for_quote',{p_client:clientId}))||[];}
+export async function criarLocalClienteOrcamentoV2DB({clientId,name,address=null}){return check(await idempotentWrite(()=>supabase.rpc('zt_create_client_location_for_quote',{p_client:clientId,p_name:name,p_address:address})));}
 
 const adminItems=(items=[])=>items.map(x=>({service_id:x.serviceId||x.service_id||null,product_id:x.productId||x.product_id||null,quantity:Number(x.quantity||1),notes:String(x.notes||'').trim()||null}));
 export async function salvarModeloOrcamentoV2DB({companyId,id=null,payload,items=[]}){
@@ -20,12 +22,15 @@ export async function salvarKitOrcamentoV2DB({companyId,id=null,payload,items=[]
 }
 
 export function novoQuoteReuseRequestId(){return newId();}
-export async function salvarOrcamentoReutilizavelV2DB({companyId,quoteId=null,requestId,row,items}){
+export async function salvarOrcamentoReutilizavelV2DB({companyId,quoteId=null,requestId,sourceWorkOrderId=null,row,items}){
   const payload=(items||[]).map((item,index)=>({
     kind:item.kind||'free',service_id:item.serviceId||null,product_id:item.productId||null,name:String(item.name||'Item').slice(0,500),
     unit:String(item.unit||'unidade').slice(0,50),quantity:Number(item.quantity||1),unit_price:Number(item.unitPrice||0),unit_cost:Number(item.unitCost||0),notes:String(item.notes||'').trim()||null,position:index,
   }));
-  const id=check(await idempotentWrite(()=>supabase.rpc('zt_save_reuse_quote_idempotent',{p_company:companyId,p_quote:quoteId,p_request:requestId,p_row:row,p_items:payload})));
+  const call=sourceWorkOrderId
+    ?()=>supabase.rpc('zt_save_quote_from_work_order_idempotent',{p_work_order:sourceWorkOrderId,p_location:row?.client_location_id||null,p_request:requestId,p_row:row,p_items:payload})
+    :()=>supabase.rpc('zt_save_reuse_quote_idempotent',{p_company:companyId,p_quote:quoteId,p_request:requestId,p_row:row,p_items:payload});
+  const id=check(await idempotentWrite(call));
   const q=await supabase.from('quotes').select('id,number').eq('id',id).eq('company_id',companyId).single();
   if(q.error) throw q.error;
   return q.data;
