@@ -82,12 +82,12 @@ update zt_fw4a1 t set quote_id=public.zt_save_quote_from_work_order_idempotent(
   t.legacy_wo,t.location_a,t.request_id,
   jsonb_build_object('client_id',t.client_a,'status','draft','issue_date',current_date,'valid_until',current_date+10,'address','FORJADO','service_place','FORJADO','title','Reuso com local'),
   jsonb_build_array(jsonb_build_object('kind','service','service_id',t.service_id,'name','Serviço FW4A1','unit','serviço','quantity',1,'unit_price',250,'unit_cost',50))
-) from zt_fw4a1 t;
+);
 update zt_fw4a1 t set retry_quote_id=public.zt_save_quote_from_work_order_idempotent(
   t.legacy_wo,t.location_a,t.request_id,
   jsonb_build_object('client_id',t.client_a,'status','draft'),
   '[]'::jsonb
-) from zt_fw4a1 t;
+);
 do $$ declare t zt_fw4a1%rowtype;
 begin
   select * into t from zt_fw4a1;
