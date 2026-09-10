@@ -56,14 +56,7 @@ function patchLegacy(){
   s=s.replace('Buscar cliente, orçamento, OS…','Buscar cliente, OS, produto, serial...');
   const legacySearch='<BuscaGlobal onClose={() => setBusca(false)} {...props} />';
   must(s,legacySearch,'legacy search component');
-  s=s.replace(legacySearch,'(real && papel === "proprietario" ? <GlobalSearchModal companyId={empresaId} onClose={() => setBusca(false)} onClient={abrirCliente} onWorkOrder={abrirOS} onQuote={abrirOrc} onWarranty={abrirGarantia} onLocation={(item)=>{ if(item.work_order_id) abrirOS(item.work_order_id); else abrirCliente(item.client_id); return true; }} onProduct={(id)=>{ const u=new URL(window.location.href); u.searchParams.set("v2","produtos"); u.searchParams.set("product",id); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} /> : <BuscaGlobal onClose={() => setBusca(false)} {...props} />)');
-  must(s,'function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso })',path);
-  s=s.replace('function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso })','function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, abrirRecursoV2 })');
-  const head='<PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`} />';
-  must(s,head,'Guarantees PageHead');
-  s=s.replace(head,'<PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`} action={real && abrirRecursoV2 ? <Btn icon={CalendarClock} onClick={()=>abrirRecursoV2("pos-venda")}>Pós-venda</Btn> : null} />');
-  must(s,'usuarioAtual, papel, permitido, empresaId, assinatura, equipe, usuarios,','legacy props');
-  s=s.replace('usuarioAtual, papel, permitido, empresaId, assinatura, equipe, usuarios,','usuarioAtual, papel, permitido, empresaId, assinatura, equipe, usuarios,\n    abrirRecursoV2: contexto?.abrirRecursoV2,');
+  s=s.replace(legacySearch,'(real && papel === "proprietario" ? <GlobalSearchModal companyId={empresaId} onClose={() => setBusca(false)} onClient={abrirCliente} onWorkOrder={abrirOS} onQuote={abrirOrc} onWarranty={abrirGarantia} onLocation={(item)=>{ if(item.work_order_id) abrirOS(item.work_order_id); else abrirCliente(item.client_id); return true; }} onPostSale={()=>{ const u=new URL(window.location.href); u.searchParams.set("v2","pos-venda"); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} onProduct={(id)=>{ const u=new URL(window.location.href); u.searchParams.set("v2","produtos"); u.searchParams.set("product",id); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} /> : <BuscaGlobal onClose={() => setBusca(false)} {...props} />)');
   write(path,`${s}\n/* ${MARK} */\n`);console.log('Legacy shell: applied Wave 4B integration');
 }
 
