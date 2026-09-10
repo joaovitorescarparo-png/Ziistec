@@ -20,7 +20,12 @@ create temp table zt_fw4b(
   check_policy uuid,
   warranty_policy uuid,
   disabled_policy uuid,
-  followup_id uuid
+  followup_id uuid,
+  finance_after_first integer,
+  warranty_after_first integer,
+  report_after_first integer,
+  inventory_after_first integer,
+  stock_after_first numeric
 ) on commit drop;
 insert into zt_fw4b default values;
 grant select,update on zt_fw4b to authenticated;
@@ -80,8 +85,12 @@ begin
   if not exists(select 1 from jsonb_array_elements(r->'items') x where x->>'type'='work_order' and (x->>'id')::uuid=t.wo_search) then raise exception 'OS não encontrada'; end if;
   r:=public.zt_global_operational_search('20000000-0000-0000-0000-000000000001','ORC-FW4B-0124',30,0);
   if not exists(select 1 from jsonb_array_elements(r->'items') x where x->>'type'='quote' and (x->>'id')::uuid=t.quote_a) then raise exception 'Orçamento não encontrado'; end if;
+  r:=public.zt_global_operational_search('20000000-0000-0000-0000-000000000001','Fechadura digital FW4B',30,0);
+  if not exists(select 1 from jsonb_array_elements(r->'items') x where x->>'type'='product' and (x->>'id')::uuid=t.product_a) then raise exception 'Produto não encontrado pelo nome'; end if;
   r:=public.zt_global_operational_search('20000000-0000-0000-0000-000000000001','INT-FR220-FW4B',30,0);
   if not exists(select 1 from jsonb_array_elements(r->'items') x where x->>'type'='product' and (x->>'id')::uuid=t.product_a) then raise exception 'SKU não encontrou produto'; end if;
+  r:=public.zt_global_operational_search('20000000-0000-0000-0000-000000000001','7891234567890',30,0);
+  if not exists(select 1 from jsonb_array_elements(r->'items') x where x->>'type'='product' and (x->>'id')::uuid=t.product_a) then raise exception 'Barcode não encontrou produto'; end if;
   r:=public.zt_global_operational_search('20000000-0000-0000-0000-000000000001','SERIAL-FW4B-ABC123',30,0);
   if not exists(select 1 from jsonb_array_elements(r->'items') x where x->>'type'='equipment' and (x->>'id')::uuid=t.equipment_a) then raise exception 'Serial não encontrou equipamento'; end if;
   if r::text ~* 'unit_cost|supplier|margin|financial' then raise exception 'Busca vazou campo privado'; end if;
@@ -115,11 +124,16 @@ reset role;
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
 set local role authenticated;
 update zt_fw4b t set check_policy=public.zt_save_post_sale_policy('20000000-0000-0000-0000-000000000001',null,'Check-in FW4B','check_in',7,true);
-update zt_fw4b t set warranty_policy=public.zt_save_post_sale_policy('20000000-0000-0000-0000-000000000001',null,'Garantia FW4B','warranty_expiring',15,true);
 update zt_fw4b t set disabled_policy=public.zt_save_post_sale_policy('20000000-0000-0000-0000-000000000001',null,'Manutenção pausada FW4B','maintenance',30,false);
 
--- Conclusão definitiva: compatibilidade followup_days + política ativa; retry não duplica.
-update public.work_orders set status='done',completed_at=now() where id=(select wo_follow from zt_fw4b);
+-- Conclusão definitiva: usa o fluxo oficial. Compatibilidade followup_days + política ativa.
+select public.zt_finalize_work_order_with_warranty_overrides(
+  (select wo_follow from zt_fw4b),
+  'Conclusão oficial FW4B',
+  null,null,7,'[]'::jsonb,'[]'::jsonb,null
+);
+set constraints all immediate;
+
 do $$ declare t zt_fw4b%rowtype; n integer; snap jsonb; due0 date;
 begin
   select * into t from zt_fw4b;
@@ -132,9 +146,48 @@ begin
   if snap->>'kind'<>'check_in' or (snap->>'days_offset')::integer<>7 then raise exception 'Snapshot da política incorreto'; end if;
   if due0<>current_date+7 then raise exception 'Data pós-venda incorreta'; end if;
 end $$;
-update public.work_orders set status='done' where id=(select wo_follow from zt_fw4b);
-do $$ declare t zt_fw4b%rowtype; n integer;
-begin select * into t from zt_fw4b; select count(*) into n from public.post_sale_followups where work_order_id=t.wo_follow; if n<>2 then raise exception 'Retry duplicou follow-up'; end if; end $$;
+
+-- Congela efeitos da primeira finalização para comparar com o retry real.
+update zt_fw4b t set
+  finance_after_first=(select count(*) from public.financial_entries f where f.work_order_id=t.wo_follow),
+  warranty_after_first=(select count(*) from public.warranties w where w.work_order_id=t.wo_follow),
+  report_after_first=(select count(*) from public.work_order_reports r where r.work_order_id=t.wo_follow and r.entry_type='service_report'),
+  inventory_after_first=(select count(*) from public.inventory_movements m where m.product_id=t.product_a),
+  stock_after_first=(select p.stock_qty from public.products p where p.id=t.product_a);
+
+do $$ declare t zt_fw4b%rowtype;
+begin
+  select * into t from zt_fw4b;
+  if t.finance_after_first<>1 then raise exception 'Finalização oficial não gerou exatamente um financeiro'; end if;
+  if t.warranty_after_first<>1 then raise exception 'Finalização oficial não gerou exatamente uma garantia'; end if;
+  if t.report_after_first<>1 then raise exception 'Finalização oficial não gerou exatamente um relatório'; end if;
+end $$;
+
+-- Retry: repete a mesma RPC oficial/idempotente; nenhum efeito pode duplicar.
+select public.zt_finalize_work_order_with_warranty_overrides(
+  (select wo_follow from zt_fw4b),
+  'Conclusão oficial FW4B',
+  null,null,7,'[]'::jsonb,'[]'::jsonb,null
+);
+set constraints all immediate;
+
+do $$ declare t zt_fw4b%rowtype; n integer; v_fin integer; v_war integer; v_rep integer; v_inv integer; v_stock numeric;
+begin
+  select * into t from zt_fw4b;
+  select count(*) into n from public.post_sale_followups where work_order_id=t.wo_follow;
+  select count(*) into v_fin from public.financial_entries f where f.work_order_id=t.wo_follow;
+  select count(*) into v_war from public.warranties w where w.work_order_id=t.wo_follow;
+  select count(*) into v_rep from public.work_order_reports r where r.work_order_id=t.wo_follow and r.entry_type='service_report';
+  select count(*) into v_inv from public.inventory_movements m where m.product_id=t.product_a;
+  select stock_qty into v_stock from public.products where id=t.product_a;
+  if n<>2 then raise exception 'Retry duplicou follow-up'; end if;
+  if (select count(*) from public.post_sale_followups where work_order_id=t.wo_follow and kind='service_review')<>1 then raise exception 'Retry duplicou services.followup_days'; end if;
+  if (select count(*) from public.post_sale_followups where work_order_id=t.wo_follow and policy_id=t.check_policy)<>1 then raise exception 'Retry duplicou policy follow-up'; end if;
+  if v_fin<>t.finance_after_first then raise exception 'Retry duplicou financeiro'; end if;
+  if v_war<>t.warranty_after_first then raise exception 'Retry duplicou garantia'; end if;
+  if v_rep<>t.report_after_first then raise exception 'Retry duplicou relatório'; end if;
+  if v_inv<>t.inventory_after_first or v_stock is distinct from t.stock_after_first then raise exception 'Retry duplicou ou alterou estoque'; end if;
+end $$;
 
 -- Editar política não reescreve evento já gerado/snapshot.
 do $$ declare t zt_fw4b%rowtype; old_due date; old_snap jsonb;
@@ -145,10 +198,18 @@ begin
   if (select due_on from public.post_sale_followups where id=t.followup_id)<>old_due or (select policy_snapshot from public.post_sale_followups where id=t.followup_id)<>old_snap then raise exception 'Edição de política reescreveu evento existente'; end if;
 end $$;
 
--- Visita de garantia não reinicia ciclo comercial.
-update public.work_orders set status='done',completed_at=now() where id=(select wo_warranty_visit from zt_fw4b);
+-- Visita de garantia usa o mesmo fluxo oficial e não reinicia ciclo comercial.
+select public.zt_finalize_work_order_with_warranty_overrides(
+  (select wo_warranty_visit from zt_fw4b),
+  'Conclusão oficial da visita em garantia FW4B',
+  null,null,7,'[]'::jsonb,'[]'::jsonb,null
+);
+set constraints all immediate;
 do $$ declare t zt_fw4b%rowtype;
 begin select * into t from zt_fw4b; if exists(select 1 from public.post_sale_followups where work_order_id=t.wo_warranty_visit) then raise exception 'Visita de garantia reiniciou pós-venda'; end if; end $$;
+
+-- Política de garantia é ativada só agora para isolar o ciclo comercial da OS anterior.
+update zt_fw4b t set warranty_policy=public.zt_save_post_sale_policy('20000000-0000-0000-0000-000000000001',null,'Garantia FW4B','warranty_expiring',15,true);
 
 -- Garantia: política relativa ao vencimento nasce uma vez e usa snapshot.
 reset role;
