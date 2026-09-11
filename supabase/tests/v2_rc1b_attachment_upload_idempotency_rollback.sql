@@ -1,7 +1,9 @@
 -- ZiisTec RC-1B — attachment idempotency + RLS matrix. Disposable CI/Staging only.
 begin;
 
--- Synthetic fixtures use the CI identities already provisioned by ci_local_seed.sql.
+-- Synthetic fixture setup is database bootstrap, not a behavioral write under test.
+-- Disable user triggers only while materializing fixtures, then restore them before assertions.
+set local session_replication_role = replica;
 insert into public.company_members(company_id,user_id,role,status,job_title)
 values ('20000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000004','technician','active','RC1B Tech B')
 on conflict (company_id,user_id) do update set role='technician',status='active';
@@ -15,6 +17,7 @@ insert into public.work_orders(id,company_id,number,client_id,status,assigned_to
  ('32000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000001','RC1B-A2','31000000-0000-0000-0000-000000000001','scheduled',null),
  ('32000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000001','RC1B-A3','31000000-0000-0000-0000-000000000001','done','10000000-0000-0000-0000-000000000003'),
  ('32000000-0000-0000-0000-000000000004','20000000-0000-0000-0000-000000000002','RC1B-B1','31000000-0000-0000-0000-000000000002','in_progress','10000000-0000-0000-0000-000000000004');
+set local session_replication_role = origin;
 
 create temp table rc1b_result(k text primary key, ok boolean, detail text) on commit drop;
 grant select,insert,update on rc1b_result to authenticated,anon;
