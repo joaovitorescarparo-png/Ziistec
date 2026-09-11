@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { baixarOrcamentoPDF, compartilharOrcamentoPDF, suportaCompartilharArquivo } from "../lib/quotePdf";
+import { baixarReciboPDF, compartilharReciboPDF, suportaCompartilharRecibo } from "../lib/reciboPdf";
 import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";
 import {
   LayoutDashboard, CalendarDays, Users, Wrench, FileText, ClipboardList,
@@ -10,10 +11,12 @@ import {
   Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles, Navigation,
   TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building,
 } from "lucide-react";
+import GlobalSearchModal from "../components/GlobalSearchModal";
 import { mensagemErro } from "../lib/supabase";
 import {
   recarregarSeguro, salvarClienteDB, salvarServicoDB, salvarProdutoDB, salvarOrcamentoDB,
   salvarOSDB, atualizarOSDB, finalizarOSDB, resolverPrecificacaoOSDB, baixarLancamentoDB, salvarLancamentoDB, atualizarStatusOrcamentoDB,
+  excluirRegistroDB,
 } from "../lib/dataApi";
 import {
   salvarCompraDB, duplicarOrcamentoDB, criarOSDeOrcamentoDB, abrirAtendimentoGarantiaDB,
@@ -27,6 +30,8 @@ import {
 import { cancelarAssinaturaDB, reativarAssinaturaDB } from "../lib/subscriptionApi";
 import { chamarIAReal } from "../lib/aiApi";
 import { resolverLogoEmpresaDB, persistirFotosOSDB } from "../lib/storageExtras";
+import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
+import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 
 /* ================================================================ helpers */
 const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -60,6 +65,11 @@ const resumoOS = (os) => os.itens.map((i) => i.nome).join(" · ")
   || (os.descricaoLivre || "").trim()
   || (os.emGarantia ? "atendimento em garantia" : "sem descrição");
 const num = (v) => { const n = parseFloat(String(v).replace(",", ".")); return Number.isFinite(n) ? n : 0; };
+const precoComAcrescimo = (custo, percentual) => Number((Math.max(0, num(custo)) * (1 + Math.max(0, num(percentual)) / 100)).toFixed(2));
+const acrescimoSobreCusto = (custo, preco) => {
+  const c = Math.max(0, num(custo));
+  return c > 0 ? Number((((Math.max(0, num(preco)) / c) - 1) * 100).toFixed(2)) : 0;
+};
 const soDigitos = (s) => (s || "").replace(/\D/g, "");
 const iniciais = (s = "") => s.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 const mapsUrl = (end) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(end || "")}`;
@@ -229,7 +239,7 @@ const ST_ASSINATURA = {
 /* permissões por papel. A lista é curta de propósito: dois papéis, regras claras. */
 const PERMISSOES = {
   proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "equipe", "config", "assinatura", "verValores", "todasOS"],
-  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais"],
+  tecnico: ["inicio", "ordens", "registrarMateriais", "vendaCampo"],
 };
 const pode = (papel, chave) => (PERMISSOES[papel] || []).includes(chave);
 
@@ -264,6 +274,7 @@ function Btn({ children, onClick, variant = "primary", size = "md", icon: Icon, 
     quiet: "bg-slate-100 text-slate-700 hover:bg-slate-200",
     ghost: "text-slate-600 hover:bg-slate-100",
     danger: "text-rose-700 hover:bg-rose-50",
+    dangerSolid: "bg-rose-600 text-white hover:bg-rose-700",
   };
   const sizes = { sm: "text-sm px-3 py-2", md: "text-sm px-4 py-3", lg: "text-base px-5 py-3.5" };
   return (
@@ -319,7 +330,45 @@ const Field = ({ label, children, hint, className }) => (
   </label>
 );
 
-const inputCls = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 transition focus:outline-none focus:ring-2 focus:ring-teal-600";
+const inputClsBase = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 transition focus:outline-none focus:ring-2 focus:ring-teal-600";
+
+/* Campo monetário brasileiro sem exigir digitação "por centavos".
+   Exemplos: 200 -> R$ 200,00; 20,50 -> R$ 20,50; 1.250,90 -> R$ 1.250,90.
+   O banco continua recebendo apenas número limpo. */
+function InputMoeda({ valor, onChange, className, ...resto }) {
+  const [foco, setFoco] = useState(false);
+  const [rascunho, setRascunho] = useState("");
+  const numero = Number(valor) || 0;
+  const formatado = numero.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const exibido = foco ? rascunho : formatado;
+
+  const interpretar = (texto) => {
+    let t = String(texto ?? "").replace(/R\$/gi, "").replace(/\s/g, "").replace(/[^0-9,.-]/g, "");
+    if (!t || t === "-" || t === "," || t === ".") return 0;
+    const temVirgula = t.includes(",");
+    if (temVirgula) t = t.replace(/\./g, "").replace(",", ".");
+    else if ((t.match(/\./g) || []).length > 1) t = t.replace(/\./g, "");
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.max(0, n) : 0;
+  };
+
+  return (
+    <div className="relative">
+      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-slate-400 pointer-events-none">R$</span>
+      <input
+        {...resto}
+        inputMode="decimal"
+        value={exibido}
+        onFocus={(e) => { setFoco(true); setRascunho(formatado); requestAnimationFrame(() => e.target.select?.()); }}
+        onBlur={() => setFoco(false)}
+        onChange={(e) => { setRascunho(e.target.value); onChange(interpretar(e.target.value)); }}
+        className={cx(inputClsBase, "pl-10 text-right tabular-nums", className)}
+      />
+    </div>
+  );
+}
+
+const inputCls = inputClsBase;
 const Input = (p) => <input {...p} className={cx(inputCls, p.className)} />;
 const Textarea = (p) => <textarea {...p} className={cx(inputCls, "resize-none leading-relaxed", p.className)} />;
 const Select = ({ children, ...p }) => <select {...p} className={cx(inputCls, "appearance-none", p.className)}>{children}</select>;
@@ -329,7 +378,7 @@ function Modal({ open, onClose, title, sub, children, footer, wide }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
-      <div className={cx("relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[92vh] sm:max-h-[88vh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
+      <div className={cx("relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[92dvh] sm:max-h-[88dvh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
         <div className="flex items-start justify-between gap-4 px-5 sm:px-7 pt-6 pb-4">
           <div>
             <h3 className="text-lg font-semibold text-slate-900 tracking-tight">{title}</h3>
@@ -349,14 +398,14 @@ function Confirm({ estado, onClose }) {
   return (
     <Modal open onClose={onClose} title={estado.titulo}
       footer={<><Btn variant="ghost" onClick={onClose}>Voltar</Btn>
-        <Btn variant="dark" onClick={() => { estado.acao(); onClose(); }}>{estado.confirmar}</Btn></>}>
+        <Btn variant={estado.perigo ? "dangerSolid" : "dark"} onClick={() => { estado.acao(); onClose(); }}>{estado.confirmar}</Btn></>}>
       <p className="text-[15px] text-slate-600 leading-relaxed">{estado.texto}</p>
     </Modal>
   );
 }
 
 const PageHead = ({ title, sub, action }) => (
-  <div className="flex items-start justify-between gap-4 mb-7">
+  <div className="flex flex-col gap-4 mb-7 min-[390px]:flex-row min-[390px]:items-start min-[390px]:justify-between">
     <div>
       <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{title}</h1>
       {sub && <p className="text-slate-500 mt-1.5 text-[15px]">{sub}</p>}
@@ -535,7 +584,7 @@ async function chamarIA(prompt) {
 
 const promptOrcamento = ({ fala, clientes, servicos, produtos, rascunho, comando }) => `Você interpreta pedidos de orçamento de um prestador de serviços brasileiro e devolve APENAS JSON, sem markdown e sem comentários.
 
-CATÁLOGO DE CLIENTES: ${JSON.stringify(clientes.map((c) => ({ id: c.id, nome: c.fantasia || c.nome })))}
+CATÁLOGO DE CLIENTES: ${JSON.stringify(clientes.filter((c) => !c.excluidoEm).map((c) => ({ id: c.id, nome: c.fantasia || c.nome })))}
 CATÁLOGO DE SERVIÇOS: ${JSON.stringify(servicos.filter((s) => s.ativo).map((s) => ({ id: s.id, nome: s.nome, preco: s.preco, unidade: s.unidade })))}
 CATÁLOGO DE PRODUTOS: ${JSON.stringify(produtos.filter((p) => p.ativo).map((p) => ({ id: p.id, nome: `${p.nome} ${p.marca || ""} ${p.modelo || ""}`.trim(), preco: p.preco, unidade: p.unidade })))}
 
@@ -570,6 +619,8 @@ export default function ZiisTec({ contexto }) {
   const real = Boolean(contexto);
   const [tela, setTela] = useState("inicio");
   const [drawer, setDrawer] = useState(false);
+  const [menuExpandido, setMenuExpandido] = useState(false);
+  const menuTouchX = useRef(null);
   const [busca, setBusca] = useState(false);
   /* --- identidade e acesso --- */
   const [empresas, setEmpresas] = useState(() => (real ? [contexto.empresa] : EMPRESAS_SEED));
@@ -686,6 +737,34 @@ export default function ZiisTec({ contexto }) {
   const abrirCompra = (id) => { setTela("compras"); setCompraAberta(id); setBusca(false); setDrawer(false); };
   const abrirGarantia = (id) => { setTela("garantias"); setGarantiaAberta(id); setBusca(false); setDrawer(false); };
 
+  const excluirRegistro = (tipo, id, nome, aoExcluir) => {
+    if (papel !== "proprietario") { aviso("Somente o proprietário pode excluir registros."); return; }
+    const rotulos = { cliente:"cliente", servico:"serviço", produto:"produto", orcamento:"orçamento", os:"ordem de serviço", compra:"compra", financeiro:"lançamento", garantia:"garantia" };
+    const rotulo = rotulos[tipo] || "registro";
+    setConfirmar({
+      titulo: `Excluir ${rotulo}?`,
+      texto: `${nome || "Este registro"} deixará de aparecer nas listas ativas. Os vínculos históricos necessários para documentos, financeiro e auditoria serão preservados.`,
+      confirmar: "Excluir", perigo: true,
+      acao: async () => {
+        try {
+          if (real) { await excluirRegistroDB(tipo, id, empresaId); await recarregarDados(); }
+          else {
+            const agora = new Date().toISOString();
+            if (tipo === "cliente") setClientes((ls) => ls.map((x) => x.id === id ? { ...x, excluidoEm: agora } : x));
+            if (tipo === "servico") setServicos((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "produto") setProdutos((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "orcamento") setOrcamentos((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "os") setOrdens((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "compra") setCompras((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "financeiro") setLancamentos((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "garantia") setGarantias((ls) => ls.filter((x) => x.id !== id));
+          }
+          aoExcluir?.(); aviso(`${rotulo.charAt(0).toUpperCase() + rotulo.slice(1)} excluído com segurança.`);
+        } catch (e) { aviso(mensagemErro(e)); }
+      },
+    });
+  };
+
   const proxNumero = (lista, prefixo) => {
     const n = lista.reduce((m, x) => Math.max(m, Number(x.numero?.split("-")[1] || 0)), 0) + 1;
     return `${prefixo}-${String(n).padStart(4, "0")}`;
@@ -706,7 +785,7 @@ export default function ZiisTec({ contexto }) {
      guardar senha exige hash no servidor, que ainda não existe. */
   const salvarColaborador = async ({ nome, email, telefone, funcao, papel: pp }) => {
     if (real) {
-      try { const eq = await convidarColaboradorDB({ nome, email, telefone, funcao, papel: pp }, empresaId, usuarioAtual?.id); setUsuarios(eq.usuarios); setMembresias(eq.membresias); aviso(`${nome} foi convidado para a equipe.`); return { convite: true }; }
+      try { const eq = await convidarColaboradorDB({ nome, email, telefone, funcao, papel: pp }, empresaId, usuarioAtual?.id); setUsuarios(eq.usuarios); setMembresias(eq.membresias); const emailEnviado = Boolean(eq.emailDelivery?.sent); aviso(emailEnviado ? `Convite ZiisTec enviado para ${email.trim().toLowerCase()}.` : `${nome} foi adicionado como convite pendente. Se já tiver conta, pode entrar com o mesmo e-mail; o acesso só será ativado após a confirmação do e-mail.`); return { convite: true, emailEnviado }; }
       catch (e) { aviso(mensagemErro(e)); return null; }
     }
     const limpo = email.trim().toLowerCase();
@@ -805,8 +884,9 @@ export default function ZiisTec({ contexto }) {
         aviso(o.id ? "Orçamento salvo" : `${salvo.numero} criado`); setOrcamentoAberto(salvo.id); return salvo.id;
       } catch (e) { aviso(mensagemErro(e)); return null; }
     }
-    if (o.id) { setOrcamentos((l) => l.map((x) => (x.id === o.id ? o : x))); aviso("Orçamento salvo"); setOrcamentoAberto(o.id); }
-    else { const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, osId: null }; setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado`); setOrcamentoAberto(novo.id); }
+    if (o.id) { setOrcamentos((l) => l.map((x) => (x.id === o.id ? o : x))); aviso("Orçamento salvo"); setOrcamentoAberto(o.id); return o.id; }
+    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, osId: null };
+    setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado`); setOrcamentoAberto(novo.id); return novo.id;
   };
   /* duplicar: copia cliente, itens e condições; não leva aprovação, OS nem número */
   const duplicarOrcamento = async (o) => {
@@ -879,6 +959,9 @@ export default function ZiisTec({ contexto }) {
       try {
         const alvo = ordens.find((o) => o.id === osId);
         if (!alvo) throw new Error("Ordem de serviço não encontrada");
+        if (Object.prototype.hasOwnProperty.call(extras, "precisaRetornar")) {
+          await atualizarOSDB(osId, { needs_return: Boolean(extras.precisaRetornar) });
+        }
         const preparado = await prepararFinalizacaoOSDB(alvo, extras, empresaId, usuarioAtual?.id, papel);
         extras = { ...extras, ...preparado };
         await finalizarOSDB(osId,extras);
@@ -906,23 +989,25 @@ export default function ZiisTec({ contexto }) {
     const novasGarantias = [];
     if (!os.emGarantia) {
       os.itens.forEach((i) => {
+        const politica = i.garantiaPolitica || "catalog";
         if (i.tipo === "servico") {
-          const s = servicos.find((x) => x.id === i.catalogoId);
-          if (s?.garantiaDias > 0) novasGarantias.push({
-            id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "servico", descricao: s.nome, servicoId: s.id,
-            local: os.localServico, inicio: execucao, dias: s.garantiaDias, ate: addDays(execucao, s.garantiaDias), serie: "",
+          const sv = servicos.find((x) => x.id === i.catalogoId);
+          const dias = politica === "disabled" ? 0 : politica === "custom" ? Number(i.garantiaDiasOverride || 0) : Number(sv?.garantiaDias || 0);
+          if (dias > 0) novasGarantias.push({
+            id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "servico", descricao: sv?.nome || i.nome, servicoId: sv?.id || i.catalogoId,
+            local: os.localServico, inicio: execucao, dias, ate: addDays(execucao, dias), serie: "",
           });
-        } else {
+        } else if (i.tipo === "produto") {
           const pr = produtos.find((x) => x.id === i.catalogoId);
-          if (pr?.garantiaMeses > 0) novasGarantias.push({
-            id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "produto", descricao: i.nome, produtoId: pr.id,
-            local: os.localServico, inicio: execucao, meses: pr.garantiaMeses, ate: addMeses(execucao, pr.garantiaMeses),
-            serie: extras.series?.[i.id] || "",
+          const meses = politica === "disabled" ? 0 : politica === "custom" ? Number(i.garantiaMesesOverride || 0) : Number(pr?.garantiaMeses || 0);
+          if (meses > 0) novasGarantias.push({
+            id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "produto", descricao: i.nome, produtoId: pr?.id || i.catalogoId,
+            local: os.localServico, inicio: execucao, meses, ate: addMeses(execucao, meses), serie: extras.series?.[i.id] || "",
           });
         }
       });
     }
-    if (novasGarantias.length) setGarantias((g) => [...novasGarantias, ...g.filter((x) => x.osId !== osId)]);
+    if (novasGarantias.length) setGarantias((g) => [...novasGarantias, ...g.filter((x) => x.osId !== osId)]);    if (novasGarantias.length) setGarantias((g) => [...novasGarantias, ...g.filter((x) => x.osId !== osId)]);
 
     /* recomendação de retorno (pós-venda), apenas registrada */
     let retorno = null;
@@ -1011,7 +1096,7 @@ export default function ZiisTec({ contexto }) {
     clienteAberto, setClienteAberto, orcamentoAberto, setOrcamentoAberto, osAberta, setOsAberta,
     compraAberta, setCompraAberta, setTela, abrirOS, abrirOrc, abrirCliente, abrirCompra,
     garantiaAberta, setGarantiaAberta, abrirGarantia, real,
-    pedirConfirmacao: setConfirmar,
+    pedirConfirmacao: setConfirmar, excluirRegistro,
   };
 
   const NAV = [
@@ -1021,20 +1106,19 @@ export default function ZiisTec({ contexto }) {
     { id: "catalogo", label: "Serviços e produtos", icon: Wrench },
     { id: "orcamentos", label: "Orçamentos", icon: FileText },
     { id: "ordens", label: "Ordens de serviço", icon: ClipboardList },
+    { id: "vendaCampo", label: "Produtos", icon: ShoppingCart },
     { id: "garantias", label: "Garantias", icon: ShieldCheck },
     { id: "compras", label: "Compras", icon: ShoppingCart },
     { id: "equipe", label: "Equipe", icon: Users2 },
     { id: "financeiro", label: "Financeiro", icon: Wallet },
     { id: "config", label: "Configurações", icon: Settings },
   ];
-  const NAV_MOBILE = ["inicio", "agenda", "orcamentos", "ordens"];
+  const NAV_MOBILE = ["inicio", "agenda", "orcamentos", "ordens", "vendaCampo"];
 
   const Marca = ({ rail }) => (
-    <div className={cx("flex items-center gap-3 px-5 h-[68px]", rail && "lg:px-5 px-0 lg:justify-start justify-center")}>
-      <div className="w-9 h-9 rounded-xl bg-teal-500 flex items-center justify-center shrink-0">
-        <span className="text-slate-900 font-bold text-lg leading-none">Z</span>
-      </div>
-      <p className={cx("text-white font-semibold tracking-tight text-[17px]", rail && "hidden lg:block")}>ZiisTec</p>
+    <div className={cx("flex items-center gap-3 px-5 h-[68px]", rail && !menuExpandido && "md:px-0 md:justify-center lg:px-5 lg:justify-start")}>
+      <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-9 h-9 rounded-xl object-contain shrink-0" />
+      <p className={cx("text-white font-semibold tracking-tight text-[17px]", rail && !menuExpandido && "hidden lg:block")}>ZiisTec</p>
     </div>
   );
   const Nav = ({ rail }) => (
@@ -1042,21 +1126,21 @@ export default function ZiisTec({ contexto }) {
       {NAV.filter((n) => permitido(n.id) && (n.id !== "equipe" || empresa.temEquipe)).map((n) => {
         const ativo = tela === n.id;
         return (
-          <button key={n.id} onClick={() => irPara(n.id)} title={n.label} aria-current={ativo ? "page" : undefined}
-            className={cx("relative w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] transition-colors",
-              rail && "lg:justify-start justify-center",
+          <button key={n.id} onClick={() => n.id === "vendaCampo" ? contexto?.abrirRecursoV2?.("venda-os") : irPara(n.id)} title={n.label} aria-current={ativo ? "page" : undefined}
+            className={cx("relative w-full min-h-11 flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] transition-colors",
+              rail && !menuExpandido && "md:justify-center lg:justify-start",
               ativo ? "bg-white/10 text-white font-medium" : "text-slate-400 hover:text-slate-100 hover:bg-white/5",
               "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400")}>
             {ativo && <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-teal-400" aria-hidden="true" />}
             <n.icon className={cx("w-[18px] h-[18px] shrink-0", ativo && "text-teal-300")} aria-hidden="true" />
-            <span className={rail ? "hidden lg:inline" : ""}>{n.label}</span>
+            <span className={rail && !menuExpandido ? "hidden lg:inline" : ""}>{n.label}</span>
           </button>
         );
       })}
     </nav>
   );
   const Empresa = ({ rail }) => (
-    <div className={cx("px-3 pb-4", rail && "hidden lg:block")}>
+    <div className={cx("px-3 pb-4", rail && !menuExpandido && "hidden lg:block")}>
       <div className="flex items-center gap-3 rounded-xl px-3 py-3 bg-white/5">
         <div className="w-8 h-8 rounded-lg bg-slate-700 text-slate-200 flex items-center justify-center text-xs font-semibold shrink-0">{iniciais(empresa.nome)}</div>
         <div className="min-w-0 flex-1">
@@ -1116,21 +1200,34 @@ export default function ZiisTec({ contexto }) {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
+    <div className="min-h-[100dvh] overflow-x-hidden bg-slate-50 text-slate-800 font-sans antialiased">
       {estiloGlobal}
 
-      <aside className="zt-nao-imprime hidden md:flex fixed inset-y-0 left-0 z-30 md:w-[72px] lg:w-[248px] bg-slate-900 flex-col">
+      <aside
+        className={cx("zt-nao-imprime hidden md:flex fixed inset-y-0 left-0 z-30 bg-slate-900 flex-col transition-[width] duration-200 select-none", menuExpandido ? "md:w-[248px]" : "md:w-[72px] lg:w-[248px]")}
+        style={{ touchAction: "pan-y" }}
+        onTouchStart={(e) => { if (window.innerWidth < 1024) menuTouchX.current = e.touches?.[0]?.clientX ?? null; }}
+        onTouchMove={(e) => {
+          if (window.innerWidth >= 1024 || menuTouchX.current == null) return;
+          const atual = e.touches?.[0]?.clientX ?? menuTouchX.current;
+          const delta = atual - menuTouchX.current;
+          if (delta > 38) { setMenuExpandido(true); menuTouchX.current = atual; }
+          if (delta < -38) { setMenuExpandido(false); menuTouchX.current = atual; }
+        }}
+        onTouchEnd={() => { menuTouchX.current = null; }}
+        aria-label="Menu lateral: arraste para abrir ou recolher"
+      >
         <Marca rail /><Nav rail /><Empresa rail />
       </aside>
 
       <header className="zt-nao-imprime md:hidden sticky top-0 z-30 bg-slate-900 flex items-center justify-between px-4 h-14">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-teal-500 flex items-center justify-center"><span className="text-slate-900 font-bold text-sm leading-none">Z</span></div>
+          <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-7 h-7 rounded-lg object-contain" />
           <span className="text-white font-semibold tracking-tight">ZiisTec</span>
         </div>
         <div className="flex items-center">
-          <button onClick={() => setBusca(true)} aria-label="Buscar" className="p-2.5 text-slate-300"><Search className="w-5 h-5" /></button>
-          <button onClick={() => setDrawer(true)} aria-label="Abrir menu" className="p-2.5 -mr-2 text-slate-300"><Menu className="w-6 h-6" /></button>
+          <button onClick={() => setBusca(true)} aria-label="Buscar" className="min-h-11 min-w-11 p-2.5 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><Search className="w-5 h-5" /></button>
+          <button onClick={() => setDrawer(true)} aria-label="Abrir menu" className="min-h-11 min-w-11 p-2.5 -mr-2 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><Menu className="w-6 h-6" /></button>
         </div>
       </header>
 
@@ -1140,19 +1237,19 @@ export default function ZiisTec({ contexto }) {
           <div className="absolute inset-y-0 left-0 w-72 bg-slate-900 flex flex-col">
             <div className="flex items-center justify-between pr-2">
               <Marca />
-              <button onClick={() => setDrawer(false)} aria-label="Fechar menu" className="p-2.5 text-slate-400"><X className="w-5 h-5" /></button>
+              <button onClick={() => setDrawer(false)} aria-label="Fechar menu" className="min-h-11 min-w-11 p-2.5 text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><X className="w-5 h-5" /></button>
             </div>
             <Nav /><Empresa />
           </div>
         </div>
       )}
 
-      <main className="md:pl-[72px] lg:pl-[248px]">
+      <main className={cx("transition-[padding] duration-200", menuExpandido ? "md:pl-[248px]" : "md:pl-[72px] lg:pl-[248px]")}>
         <div className="hidden md:flex zt-nao-imprime justify-end max-w-[1180px] mx-auto px-8 lg:px-10 pt-5">
           <button onClick={() => setBusca(true)}
             className={cx("flex items-center gap-2.5 rounded-xl bg-white ring-1 ring-slate-200 px-4 py-2.5 text-[13px] text-slate-400 hover:ring-slate-300 w-72", ring)}>
             <Search className="w-4 h-4" aria-hidden="true" />
-            Buscar cliente, orçamento, OS…
+            Buscar cliente, OS, produto, serial...
           </button>
         </div>
         <div className="max-w-[1180px] mx-auto px-4 sm:px-8 lg:px-10 py-6 sm:py-7 pb-28 md:pb-16">
@@ -1172,24 +1269,24 @@ export default function ZiisTec({ contexto }) {
         </div>
       </main>
 
-      <nav className="zt-nao-imprime md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 flex" aria-label="Navegação rápida">
+      <nav className="zt-nao-imprime md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 flex pb-[env(safe-area-inset-bottom)]" aria-label="Navegação rápida">
         {NAV.filter((n) => NAV_MOBILE.includes(n.id) && permitido(n.id)).map((n) => {
           const ativo = tela === n.id;
           return (
-            <button key={n.id} onClick={() => irPara(n.id)} aria-current={ativo ? "page" : undefined}
-              className={cx("flex-1 flex flex-col items-center gap-1 py-2.5", ativo ? "text-teal-800" : "text-slate-400")}>
+            <button key={n.id} onClick={() => n.id === "vendaCampo" ? contexto?.abrirRecursoV2?.("venda-os") : irPara(n.id)} aria-current={ativo ? "page" : undefined}
+              className={cx("flex-1 min-h-14 flex flex-col items-center justify-center gap-1 py-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600", ativo ? "text-teal-800" : "text-slate-400")}>
               <n.icon className="w-[22px] h-[22px]" aria-hidden="true" />
               <span className="text-[10px] font-medium">{n.label.split(" ")[0]}</span>
             </button>
           );
         })}
-        <button onClick={() => setDrawer(true)} className="flex-1 flex flex-col items-center gap-1 py-2.5 text-slate-400" aria-label="Mais seções">
+        <button onClick={() => setDrawer(true)} className="flex-1 min-h-14 flex flex-col items-center justify-center gap-1 py-2.5 text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600" aria-label="Mais seções">
           <MoreHorizontal className="w-[22px] h-[22px]" aria-hidden="true" />
           <span className="text-[10px] font-medium">Mais</span>
         </button>
       </nav>
 
-      {busca && <BuscaGlobal onClose={() => setBusca(false)} {...props} />}
+      {busca && (real && papel === "proprietario" ? <GlobalSearchModal companyId={empresaId} onClose={() => setBusca(false)} onClient={abrirCliente} onWorkOrder={abrirOS} onQuote={abrirOrc} onWarranty={abrirGarantia} onLocation={(item)=>{ if(item.work_order_id) abrirOS(item.work_order_id); else abrirCliente(item.client_id); return true; }} onPostSale={()=>{ const u=new URL(window.location.href); u.searchParams.set("v2","pos-venda"); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} onProduct={(id)=>{ const u=new URL(window.location.href); u.searchParams.set("v2","produtos"); u.searchParams.set("product",id); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} /> : <BuscaGlobal onClose={() => setBusca(false)} {...props} />)}
 
       {toast && (
         <div role="status" className="zt-nao-imprime fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white text-[14px] px-4 py-3 rounded-xl shadow-lg flex items-center gap-2.5 max-w-[92vw]">
@@ -1216,7 +1313,7 @@ function BuscaGlobal({ onClose, clientes, orcamentos, ordens, compras, nomeClien
   };
 
   /* a busca respeita o papel: o técnico só alcança as ordens dele */
-  const rc = permitido("clientes") ? clientes.filter((c) => bate(c.nome, c.fantasia, c.documento, c.telefone, c.whatsapp, c.endereco)) : [];
+  const rc = permitido("clientes") ? clientes.filter((c) => !c.excluidoEm && bate(c.nome, c.fantasia, c.documento, c.telefone, c.whatsapp, c.endereco)) : [];
   const ro = permitido("orcamentos") ? orcamentos.filter((o) => bate(o.numero, nomeCliente(o.clienteId), o.local, o.localServico)) : [];
   const rs = ordens.filter((o) => bate(o.numero, nomeCliente(o.clienteId), o.local, o.localServico));
   const rp = permitido("compras") ? compras.filter((c) => bate(c.numero, c.fornecedor)) : [];
@@ -1306,14 +1403,19 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
 
   const hora = new Date().getHours();
   const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
+  const abrirProdutosCampo = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("v2", "venda-os");
+    window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+  };
   const atalhos = verFinanceiro ? [
     { label: "Novo orçamento", icon: FileText, ir: () => { setTela("orcamentos"); setOrcamentoAberto("novo"); } },
     { label: "Novo cliente", icon: Users, ir: () => irPara("clientes") },
     { label: "Nova OS", icon: ClipboardList, ir: () => irPara("ordens") },
     { label: "Nova compra", icon: ShoppingCart, ir: () => irPara("compras") },
   ] : [
-    { label: "Minhas ordens", icon: ClipboardList, ir: () => irPara("ordens") },
-    { label: "Agenda", icon: CalendarDays, ir: () => irPara("agenda") },
+    { label: "Meus serviços", icon: ClipboardList, ir: () => irPara("ordens") },
+    { label: "Produtos", icon: ShoppingCart, ir: abrirProdutosCampo },
   ];
 
   return (
@@ -1336,7 +1438,7 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
       <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         <div className="lg:col-span-2 space-y-8">
           <section>
-            <Rotulo acao={<button onClick={() => irPara("agenda")} className="text-[13px] font-medium text-teal-800 hover:underline">Ver agenda</button>}>
+            <Rotulo acao={<button onClick={() => irPara(verFinanceiro ? "agenda" : "ordens")} className="text-[13px] font-medium text-teal-800 hover:underline">{verFinanceiro ? "Ver agenda" : "Ver serviços"}</button>}>
               {verFinanceiro ? "O que tenho para hoje" : "Meus atendimentos de hoje"}
             </Rotulo>
             <Panel className="divide-y divide-slate-100 overflow-hidden">
@@ -1419,85 +1521,135 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
 }
 
 /* =================================================================== Agenda */
-function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, empresa, equipe }) {
+function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, salvarOS, salvarCliente, usuarioAtual, pedirConfirmacao }) {
   const [dia, setDia] = useState(HOJE);
+  const [visao, setVisao] = useState("semana");
+  const [filtro, setFiltro] = useState("proximos");
+  const [busca, setBusca] = useState("");
   const [agendando, setAgendando] = useState(null);
-  const semana = Array.from({ length: 7 }, (_, i) => addDays(dia, i - 3));
-  const doDia = ordens.filter((o) => o.data === dia && o.status !== "cancelada").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const semAgenda = ordens.filter((o) => !o.data && o.status !== "cancelada" && o.status !== "concluida");
+  const [novaOS, setNovaOS] = useState(false);
+
+  const inicioSemana = (d) => {
+    const x = new Date(d + "T12:00:00");
+    const dow = x.getDay();
+    x.setDate(x.getDate() - ((dow + 6) % 7));
+    return iso(x);
+  };
+  const moverMes = (d, n) => {
+    const x = new Date(d + "T12:00:00");
+    x.setDate(1); x.setMonth(x.getMonth() + n);
+    return iso(x);
+  };
+  const mesAtual = dia.slice(0, 7);
+  const inicio = inicioSemana(dia);
+  const semana = Array.from({ length: 7 }, (_, i) => addDays(inicio, i));
+  const primeiroMes = mesAtual + "-01";
+  const gradeInicio = inicioSemana(primeiroMes);
+  const diasMes = Array.from({ length: 42 }, (_, i) => addDays(gradeInicio, i));
+  const termo = semAcento(busca.trim());
+  const bateBusca = (o) => !termo || semAcento([o.numero,nomeCliente(o.clienteId),o.local,o.localServico,resumoOS(o)].filter(Boolean).join(" ")).includes(termo);
+  const bateFiltro = (o) => filtro === "concluidos" ? o.status === "concluida"
+    : filtro === "proximos" ? o.status !== "concluida" && (!o.data || o.data >= HOJE)
+    : true;
+  const base = ordens.filter((o) => o.status !== "cancelada" && bateFiltro(o) && bateBusca(o));
+  const doDia = base.filter((o) => o.data === dia).sort((a,b)=>(a.hora||"").localeCompare(b.hora||""));
+  const semAgenda = base.filter((o) => !o.data && o.status !== "concluida");
+  const concluidosMes = ordens.filter((o)=>o.status==="concluida" && (o.concluidaEm||o.data||"").slice(0,7)===mesAtual && bateBusca(o));
+
+  const abrirHoje = () => { setDia(HOJE); setVisao("dia"); };
+  const tituloLista = visao === "mes" && filtro === "concluidos"
+    ? `Serviços feitos em ${nomeMes(mesAtual)} · ${concluidosMes.length}`
+    : `${diaSemana(dia)}, ${dataBR(dia)}${dia===HOJE?" · hoje":""}`;
+  const lista = visao === "mes" && filtro === "concluidos"
+    ? [...concluidosMes].sort((a,b)=>((b.concluidaEm||b.data||"")+" "+(b.hora||"")).localeCompare((a.concluidaEm||a.data||"")+" "+(a.hora||"")))
+    : doDia;
 
   return (
     <>
-      <PageHead title="Agenda" sub="O que está marcado e o que ainda precisa de data."
-        action={dia !== HOJE ? <Btn variant="soft" size="sm" onClick={() => setDia(HOJE)}>Hoje</Btn> : null} />
+      <PageHead title="Agenda" sub="Próximos atendimentos e histórico completo do que já foi feito."
+        action={<Btn icon={Plus} onClick={() => setNovaOS(true)}>Novo agendamento</Btn>} />
 
-      <div className="flex items-center gap-1 sm:gap-2 mb-6">
-        <button onClick={() => setDia(addDays(dia, -7))} aria-label="Semana anterior" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowLeft className="w-4 h-4" /></button>
-        <div className="grid grid-cols-7 gap-1.5 sm:gap-2 flex-1">
-          {semana.map((d) => {
-            const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length;
-            const sel = d === dia;
-            return (
-              <button key={d} onClick={() => setDia(d)} aria-pressed={sel} aria-label={`${diaSemana(d)} ${dataBR(d)}`}
-                className={cx("rounded-2xl py-3 text-center transition-colors", ring, sel ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200/70 text-slate-600 hover:ring-slate-300")}>
-                <p className={cx("text-[11px] uppercase tracking-wide", sel ? "text-slate-300" : d === HOJE ? "text-teal-700 font-semibold" : "text-slate-400")}>{diaCurto(d)}</p>
-                <p className={cx("text-[19px] font-semibold leading-tight mt-0.5 tabular-nums", d === HOJE && !sel && "text-teal-800")}>{d.slice(8)}</p>
-                <div className="h-2 flex justify-center items-center">{qtd > 0 && <span className={cx("w-1.5 h-1.5 rounded-full", sel ? "bg-teal-400" : "bg-teal-600")} />}</div>
-              </button>
-            );
-          })}
+      <Panel className="p-3 sm:p-4 mb-5">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+          <div className="flex flex-wrap gap-2">
+            {[['dia','Hoje'],['semana','Semana'],['mes','Mês']].map(([id,label])=>(
+              <button key={id} onClick={()=>id==='dia'?abrirHoje():setVisao(id)}
+                className={cx("px-4 py-2 rounded-xl text-[13px] font-medium",ring,visao===id?"bg-slate-900 text-white":"bg-slate-50 text-slate-600 hover:bg-slate-100")}>{label}</button>
+            ))}
+            <span className="w-px bg-slate-200 mx-1 hidden sm:block" />
+            {[['proximos','Próximos'],['concluidos','Concluídos'],['todos','Todos']].map(([id,label])=>(
+              <button key={id} onClick={()=>setFiltro(id)}
+                className={cx("px-3 py-2 rounded-xl text-[13px] font-medium",ring,filtro===id?"bg-teal-50 text-teal-800 ring-1 ring-teal-200":"text-slate-500 hover:bg-slate-50")}>{label}</button>
+            ))}
+          </div>
+          <div className="relative min-w-0 lg:w-72">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input value={busca} onChange={(e)=>setBusca(e.target.value)} placeholder="Cliente, OS, prédio ou endereço" className="pl-9" />
+          </div>
         </div>
-        <button onClick={() => setDia(addDays(dia, 7))} aria-label="Próxima semana" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowRight className="w-4 h-4" /></button>
-      </div>
-
-      <Rotulo>{diaSemana(dia)}, {dataBR(dia)}{dia === HOJE ? " · hoje" : ""}</Rotulo>
-      <Panel className="divide-y divide-slate-100 overflow-hidden mb-8">
-        {doDia.length === 0 ? <Empty icon={CalendarDays} title="Nenhum atendimento neste dia" sub="Agende uma ordem de serviço para ela aparecer aqui." />
-          : doDia.map((os) => (
-            <Linha key={os.id}>
-              <div className="flex gap-4">
-                <button onClick={() => abrirOS(os.id)} className={cx("w-14 shrink-0 text-left", ring)}>
-                  <p className="text-[17px] font-semibold text-slate-900 leading-none tabular-nums">{os.hora || "—"}</p>
-                  <p className="text-[11px] text-slate-400 mt-1.5">{os.numero}</p>
-                </button>
-                <div className="min-w-0 flex-1">
-                  <button onClick={() => abrirOS(os.id)} className={cx("w-full text-left", ring)}>
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
-                      <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
-                    </div>
-                    <p className="text-[13px] text-slate-600 mt-1">{os.itens.length ? os.itens.map((i) => `${i.qtd}× ${i.nome}`).join(" · ") : resumoOS(os)}</p>
-                  </button>
-                  <div className="flex items-center gap-4 mt-2 text-[12px] flex-wrap">
-                    <Endereco valor={os.local} local={os.localServico} compacto className="max-w-full" />
-                    {empresa.temEquipe && <span className="flex items-center gap-1.5 text-slate-400"><User className="w-3.5 h-3.5" />{os.responsavel}</span>}
-                  </div>
-                </div>
-              </div>
-            </Linha>
-          ))}
       </Panel>
 
-      {semAgenda.length > 0 && (
-        <section>
-          <Rotulo>Aguardando agendamento · {semAgenda.length}</Rotulo>
-          <Panel className="divide-y divide-slate-100 overflow-hidden">
-            {semAgenda.map((os) => (
-              <Linha key={os.id}>
-                <div className="flex items-center justify-between gap-3">
-                  <button onClick={() => abrirOS(os.id)} className={cx("min-w-0 text-left", ring)}>
-                    <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
-                    <p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
-                  </button>
-                  <Btn size="sm" variant="soft" icon={CalendarClock} onClick={() => setAgendando(os)}>Agendar</Btn>
-                </div>
-              </Linha>
-            ))}
-          </Panel>
-        </section>
-      )}
+      {visao === "semana" && <div className="flex items-center gap-1 sm:gap-2 mb-6">
+        <button onClick={()=>setDia(addDays(dia,-7))} aria-label="Semana anterior" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0",ring)}><ArrowLeft className="w-4 h-4" /></button>
+        <div className="grid grid-cols-7 gap-1.5 sm:gap-2 flex-1">
+          {semana.map((d)=>{
+            const qtd=ordens.filter((o)=>o.data===d&&o.status!=="cancelada").length;
+            const feitos=ordens.filter((o)=>(o.concluidaEm||o.data)===d&&o.status==="concluida").length;
+            const sel=d===dia;
+            return <button key={d} onClick={()=>setDia(d)} className={cx("rounded-2xl py-3 text-center transition-colors",ring,sel?"bg-slate-900 text-white":"bg-white ring-1 ring-slate-200/70 text-slate-600 hover:ring-slate-300")}>
+              <p className={cx("text-[11px] uppercase tracking-wide",sel?"text-slate-300":d===HOJE?"text-teal-700 font-semibold":"text-slate-400")}>{diaCurto(d)}</p>
+              <p className={cx("text-[19px] font-semibold leading-tight mt-0.5 tabular-nums",d===HOJE&&!sel&&"text-teal-800")}>{d.slice(8)}</p>
+              <div className="h-2 flex justify-center items-center gap-1">{qtd>0&&<span className={cx("w-1.5 h-1.5 rounded-full",sel?"bg-teal-400":"bg-teal-600")} />}{feitos>0&&<span className={cx("w-1.5 h-1.5 rounded-full",sel?"bg-emerald-300":"bg-emerald-500")} />}</div>
+            </button>;
+          })}
+        </div>
+        <button onClick={()=>setDia(addDays(dia,7))} aria-label="Próxima semana" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0",ring)}><ArrowRight className="w-4 h-4" /></button>
+      </div>}
 
-      <AgendarModal os={agendando} onClose={() => setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />
+      {visao === "mes" && <Panel className="p-3 sm:p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={()=>setDia(moverMes(dia,-1))} className={cx("p-2 rounded-xl hover:bg-slate-50 text-slate-500",ring)}><ArrowLeft className="w-4 h-4" /></button>
+          <div className="text-center"><p className="font-semibold text-slate-900">{nomeMes(mesAtual)}</p><button onClick={abrirHoje} className="text-[12px] text-teal-700 mt-0.5 hover:underline">Voltar para hoje</button></div>
+          <button onClick={()=>setDia(moverMes(dia,1))} className={cx("p-2 rounded-xl hover:bg-slate-50 text-slate-500",ring)}><ArrowRight className="w-4 h-4" /></button>
+        </div>
+        <div className="grid grid-cols-7 text-center text-[11px] uppercase tracking-wide text-slate-400 mb-1">{['seg','ter','qua','qui','sex','sáb','dom'].map(x=><span key={x} className="py-1">{x}</span>)}</div>
+        <div className="grid grid-cols-7 gap-1 sm:gap-2">
+          {diasMes.map((d)=>{
+            const doMes=d.slice(0,7)===mesAtual;
+            const qtd=ordens.filter((o)=>o.data===d&&o.status!=="cancelada"&&o.status!=="concluida").length;
+            const feitos=ordens.filter((o)=>(o.concluidaEm||o.data)===d&&o.status==="concluida").length;
+            const sel=d===dia;
+            return <button key={d} onClick={()=>setDia(d)} className={cx("min-h-[58px] sm:min-h-[72px] rounded-xl p-1.5 sm:p-2 text-left border transition-colors",ring,sel?"border-slate-900 bg-slate-900 text-white":doMes?"border-slate-200 bg-white hover:border-slate-300":"border-transparent bg-slate-50/40 text-slate-300")}>
+              <span className={cx("text-[13px] font-medium tabular-nums",d===HOJE&&!sel&&"text-teal-700")}>{Number(d.slice(8))}</span>
+              <div className="mt-2 space-y-1">{qtd>0&&<span className={cx("block text-[10px] sm:text-[11px] truncate",sel?"text-teal-300":"text-teal-700")}>{qtd} próximo{qtd>1?'s':''}</span>}{feitos>0&&<span className={cx("block text-[10px] sm:text-[11px] truncate",sel?"text-emerald-300":"text-emerald-700")}>{feitos} feito{feitos>1?'s':''}</span>}</div>
+            </button>;
+          })}
+        </div>
+      </Panel>}
+
+      <Rotulo>{tituloLista}</Rotulo>
+      <Panel className="divide-y divide-slate-100 overflow-hidden mb-8">
+        {lista.length===0 ? <Empty icon={CalendarDays} title={filtro==='concluidos'?"Nenhum serviço encontrado":"Nenhum atendimento neste período"} sub={busca?"Tente outro cliente, número de OS ou endereço.":"Use Novo agendamento para marcar um atendimento."} />
+        : lista.map((os)=><Linha key={os.id} onClick={()=>abrirOS(os.id)}>
+          <div className="flex gap-4 items-start">
+            <div className="w-16 shrink-0"><p className="text-[16px] font-semibold text-slate-900 tabular-nums">{os.hora||"—"}</p><p className="text-[11px] text-slate-400 mt-1">{os.status==='concluida'?dataCurta(os.concluidaEm||os.data):os.numero}</p></div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3"><p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p><Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill></div>
+              <p className="text-[13px] text-slate-600 mt-1 line-clamp-2">{os.itens.length?os.itens.map((i)=>`${i.qtd}× ${i.nome}`).join(" · "):resumoOS(os)}</p>
+              <div className="flex items-center gap-4 mt-2 text-[12px] flex-wrap"><Endereco valor={os.local} local={os.localServico} compacto className="max-w-full" />{empresa.temEquipe&&<span className="flex items-center gap-1.5 text-slate-400"><User className="w-3.5 h-3.5" />{os.responsavel}</span>}</div>
+              {os.data && os.status !== "concluida" && <button onClick={(e) => { e.stopPropagation(); pedirConfirmacao({ titulo:"Remover da agenda?", texto:`${os.numero} continuará existindo como OS, mas ficará sem data e horário.`, confirmar:"Remover agendamento", perigo:true, acao:()=>desagendarOS(os.id) }); }} className="mt-2 text-[12px] font-medium text-rose-600 hover:underline">Remover da agenda</button>}
+            </div>
+          </div>
+        </Linha>)}
+      </Panel>
+
+      {filtro!=="concluidos" && semAgenda.length>0 && <section>
+        <Rotulo>Aguardando agendamento · {semAgenda.length}</Rotulo>
+        <Panel className="divide-y divide-slate-100 overflow-hidden">{semAgenda.map((os)=><Linha key={os.id}><div className="flex items-center justify-between gap-3"><button onClick={()=>abrirOS(os.id)} className={cx("min-w-0 text-left",ring)}><p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p><p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p></button><Btn size="sm" variant="soft" icon={CalendarClock} onClick={()=>setAgendando(os)}>Agendar</Btn></div></Linha>)}</Panel>
+      </section>}
+
+      <AgendarModal os={agendando} onClose={()=>setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />
+      {novaOS && <NovaOS onClose={()=>setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} />}
     </>
   );
 }
@@ -1535,7 +1687,7 @@ function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = []
 
 /* ================================================================ Clientes */
 function Clientes(p) {
-  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso } = p;
+  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso, excluirRegistro, papel } = p;
   const [revisoesCliente, setRevisoesCliente] = useState([]);
   useEffect(() => {
     if (!real || !empresaId) return;
@@ -1545,7 +1697,10 @@ function Clientes(p) {
   }, [real, empresaId]);
   const [busca, setBusca] = useState("");
   const [form, setForm] = useState(null);
-  const lista = clientes.filter((c) => semAcento(c.nome + (c.fantasia || "") + c.documento + c.telefone).includes(semAcento(busca)));
+  const lista = clientes.filter((c) => !c.excluidoEm && semAcento(c.nome + (c.fantasia || "") + c.documento + c.telefone).includes(semAcento(busca)));
+
+  const [localCliente, setLocalCliente] = useState("");
+  useEffect(() => setLocalCliente(""), [clienteAberto]);
 
   if (clienteAberto) {
     const c = clientes.find((x) => x.id === clienteAberto);
@@ -1557,6 +1712,7 @@ function Clientes(p) {
     const recebido = pgs.filter((l) => l.pago).reduce((t, l) => t + l.valor, 0);
     const aberto = pgs.filter((l) => !l.pago).reduce((t, l) => t + l.valor, 0);
     const locais = [...new Set(oss.map((o) => o.localServico).filter(Boolean))];
+    const ossVisiveis = localCliente ? oss.filter((o) => o.localServico === localCliente) : oss;
     const retornos = real ? revisoesCliente.filter((r)=>r.clienteId===c.id && r.status==="pending").map((r)=>({ data:r.data, servico:r.descricao })) : oss.filter((o) => o.retorno).map((o) => o.retorno);
 
     return (
@@ -1570,11 +1726,12 @@ function Clientes(p) {
             <Avatar nome={c.nome} tipo={c.tipo} size="lg" />
             <div>
               <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{c.fantasia || c.nome}</h1>
-              <p className="text-[14px] text-slate-500 mt-1">{c.tipo === "PJ" ? c.nome : "Pessoa física"} · {c.documento}</p>
+              <p className="text-[14px] text-slate-500 mt-1">{c.tipo === "PJ" ? c.nome : "Pessoa física"} · {c.documento}{c.excluidoEm ? " · arquivado" : ""}</p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm(c)}>Editar</Btn>
+            {papel === "proprietario" && <Btn variant="danger" size="sm" icon={Trash2} onClick={() => excluirRegistro("cliente", c.id, c.fantasia || c.nome, () => setClienteAberto(null))}>Excluir</Btn>}
             <Btn size="sm" icon={FileText} onClick={() => { setTela("orcamentos"); setOrcamentoAberto("novo:" + c.id); }}>Novo orçamento</Btn>
           </div>
         </div>
@@ -1603,8 +1760,9 @@ function Clientes(p) {
             {locais.length > 0 && (
               <section>
                 <Rotulo>Locais atendidos</Rotulo>
-                <Panel className="p-5 flex flex-wrap gap-2">
-                  {locais.map((l) => <Pill key={l} tone="neutro">{l}</Pill>)}
+                <Panel className="p-4 sm:p-5 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setLocalCliente("")} aria-pressed={!localCliente} className={cx("min-h-11 rounded-xl px-3 py-2 text-[13px] font-medium", !localCliente ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}>Todos os locais</button>
+                  {locais.map((l) => <button type="button" key={l} onClick={() => setLocalCliente(l)} aria-pressed={localCliente === l} className={cx("min-h-11 rounded-xl px-3 py-2 text-[13px] font-medium text-left break-words", localCliente === l ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}>{l}</button>)}
                 </Panel>
               </section>
             )}
@@ -1673,9 +1831,9 @@ function Clientes(p) {
             </section>
 
             <section>
-              <Rotulo>Histórico de serviços</Rotulo>
+              <Rotulo>{localCliente ? `Histórico em ${localCliente}` : "Histórico de serviços"}</Rotulo>
               <Panel className="divide-y divide-slate-100 overflow-hidden">
-                {oss.length === 0 ? <Empty icon={ClipboardList} title="Nenhuma OS ainda" /> : oss.map((o) => (
+                {ossVisiveis.length === 0 ? <Empty icon={ClipboardList} title={localCliente ? "Nenhuma OS neste local" : "Nenhuma OS ainda"} /> : ossVisiveis.map((o) => (
                   <Linha key={o.id} onClick={() => abrirOS(o.id)}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -1795,13 +1953,16 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
 }
 
 function ClienteForm({ form, setForm, onSave, onSaved }) {
+  const [salvandoCliente, setSalvandoCliente] = useState(false);
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const pj = form.tipo === "PJ";
   return (
     <Modal open onClose={() => setForm(null)} title={form.id ? "Editar cliente" : "Novo cliente"} wide
       footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
-        <Btn onClick={() => { const id = onSave(form); setForm(null); onSaved?.(id); }} disabled={!form.nome}>Salvar cliente</Btn></>}>
+        <Btn disabled={!form.nome || salvandoCliente}
+          onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
+          {salvandoCliente ? "Salvando…" : "Salvar cliente"}</Btn></>}>
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
         {["PF", "PJ"].map((t) => (
           <button key={t} role="tab" aria-selected={form.tipo === t} onClick={() => set("tipo", t)}
@@ -1831,7 +1992,7 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
 }
 
 /* ==================================================== Catálogo (serviços + produtos) */
-function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
+function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirRegistro, papel }) {
   const [aba, setAba] = useState("servicos");
   const [busca, setBusca] = useState("");
   const [formS, setFormS] = useState(null);
@@ -1865,7 +2026,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
     </Linha>
   );
   const LinhaProduto = ({ p, apagado }) => (
-    <Linha onClick={() => setFormP(p)} className={apagado ? "opacity-55" : ""}>
+    <Linha onClick={() => setFormP({ ...p, margemPct: p.custo > 0 ? acrescimoSobreCusto(p.custo, p.preco) : "" })} className={apagado ? "opacity-55" : ""}>
       <div className="flex items-center gap-4">
         <div className="min-w-0 flex-1">
           <p className="font-medium text-slate-900 truncate">{p.nome}</p>
@@ -1890,7 +2051,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
       <PageHead title="Serviços e produtos" sub="O que você vende, quanto cobra e como cobra."
         action={aba === "servicos"
           ? <Btn icon={Plus} onClick={() => setFormS({ unidade: "unidade", ativo: true, preco: 0, custo: 0, categoria: "", garantiaDias: 0, retornoDias: 0 })}>Novo serviço</Btn>
-          : <Btn icon={Plus} onClick={() => setFormP({ unidade: "unidade", ativo: true, preco: 0, custo: 0, garantiaMeses: 0 })}>Novo produto</Btn>} />
+          : <Btn icon={Plus} onClick={() => setFormP({ unidade: "unidade", ativo: true, preco: 0, custo: 0, margemPct: "", garantiaMeses: 0 })}>Novo produto</Btn>} />
 
       <Tabs valor={aba} onChange={setAba} opcoes={[{ id: "servicos", label: `Serviços · ${ativosS.length}` }, { id: "produtos", label: `Produtos e materiais · ${ativosP.length}` }]} className="mb-5" />
       <div className="mb-6 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder={aba === "servicos" ? "Buscar serviço" : "Buscar produto, marca ou modelo"} /></div>
@@ -1930,7 +2091,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
 
       {formS && (
         <Modal open onClose={() => setFormS(null)} title={formS.id ? "Editar serviço" : "Novo serviço"} wide
-          footer={<><Btn variant="ghost" onClick={() => setFormS(null)}>Cancelar</Btn>
+          footer={<>{formS.id && papel === "proprietario" && <Btn variant="danger" icon={Trash2} onClick={() => excluirRegistro("servico", formS.id, formS.nome, () => setFormS(null))}>Excluir</Btn>}<span className="flex-1" /><Btn variant="ghost" onClick={() => setFormS(null)}>Cancelar</Btn>
             <Btn onClick={() => { salvarServico(formS); setFormS(null); }} disabled={!formS.nome}>Salvar serviço</Btn></>}>
           <Field label="Nome do serviço"><Input value={formS.nome || ""} onChange={(e) => setFormS({ ...formS, nome: e.target.value })} placeholder="Ex.: Instalação de fechadura digital" /></Field>
           <div className="grid sm:grid-cols-2 gap-5">
@@ -2001,16 +2162,40 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
 
       {formP && (
         <Modal open onClose={() => setFormP(null)} title={formP.id ? "Editar produto" : "Novo produto ou material"} wide
-          footer={<><Btn variant="ghost" onClick={() => setFormP(null)}>Cancelar</Btn>
+          footer={<>{formP.id && papel === "proprietario" && <Btn variant="danger" icon={Trash2} onClick={() => excluirRegistro("produto", formP.id, formP.nome, () => setFormP(null))}>Excluir</Btn>}<span className="flex-1" /><Btn variant="ghost" onClick={() => setFormP(null)}>Cancelar</Btn>
             <Btn onClick={() => { salvarProduto(formP); setFormP(null); }} disabled={!formP.nome}>Salvar produto</Btn></>}>
           <Field label="Nome do produto"><Input value={formP.nome || ""} onChange={(e) => setFormP({ ...formP, nome: e.target.value })} placeholder="Ex.: Fechadura digital biométrica" /></Field>
           <div className="grid sm:grid-cols-2 gap-5">
             <Field label="Marca"><Input value={formP.marca || ""} onChange={(e) => setFormP({ ...formP, marca: e.target.value })} placeholder="Ex.: Intelbras" /></Field>
             <Field label="Modelo ou referência"><Input value={formP.modelo || ""} onChange={(e) => setFormP({ ...formP, modelo: e.target.value })} placeholder="Ex.: FR 320" /></Field>
           </div>
-          <div className="grid sm:grid-cols-2 gap-5">
-            <Field label="Custo de compra"><Input type="number" min="0" value={formP.custo} onChange={(e) => setFormP({ ...formP, custo: Number(e.target.value) })} /></Field>
-            <Field label="Preço de venda"><Input type="number" min="0" value={formP.preco} onChange={(e) => setFormP({ ...formP, preco: Number(e.target.value) })} /></Field>
+          {/* CALCULADORA DE MARGEM SOBRE CUSTO — ferramenta local; só custo e preço são persistidos. */}
+          <div className="grid sm:grid-cols-3 gap-5">
+            <Field label="Custo de compra">
+              <Input type="number" min="0" step="0.01" value={formP.custo} onChange={(e) => {
+                const custo = Number(e.target.value);
+                const pct = formP.margemPct;
+                setFormP({ ...formP, custo, ...(pct !== "" && Number.isFinite(Number(pct)) ? { preco: precoComAcrescimo(custo, pct) } : {}) });
+              }} />
+            </Field>
+            <Field label="Acréscimo sobre custo (%)" hint="Ex.: R$ 80 + 45% = R$ 116">
+              <Input type="number" min="0" step="0.01" value={formP.margemPct ?? ""} placeholder="45" onChange={(e) => {
+                const raw = e.target.value;
+                const margemPct = raw === "" ? "" : Number(raw);
+                setFormP({ ...formP, margemPct, ...(raw !== "" ? { preco: precoComAcrescimo(formP.custo, margemPct) } : {}) });
+              }} />
+            </Field>
+            <Field label="Preço de venda">
+              <Input type="number" min="0" step="0.01" value={formP.preco} onChange={(e) => {
+                const preco = Number(e.target.value);
+                setFormP({ ...formP, preco, margemPct: formP.custo > 0 ? acrescimoSobreCusto(formP.custo, preco) : formP.margemPct });
+              }} />
+            </Field>
+          </div>
+          <div className="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 px-4 py-3 grid sm:grid-cols-3 gap-3 text-[13px]">
+            <div><span className="text-emerald-700">Custo</span><p className="font-semibold text-slate-900 tabular-nums">{brl(formP.custo)}</p></div>
+            <div><span className="text-emerald-700">Lucro bruto por unidade</span><p className="font-semibold text-slate-900 tabular-nums">{brl(Math.max(0, num(formP.preco) - num(formP.custo)))}</p></div>
+            <div><span className="text-emerald-700">Preço calculado</span><p className="font-semibold text-emerald-800 tabular-nums">{brl(formP.preco)}</p></div>
           </div>
           <div className="grid sm:grid-cols-2 gap-5">
             <Field label="Unidade">
@@ -2038,32 +2223,37 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
 
 /* ============================================================== Orçamentos */
 function Orcamentos(p) {
-  const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto } = p;
+  const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto, empresa, cliente, aviso, mudarStatusOrc } = p;
   const [filtro, setFiltro] = useState("todos");
-  const [voz, setVoz] = useState(false);
-  const [rascunhoVoz, setRascunhoVoz] = useState(null);
+  const [criado, setCriado] = useState(null);
+
+  const confirmacao = (
+    <OrcamentoCriado
+      id={criado} orcamentos={orcamentos} empresa={empresa} cliente={cliente}
+      aviso={aviso} mudarStatusOrc={mudarStatusOrc}
+      onVer={() => { setOrcamentoAberto(criado); setCriado(null); }}
+      onDepois={() => setCriado(null)}
+    />
+  );
 
   if (orcamentoAberto) {
     if (String(orcamentoAberto).startsWith("novo")) {
       const preCliente = String(orcamentoAberto).split(":")[1] || "";
-      return <OrcamentoEditor {...p} inicial={{ clienteId: preCliente }} onFechar={() => setOrcamentoAberto(null)} />;
+      return <>
+        <OrcamentoEditor {...p} inicial={{ clienteId: preCliente }} onOrcamentoCriado={setCriado} onFechar={() => setOrcamentoAberto(null)} />
+        {confirmacao}
+      </>;
     }
     const o = orcamentos.find((x) => x.id === orcamentoAberto);
-    if (o) return <OrcamentoDoc {...p} orc={o} />;
+    if (o) return <><OrcamentoDoc {...p} orc={o} />{confirmacao}</>;
   }
-  if (rascunhoVoz) return <OrcamentoEditor {...p} inicial={rascunhoVoz} onFechar={() => setRascunhoVoz(null)} />;
 
   const filtrados = orcamentos.filter((o) => filtro === "todos" || o.status === filtro);
 
   return (
     <>
       <PageHead title="Orçamentos" sub="Monte, envie e acompanhe a resposta do cliente."
-        action={
-          <div className="flex gap-2">
-            <Btn variant="soft" icon={Mic} onClick={() => setVoz(true)}>Por voz</Btn>
-            <Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo</Btn>
-          </div>
-        } />
+        action={<Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo orçamento</Btn>} />
       <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
         opcoes={[{ id: "todos", label: "Todos" }, { id: "rascunho", label: "Rascunhos" }, { id: "enviado", label: "Aguardando" }, { id: "aprovado", label: "Aprovados" }]} />
 
@@ -2073,8 +2263,10 @@ function Orcamentos(p) {
       ) : (
         <Panel className="divide-y divide-slate-100 overflow-hidden">
           {filtrados.map((o) => (
-            <Linha key={o.id} onClick={() => setOrcamentoAberto(o.id)}>
-              <div className="flex items-start justify-between gap-4">
+            <div key={o.id} className="px-4 sm:px-5 py-4 transition-colors hover:bg-slate-50/80">
+              <div className="flex items-stretch gap-2 sm:gap-3">
+                <button type="button" onClick={() => setOrcamentoAberto(o.id)} className="min-w-0 flex-1 text-left">
+                  <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="font-medium text-slate-900 truncate">{nomeCliente(o.clienteId)}</p>
                   <p className="text-[13px] text-slate-500">{o.numero} · {dataBR(o.data)} · {o.itens.length} item{o.itens.length > 1 ? "ns" : ""}</p>
@@ -2086,226 +2278,92 @@ function Orcamentos(p) {
                     ]} />
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-[17px] font-semibold text-slate-900 tabular-nums">{brl(totalDoc(o))}</p>
-                  <Pill tone={ST_ORC[o.status].tone} className="mt-1.5">{ST_ORC[o.status].label}</Pill>
-                </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[17px] font-semibold text-slate-900 tabular-nums">{brl(totalDoc(o))}</p>
+                      <Pill tone={ST_ORC[o.status].tone} className="mt-1.5">{ST_ORC[o.status].label}</Pill>
+                    </div>
+                  </div>
+                </button>
+                {/* APROVACAO RAPIDA ORCAMENTO — pode aprovar rascunho ou enviado sem obrigar envio pelo app. */}
+                {["rascunho", "enviado"].includes(o.status) && (
+                  <button
+                    type="button"
+                    aria-label={`Aprovar ${o.numero}`}
+                    title="Aprovar orçamento"
+                    onClick={() => mudarStatusOrc(o.id, "aprovado")}
+                    className="self-center shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[12px] font-semibold text-emerald-800 ring-1 ring-emerald-200 transition hover:bg-emerald-100 active:scale-[0.98]"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Aprovar</span>
+                  </button>
+                )}
               </div>
-            </Linha>
+            </div>
           ))}
         </Panel>
       )}
 
-      {voz && <OrcamentoVoz {...p} onClose={() => setVoz(false)} onConfirmar={(rasc) => { setVoz(false); setRascunhoVoz(rasc); }} />}
     </>
   );
 }
 
-/* ------------------------------------------- orçamento por voz (com confirmação) */
-function OrcamentoVoz({ onClose, onConfirmar, clientes, servicos, produtos, empresa, salvarCliente, aviso }) {
-  const [fala, setFala] = useState("");
-  const [carregando, setCarregando] = useState(false);
-  const [erro, setErro] = useState(null);
-  const [previa, setPrevia] = useState(null);
-  const [comando, setComando] = useState("");
-  const [novoCliente, setNovoCliente] = useState(null);
+/* -------- interpretação por IA reaproveitada DENTRO do editor manual --------
+   A lógica de leitura da fala continua a mesma que existia na tela separada
+   de "orçamento por voz"; o que muda é o destino: em vez de gerar um documento
+   próprio, ela devolve um patch que preenche o formulário manual já aberto. */
+function interpretarParaFormulario(bruto, { clientes, servicos, produtos, empresa }) {
+  const itens = (bruto.itens || []).map((i) => {
+    const cat = i.tipo === "produto"
+      ? produtos.find((p) => p.id === i.catalogoId)
+      : servicos.find((s) => s.id === i.catalogoId);
+    const precoCatalogo = cat?.preco;
+    return {
+      id: uid(), tipo: i.tipo || "servico", catalogoId: cat?.id || null,
+      nome: cat
+        ? (i.tipo === "produto" ? `${cat.nome}${cat.marca ? " · " + cat.marca : ""}${cat.modelo ? " " + cat.modelo : ""}` : cat.nome)
+        : i.nome,
+      unidade: cat?.unidade || i.unidade || "unidade",
+      qtd: Number(i.qtd) || 1,
+      preco: i.preco != null ? Number(i.preco) : (precoCatalogo ?? 0),
+      custo: cat?.custo || 0,
+      obs: "",
+      semPreco: i.preco == null && precoCatalogo == null,
+      foraDoCatalogo: !cat,
+    };
+  });
+  const cl = clientes.find((c) => c.id === bruto.clienteId);
+  const parecidos = !cl && bruto.clienteSugerido
+    ? clientes.filter((c) => !c.excluidoEm && semAcento(c.fantasia || c.nome).includes(semAcento(String(bruto.clienteSugerido).split(" ")[0] || "")))
+    : [];
+  const avisos = [...(bruto.avisos || [])];
+  itens.filter((i) => i.semPreco).forEach((i) => avisos.push(`Informe o preço de "${i.nome}".`));
+  itens.filter((i) => i.foraDoCatalogo).forEach((i) => avisos.push(`"${i.nome}" não está no catálogo e entrou como item livre.`));
 
-  const interpretar = async (comandoCorrecao) => {
-    setCarregando(true); setErro(null);
-    try {
-      const bruto = await chamarIA(promptOrcamento({
-        fala, clientes, servicos, produtos,
-        rascunho: comandoCorrecao ? previa.bruto : null, comando: comandoCorrecao,
-      }));
-      setPrevia(montarPrevia(bruto));
-      setComando("");
-    } catch (e) {
-      setErro("Não consegui interpretar agora. Você pode tentar de novo ou montar o orçamento manualmente.");
-    }
-    setCarregando(false);
+  return {
+    patch: {
+      clienteId: cl?.id || null,
+      itens,
+      desconto: Number(bruto.desconto) || 0,
+      acrescimo: Number(bruto.acrescimo) || 0,
+      validade: bruto.validadeDias ? addDays(HOJE, Number(bruto.validadeDias)) : null,
+      condicao: bruto.condicao || null,
+      obs: bruto.obs || null,
+      localServico: bruto.localServico || null,
+    },
+    avisos, clienteSugerido: bruto.clienteSugerido || null, parecidos,
   };
-
-  const montarPrevia = (bruto) => {
-    const itens = (bruto.itens || []).map((i) => {
-      const cat = i.tipo === "produto" ? produtos.find((p) => p.id === i.catalogoId) : servicos.find((s) => s.id === i.catalogoId);
-      const precoCatalogo = cat?.preco;
-      return {
-        id: uid(), tipo: i.tipo || "servico", catalogoId: cat?.id || null,
-        nome: cat ? (i.tipo === "produto" ? `${cat.nome}${cat.marca ? " · " + cat.marca : ""}${cat.modelo ? " " + cat.modelo : ""}` : cat.nome) : i.nome,
-        unidade: cat?.unidade || i.unidade || "unidade",
-        qtd: Number(i.qtd) || 1,
-        preco: i.preco != null ? Number(i.preco) : (precoCatalogo ?? null),
-        custo: cat?.custo || 0,
-        precoDito: i.preco != null && precoCatalogo != null && Number(i.preco) !== precoCatalogo,
-        semCatalogo: !cat,
-      };
-    });
-    const cl = clientes.find((c) => c.id === bruto.clienteId);
-    const parecidos = !cl && bruto.clienteSugerido
-      ? clientes.filter((c) => semAcento(c.fantasia || c.nome).includes(semAcento(bruto.clienteSugerido.split(" ")[0] || ""))) : [];
-    return { bruto, itens, clienteId: cl?.id || null, clienteSugerido: bruto.clienteSugerido, parecidos,
-      desconto: Number(bruto.desconto) || 0, acrescimo: Number(bruto.acrescimo) || 0,
-      validadeDias: bruto.validadeDias || empresa.validadePadrao,
-      condicao: bruto.condicao || empresa.condicaoPadrao, obs: bruto.obs || "",
-      localServico: bruto.localServico || "", avisos: bruto.avisos || [] };
-  };
-
-  const total = previa ? Math.max(0, previa.itens.reduce((t, i) => t + i.qtd * (i.preco || 0), 0) - previa.desconto + previa.acrescimo) : 0;
-  const faltaPreco = previa?.itens.some((i) => i.preco == null);
-
-  const confirmar = () => {
-    onConfirmar({
-      clienteId: previa.clienteId, itens: previa.itens.filter((i) => i.preco != null).map(({ precoDito, semCatalogo, ...i }) => i),
-      desconto: previa.desconto, acrescimo: previa.acrescimo,
-      validade: addDays(HOJE, previa.validadeDias), condicao: previa.condicao, obs: previa.obs,
-      localServico: previa.localServico, data: HOJE, status: "rascunho",
-    });
-  };
-
-  return (
-    <>
-      <Modal open onClose={onClose} wide title="Orçamento por voz"
-        sub={previa ? "Confira antes de criar. Nada é salvo sem a sua confirmação." : "Fale naturalmente o que o cliente pediu."}
-        footer={previa ? (
-          <>
-            <Btn variant="ghost" onClick={() => { setPrevia(null); }}>Recomeçar</Btn>
-            <Btn disabled={!previa.clienteId || previa.itens.length === 0 || faltaPreco} onClick={confirmar}>Confirmar e abrir orçamento</Btn>
-          </>
-        ) : (
-          <>
-            <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-            <Btn disabled={!fala.trim() || carregando} icon={carregando ? Loader2 : Sparkles} onClick={() => interpretar(null)}>
-              {carregando ? "Interpretando…" : "Interpretar"}
-            </Btn>
-          </>
-        )}>
-
-        {!previa && (
-          <>
-            <CampoVoz valor={fala} onChange={setFala} rows={6}
-              placeholder="Ex.: cria um orçamento para o Condomínio Jardins com duas instalações de fechadura digital, mais uma visita técnica, cem reais de desconto, validade de 15 dias, serviço na portaria"
-              dica="Você também pode digitar." />
-            {erro && <p className="text-[13px] text-rose-700">{erro}</p>}
-            <p className="text-[12px] text-slate-400 leading-relaxed">
-              A interpretação usa um serviço de IA online. Se ele estiver indisponível, monte o orçamento pela tela normal — o resultado é exatamente o mesmo tipo de orçamento.
-            </p>
-          </>
-        )}
-
-        {previa && (
-          <>
-            <p className="text-[14px] font-medium text-slate-700">Entendi seu orçamento assim:</p>
-
-            <div className="rounded-2xl ring-1 ring-slate-200 p-4">
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-1.5">Cliente</p>
-              {previa.clienteId ? (
-                <p className="text-[15px] font-medium text-slate-900">{clientes.find((c) => c.id === previa.clienteId)?.fantasia || clientes.find((c) => c.id === previa.clienteId)?.nome}</p>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-[14px] text-amber-800">Não encontrei “{previa.clienteSugerido || "o cliente"}” no seu cadastro.</p>
-                  {previa.parecidos.length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="text-[12px] text-slate-500">Você quis dizer:</p>
-                      {previa.parecidos.map((c) => (
-                        <button key={c.id} onClick={() => setPrevia({ ...previa, clienteId: c.id })}
-                          className={cx("w-full text-left rounded-xl ring-1 ring-slate-200 px-3.5 py-2.5 text-[14px] hover:ring-teal-500", ring)}>
-                          {c.fantasia || c.nome}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex gap-2 flex-wrap">
-                    <Select value="" onChange={(e) => setPrevia({ ...previa, clienteId: e.target.value })} className="max-w-[240px]">
-                      <option value="">Escolher da lista…</option>
-                      {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
-                    </Select>
-                    <Btn size="sm" variant="soft" icon={Plus} onClick={() => setNovoCliente({ tipo: "PF", nome: previa.clienteSugerido || "" })}>Cadastrar novo</Btn>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100">
-              {previa.itens.map((i, idx) => (
-                <div key={i.id} className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[15px] text-slate-900">{i.nome}</p>
-                      <p className="text-[12px] text-slate-500 mt-0.5">
-                        {i.qtd} {unidadeLabel(i.unidade)} × {i.preco != null ? brl(i.preco) : "preço não informado"}
-                        {i.tipo === "produto" && " · produto"}
-                      </p>
-                      {i.precoDito && <p className="text-[12px] text-amber-700 mt-1">Preço dito por você — o catálogo não será alterado.</p>}
-                      {i.semCatalogo && <p className="text-[12px] text-amber-700 mt-1">Não está no catálogo. Entra só neste orçamento.</p>}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <p className="text-[15px] font-semibold text-slate-900 tabular-nums">{i.preco != null ? brl(i.qtd * i.preco) : "—"}</p>
-                      <button onClick={() => setPrevia({ ...previa, itens: previa.itens.filter((_, k) => k !== idx) })}
-                        aria-label={`Remover ${i.nome}`} className={cx("p-1.5 rounded-lg text-slate-300 hover:text-rose-600", ring)}><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                  {i.preco == null && (
-                    <div className="mt-3 max-w-[200px]">
-                      <Field label="Informe o preço unitário">
-                        <Input type="number" min="0" onChange={(e) => setPrevia({ ...previa, itens: previa.itens.map((x, k) => k === idx ? { ...x, preco: Number(e.target.value) } : x) })} />
-                      </Field>
-                    </div>
-                  )}
-                </div>
-              ))}
-              <div className="p-4 space-y-1.5 text-[14px]">
-                {previa.desconto > 0 && <div className="flex justify-between text-slate-500"><span>Desconto</span><span className="tabular-nums">− {brl(previa.desconto)}</span></div>}
-                {previa.acrescimo > 0 && <div className="flex justify-between text-slate-500"><span>Acréscimo</span><span className="tabular-nums">+ {brl(previa.acrescimo)}</span></div>}
-                <div className="flex justify-between items-baseline pt-2">
-                  <span className="font-medium text-slate-700">Total</span>
-                  <span className="text-2xl font-semibold text-slate-900 tabular-nums">{brl(total)}</span>
-                </div>
-                <p className="text-[12px] text-slate-400 pt-1">Validade de {previa.validadeDias} dias · {previa.condicao}</p>
-                {previa.localServico && <p className="text-[12px] text-slate-400">Local do serviço: {previa.localServico}</p>}
-                {previa.obs && <p className="text-[12px] text-slate-400">Observações: {previa.obs}</p>}
-              </div>
-            </div>
-
-            {previa.avisos.length > 0 && (
-              <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 p-3.5 space-y-1">
-                {previa.avisos.map((a, i) => <p key={i} className="text-[13px] text-amber-900">{a}</p>)}
-              </div>
-            )}
-
-            <div>
-              <Field label="Quer corrigir algo? Fale ou escreva a correção">
-                <Input value={comando} onChange={(e) => setComando(e.target.value)} placeholder="Ex.: muda para três fechaduras e tira a visita técnica" />
-              </Field>
-              <div className="flex gap-2 mt-2">
-                <Btn size="sm" variant="soft" disabled={!comando.trim() || carregando} icon={carregando ? Loader2 : Sparkles} onClick={() => interpretar(comando)}>
-                  {carregando ? "Aplicando…" : "Aplicar correção"}
-                </Btn>
-              </div>
-              {erro && <p className="text-[13px] text-rose-700 mt-2">{erro}</p>}
-            </div>
-          </>
-        )}
-      </Modal>
-
-      <ClienteForm form={novoCliente} setForm={setNovoCliente} onSave={salvarCliente}
-        onSaved={(id) => id && setPrevia((pv) => ({ ...pv, clienteId: id }))} />
-    </>
-  );
 }
 
 /* -------------------------------------------------------- documento do orçamento */
 function OrcamentoDoc(p) {
-  const { orc, cliente, empresa, mudarStatusOrc, duplicarOrcamento, gerarOS, setOrcamentoAberto, aviso, pedirConfirmacao } = p;
+  const { orc, cliente, empresa, mudarStatusOrc, duplicarOrcamento, gerarOS, setOrcamentoAberto, aviso, pedirConfirmacao, excluirRegistro, papel } = p;
   const [editando, setEditando] = useState(false);
   const c = cliente(orc.clienteId);
   if (editando) return <OrcamentoEditor {...p} inicial={orc} onFechar={() => setEditando(false)} />;
 
   const [gerandoPdf, setGerandoPdf] = useState(false);
-  const arquivoPdf = `Orcamento-${orc.numero}.pdf`;
-  const textoWhats = () => {
-    const linhas = orc.itens.map((i) => `• ${i.qtd}× ${i.nome} — ${brl(i.qtd * i.preco)}`).join("\n");
-    return `*${empresa.nome}*\nOrçamento ${orc.numero}\n\n${linhas}\n\n*Total: ${brl(totalDoc(orc))}*\nValidade: ${dataBR(orc.validade)}\n${orc.condicao}`;
-  };
+  const arquivoPdf = nomeArquivoDoc(orc.numero, c?.fantasia || c?.nome);
+  const textoWhats = () => mensagemOrcamento(orc, c, empresa);
   const baixarPdf = async () => {
     if (gerandoPdf) return;
     setGerandoPdf(true);
@@ -2356,11 +2414,14 @@ function OrcamentoDoc(p) {
         </button>
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
-            <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{orc.numero}</h1>
+            <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">
+              {orc.numero}<span className="text-slate-400 font-normal"> — </span>{c?.fantasia || c?.nome || "Cliente"}
+            </h1>
             <Pill tone={ST_ORC[orc.status].tone}>{ST_ORC[orc.status].label}</Pill>
           </div>
           <div className="flex flex-wrap gap-2">
             <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setEditando(true)}>Editar</Btn>
+            {papel === "proprietario" && <Btn variant="danger" size="sm" icon={Trash2} onClick={() => excluirRegistro("orcamento", orc.id, `${orc.numero} — ${c?.fantasia || c?.nome || "Cliente"}`, () => setOrcamentoAberto(null))}>Excluir</Btn>}
             <Btn variant="soft" size="sm" icon={Copy} onClick={() => pedirConfirmacao({
               titulo: `Duplicar o ${orc.numero}?`,
               texto: "Cria um novo rascunho com o mesmo cliente, itens e condições. Aprovação, OS e pagamentos não são copiados.",
@@ -2466,8 +2527,19 @@ function OrcamentoDoc(p) {
 
 /* -------------------------------------------------------------- editor de orçamento */
 function OrcamentoEditor(p) {
-  const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente, inicial, onFechar, cliente } = p;
+  const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente,
+    salvarServico, salvarProduto, inicial, onFechar, cliente, aviso } = p;
   const [novoCliente, setNovoCliente] = useState(false);
+  const [cadastroRapido, setCadastroRapido] = useState(null);   // "servico" | "produto"
+  /* IA e voz são auxiliares: preenchem este mesmo formulário e nada é salvo
+     sem o usuário revisar e clicar em criar/salvar. */
+  const [iaAberta, setIaAberta] = useState(false);
+  const [iaTexto, setIaTexto] = useState("");
+  const [iaOcupada, setIaOcupada] = useState(false);
+  const [iaErro, setIaErro] = useState(null);
+  const [iaAvisos, setIaAvisos] = useState([]);
+  const [iaSugestoes, setIaSugestoes] = useState([]);
+  const [salvando, setSalvando] = useState(false);
   const [d, setD] = useState(() => ({
     id: inicial?.id, numero: inicial?.numero, clienteId: inicial?.clienteId || "",
     status: inicial?.status || "rascunho", data: inicial?.data || HOJE,
@@ -2499,6 +2571,76 @@ function OrcamentoEditor(p) {
   const upItem = (id, k, v) => setD((s) => ({ ...s, itens: s.itens.map((i) => (i.id === id ? { ...i, [k]: v } : i)) }));
   const rmItem = (id) => setD((s) => ({ ...s, itens: s.itens.filter((i) => i.id !== id) }));
 
+  /* Preenche o formulário aberto a partir do que foi falado/digitado.
+     Acrescenta itens em vez de descartar o que já existe, e só sobrescreve
+     um campo quando a fala trouxe informação para ele. */
+  const preencherComIA = async () => {
+    if (!iaTexto.trim()) return;
+    setIaOcupada(true); setIaErro(null); setIaAvisos([]); setIaSugestoes([]);
+    try {
+      const bruto = await chamarIA(promptOrcamento({ fala: iaTexto, clientes, servicos, produtos }));
+      const { patch, avisos, clienteSugerido, parecidos } =
+        interpretarParaFormulario(bruto, { clientes, servicos, produtos, empresa });
+
+      setD((st) => {
+        const proximo = { ...st, itens: [...st.itens, ...patch.itens.map(({ semPreco, foraDoCatalogo, ...i }) => i)] };
+        if (patch.clienteId && !st.clienteId) {
+          proximo.clienteId = patch.clienteId;
+          proximo.local = clientes.find((x) => x.id === patch.clienteId)?.endereco || st.local;
+        }
+        if (patch.desconto) proximo.desconto = patch.desconto;
+        if (patch.acrescimo) proximo.acrescimo = patch.acrescimo;
+        if (patch.validade) proximo.validade = patch.validade;
+        if (patch.condicao) proximo.condicao = patch.condicao;
+        if (patch.localServico) proximo.localServico = patch.localServico;
+        if (patch.obs) proximo.obs = st.obs && st.obs !== empresa.observacaoPadrao ? `${st.obs}\n${patch.obs}` : patch.obs;
+        return proximo;
+      });
+
+      const recados = [...avisos];
+      if (!patch.clienteId && clienteSugerido) recados.push(`Não encontrei "${clienteSugerido}" no cadastro. Selecione o cliente ou cadastre um novo.`);
+      setIaAvisos(recados);
+      setIaSugestoes(parecidos.slice(0, 4));
+      setIaTexto("");
+      aviso?.("Formulário preenchido. Revise antes de salvar.");
+    } catch (e) {
+      setIaErro("Não consegui interpretar agora. Continue preenchendo normalmente — o orçamento manual não depende da IA.");
+    }
+    setIaOcupada(false);
+  };
+
+  /* Salva e, quando é um orçamento novo, oferece os próximos passos em vez de
+     sair da tela ou baixar PDF sem o usuário pedir. */
+  const salvarEDecidir = async () => {
+    if (!d.clienteId || d.itens.length === 0 || salvando) return;
+    setSalvando(true);
+    try {
+      const edicao = Boolean(d.id);
+      const id = await salvarOrcamento(d);
+      if (!id) return;                   // erro já foi avisado por salvarOrcamento
+      if (edicao) { onFechar(); return; }
+      /* pós-criação: o registro já está salvo e a tela de Orçamentos abre as
+         próximas ações. Nada é baixado automaticamente. */
+      p.onOrcamentoCriado?.(id);
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  /* Cadastro rápido sem sair do orçamento: salva no catálogo e já usa o item. */
+  const cadastrarServicoRapido = async (dados) => {
+    const id = await salvarServico({ ...dados, ativo: true });
+    if (!id) return;
+    addServico({ ...dados, id });
+    setCadastroRapido(null);
+  };
+  const cadastrarProdutoRapido = async (dados) => {
+    const id = await salvarProduto({ ...dados, ativo: true });
+    if (!id) return;
+    addProduto({ ...dados, id });
+    setCadastroRapido(null);
+  };
+
   const dispS = servicos.filter((s) => s.ativo && semAcento(s.nome).includes(semAcento(buscaCat)));
   const dispP = produtos.filter((x) => x.ativo && semAcento(`${x.nome} ${x.marca} ${x.modelo}`).includes(semAcento(buscaCat)));
 
@@ -2507,7 +2649,48 @@ function OrcamentoEditor(p) {
       <button onClick={onFechar} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
         <ArrowLeft className="w-4 h-4" /> Voltar
       </button>
-      <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche." />
+      <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche."
+        action={
+          <Btn variant="soft" icon={Sparkles} onClick={() => setIaAberta((v) => !v)}>
+            {iaAberta ? "Fechar assistente" : "Preencher com IA / voz"}
+          </Btn>
+        } />
+
+      {iaAberta && (
+        <Panel className="p-5 mb-6">
+          <Rotulo>Assistente · opcional</Rotulo>
+          <p className="text-[13px] text-slate-500 mb-3 leading-relaxed">
+            Fale ou escreva o pedido do cliente. O ZiisTec preenche os campos abaixo e você continua editando tudo à mão.
+          </p>
+          <CampoVoz rows={3} valor={iaTexto} onChange={setIaTexto}
+            placeholder="Ex.: orçamento para o Condomínio Jardins com duas fechaduras digitais, uma visita técnica, cem reais de desconto e pagamento no Pix" />
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <Btn size="sm" icon={iaOcupada ? Loader2 : Sparkles} disabled={!iaTexto.trim() || iaOcupada} onClick={preencherComIA}>
+              {iaOcupada ? "Interpretando…" : "Preencher formulário"}
+            </Btn>
+            <span className="text-[12px] text-slate-400">Nada é salvo sem a sua confirmação.</span>
+          </div>
+          {iaErro && <p className="text-[13px] text-rose-700 mt-3">{iaErro}</p>}
+          {iaAvisos.length > 0 && (
+            <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 p-3.5 mt-3 space-y-1">
+              {iaAvisos.map((a, i) => <p key={i} className="text-[13px] text-amber-900">{a}</p>)}
+            </div>
+          )}
+          {iaSugestoes.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[12px] text-slate-500 mb-1.5">Você quis dizer:</p>
+              <div className="flex flex-wrap gap-2">
+                {iaSugestoes.map((c) => (
+                  <button key={c.id} onClick={() => { escolherCliente(c.id); setIaSugestoes([]); }}
+                    className={cx("rounded-xl ring-1 ring-slate-200 px-3 py-2 text-[13px] hover:ring-teal-500", ring)}>
+                    {c.fantasia || c.nome}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </Panel>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         <div className="lg:col-span-2 space-y-7">
@@ -2518,7 +2701,7 @@ function OrcamentoEditor(p) {
                 <div className="flex gap-2 flex-wrap sm:flex-nowrap">
                   <Select value={d.clienteId} onChange={(e) => escolherCliente(e.target.value)} className="flex-1">
                     <option value="">Selecione um cliente</option>
-                    {clientes.map((x) => <option key={x.id} value={x.id}>{x.fantasia || x.nome}</option>)}
+                    {clientes.filter((x) => !x.excluidoEm).map((x) => <option key={x.id} value={x.id}>{x.fantasia || x.nome}</option>)}
                   </Select>
                   <Btn variant="soft" icon={Plus} onClick={() => setNovoCliente(true)} className="shrink-0">Cadastrar novo cliente</Btn>
                 </div>
@@ -2559,6 +2742,11 @@ function OrcamentoEditor(p) {
                       </button>))}
                   {(abaCat === "servicos" ? dispS : dispP).length === 0 && <p className="text-[13px] text-slate-400 py-1">Nada encontrado com esse nome.</p>}
                 </div>
+                {/* o que ainda não está no catálogo pode ser cadastrado aqui mesmo */}
+                <button onClick={() => setCadastroRapido(abaCat === "servicos" ? "servico" : "produto")}
+                  className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
+                  + Cadastrar {abaCat === "servicos" ? "serviço" : "produto"} no catálogo
+                </button>
                 </>)}
               </div>
 
@@ -2583,8 +2771,18 @@ function OrcamentoEditor(p) {
                           className={cx("p-1.5 -m-1 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 shrink-0", ring)}><Trash2 className="w-4 h-4" /></button>
                       </div>
                       <div className="grid grid-cols-3 gap-3 sm:gap-4 items-end">
-                        <Field label={`Qtd em ${unidadeLabel(i.unidade)}`}><Input type="number" min="0" step="0.5" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", num(e.target.value))} /></Field>
-                        <Field label="Valor unitário"><Input type="number" min="0" step="0.01" value={i.preco} onChange={(e) => upItem(i.id, "preco", num(e.target.value))} /></Field>
+                        <Field label={`Qtd em ${unidadeLabel(i.unidade)}`}>
+                          <div className="flex items-stretch gap-1.5">
+                            <button type="button" aria-label={`Diminuir quantidade de ${i.nome}`}
+                              onClick={() => upItem(i.id, "qtd", Math.max(0, num(i.qtd) - 1))}
+                              className={cx("w-11 shrink-0 rounded-xl ring-1 ring-slate-200 text-slate-600 text-lg leading-none hover:bg-slate-50", ring)}>−</button>
+                            <Input type="number" min="0" step="0.5" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", num(e.target.value))} className="text-center" />
+                            <button type="button" aria-label={`Aumentar quantidade de ${i.nome}`}
+                              onClick={() => upItem(i.id, "qtd", num(i.qtd) + 1)}
+                              className={cx("w-11 shrink-0 rounded-xl ring-1 ring-slate-200 text-slate-600 text-lg leading-none hover:bg-slate-50", ring)}>+</button>
+                          </div>
+                        </Field>
+                        <Field label="Valor unitário"><InputMoeda valor={i.preco} onChange={(v) => upItem(i.id, "preco", v)} aria-label={`Valor unitário de ${i.nome}`} /></Field>
                         <div className="text-right pb-3">
                           <p className="text-[12px] text-slate-400">Total</p>
                           <p className="text-[19px] font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</p>
@@ -2627,24 +2825,212 @@ function OrcamentoEditor(p) {
           <Panel className="p-5">
             <div className="flex justify-between text-[14px] text-slate-500 mb-4"><span>Subtotal</span><span className="tabular-nums">{brl(somaItens(d.itens))}</span></div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Desconto"><Input type="number" min="0" value={d.desconto} onChange={(e) => setD({ ...d, desconto: Number(e.target.value) })} /></Field>
-              <Field label="Acréscimo"><Input type="number" min="0" value={d.acrescimo} onChange={(e) => setD({ ...d, acrescimo: Number(e.target.value) })} /></Field>
+              <Field label="Desconto"><InputMoeda valor={d.desconto} onChange={(v) => setD({ ...d, desconto: v })} aria-label="Desconto" /></Field>
+              <Field label="Acréscimo"><InputMoeda valor={d.acrescimo} onChange={(v) => setD({ ...d, acrescimo: v })} aria-label="Acréscimo" /></Field>
             </div>
             <div className="flex justify-between items-baseline pt-4 mt-4 border-t border-slate-200">
               <span className="text-[14px] font-medium text-slate-600">Total</span>
               <span className="text-[26px] font-semibold text-slate-900 tracking-tight tabular-nums">{brl(totalDoc(d))}</span>
             </div>
-            <Btn className="w-full mt-5" disabled={!d.clienteId || d.itens.length === 0} onClick={() => { salvarOrcamento(d); onFechar(); }}>
-              {d.id ? "Salvar alterações" : "Criar orçamento"}
+            <Btn className="w-full mt-5" disabled={!d.clienteId || d.itens.length === 0 || salvando} onClick={salvarEDecidir}>
+              {salvando ? "Salvando…" : d.id ? "Salvar alterações" : "Criar orçamento"}
             </Btn>
             <p className="text-[12px] text-slate-400 text-center mt-3 leading-relaxed">Mudar o valor aqui não altera o preço do seu catálogo.</p>
           </Panel>
         </section>
       </div>
 
+      {/* barra fixa no celular/tablet: total e ação principal sempre à mão */}
+      <div className="lg:hidden sticky bottom-0 -mx-4 sm:-mx-8 mt-6 border-t border-slate-200 bg-white/95 backdrop-blur px-4 sm:px-8 py-3 flex items-center justify-between gap-4 z-20">
+        <div>
+          <p className="text-[11px] text-slate-500 leading-none">Total</p>
+          <p className="text-[20px] font-semibold text-slate-900 tabular-nums leading-tight">{brl(totalDoc(d))}</p>
+        </div>
+        <Btn disabled={!d.clienteId || d.itens.length === 0 || salvando} onClick={salvarEDecidir} className="min-w-[170px]">
+          {salvando ? "Salvando…" : d.id ? "Salvar alterações" : "Criar orçamento"}
+        </Btn>
+      </div>
+
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={(novo) => { const id = salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
+
+      <CadastroRapidoCatalogo
+        tipo={cadastroRapido}
+        verCusto={p.permitido ? p.permitido("verValores") : true}
+        onClose={() => setCadastroRapido(null)}
+        onSalvar={cadastroRapido === "servico" ? cadastrarServicoRapido : cadastrarProdutoRapido}
+      />
     </>
+  );
+}
+
+/* Confirmação após criar o orçamento. O documento já está salvo; aqui o usuário
+   escolhe o próximo passo. O PDF sai sempre do registro persistido e nunca é
+   baixado sem ele pedir. */
+function OrcamentoCriado({ id, orcamentos, empresa, cliente, aviso, mudarStatusOrc, onVer, onDepois }) {
+  const [ocupado, setOcupado] = useState(false);
+  if (!id) return null;
+  const orc = (orcamentos || []).find((o) => o.id === id);
+  if (!orc) return null;
+  const c = cliente(orc.clienteId);
+  const arquivo = nomeArquivoDoc(orc.numero, c?.fantasia || c?.nome);
+  const texto = () => mensagemOrcamento(orc, c, empresa);
+
+  const gerarPdf = async () => {
+    if (ocupado) return;
+    setOcupado(true);
+    try { await baixarOrcamentoPDF(orc.id, orc.empresaId, arquivo); aviso("PDF gerado a partir do orçamento salvo."); }
+    catch (e) { aviso(e?.message || "Não foi possível gerar o PDF."); }
+    finally { setOcupado(false); }
+  };
+
+  const enviar = async () => {
+    if (ocupado) return;
+    const txt = texto();
+    if (suportaCompartilharArquivo()) {
+      setOcupado(true);
+      try {
+        const r = await compartilharOrcamentoPDF({ quoteId: orc.id, companyId: orc.empresaId, filename: arquivo, text: txt });
+        if (r.shared) { if (orc.status === "rascunho") await mudarStatusOrc(orc.id, "enviado"); else aviso("PDF compartilhado."); setOcupado(false); return; }
+      } catch (e) { aviso(e?.message || "Não foi possível compartilhar o PDF."); setOcupado(false); return; }
+      setOcupado(false);
+    }
+    window.open(`https://wa.me/55${soDigitos(c?.whatsapp)}?text=${encodeURIComponent(txt)}`, "_blank");
+    if (orc.status === "rascunho") await mudarStatusOrc(orc.id, "enviado");
+  };
+
+  return (
+    <Modal open onClose={onDepois} title={`${orc.numero} criado`} sub={`${c?.fantasia || c?.nome || "Cliente"} · ${brl(totalDoc(orc))}`}>
+      <p className="text-[14px] text-slate-600 leading-relaxed">
+        O orçamento já está salvo. O que você quer fazer agora?
+      </p>
+      <div className="space-y-2.5">
+        <Btn className="w-full" icon={FileText} onClick={onVer}>Ver orçamento</Btn>
+        <Btn variant="soft" className="w-full" icon={Printer} disabled={ocupado} onClick={gerarPdf}>
+          {ocupado ? "Gerando…" : "Gerar PDF"}
+        </Btn>
+        <Btn variant="soft" className="w-full" icon={Send} disabled={ocupado} onClick={enviar}>Enviar pelo WhatsApp</Btn>
+        <Btn variant="ghost" className="w-full" onClick={onDepois}>Continuar depois</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/* Cadastro rápido de serviço/produto sem sair do orçamento. Só o essencial;
+   o cadastro completo continua em "Serviços e produtos". */
+function CadastroRapidoCatalogo({ tipo, onClose, onSalvar, verCusto = true }) {
+  const serv = tipo === "servico";
+  const vazio = { nome: "", categoria: "", marca: "", modelo: "", unidade: "unidade", preco: 0, custo: 0, margemPct: "", descricao: "", temGarantia: false, prazo: 0 };
+  const [f, setF] = useState(vazio);
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => { if (tipo) setF(vazio); }, [tipo]);
+  if (!tipo) return null;
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  const atalhos = serv ? [30, 60, 90, 180, 365] : [3, 6, 12, 24, 36];
+  const unidadePrazo = serv ? "dias" : "meses";
+
+  return (
+    <Modal open onClose={onClose} wide
+      title={serv ? "Cadastrar serviço" : "Cadastrar produto"}
+      sub="Fica salvo no catálogo e entra neste orçamento."
+      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn disabled={!f.nome.trim() || ocupado} onClick={async () => {
+          setOcupado(true);
+          const prazo = f.temGarantia ? Math.max(0, num(f.prazo)) : 0;
+          await onSalvar(serv
+            ? { nome: f.nome.trim(), categoria: f.categoria.trim(), descricao: f.descricao, unidade: f.unidade,
+                preco: num(f.preco), custo: verCusto ? num(f.custo) : 0, garantiaDias: prazo, retornoDias: 0 }
+            : { nome: f.nome.trim(), marca: f.marca.trim(), modelo: f.modelo.trim(), descricao: f.descricao,
+                unidade: f.unidade, preco: num(f.preco), custo: verCusto ? num(f.custo) : 0, garantiaMeses: prazo });
+          setOcupado(false);
+        }}>{ocupado ? "Salvando…" : "Salvar e adicionar"}</Btn></>}>
+      <Field label={serv ? "Nome do serviço" : "Nome do produto"}>
+        <Input value={f.nome} onChange={(e) => set("nome", e.target.value)} autoFocus
+          placeholder={serv ? "Ex.: Instalação de fechadura digital" : "Ex.: Fechadura digital biométrica"} />
+      </Field>
+      {serv ? (
+        <Field label="Categoria"><Input value={f.categoria} onChange={(e) => set("categoria", e.target.value)} placeholder="Ex.: Controle de acesso" /></Field>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Marca"><Input value={f.marca} onChange={(e) => set("marca", e.target.value)} /></Field>
+          <Field label="Modelo"><Input value={f.modelo} onChange={(e) => set("modelo", e.target.value)} /></Field>
+        </div>
+      )}
+      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+        <Field label="Unidade">
+          <Select value={f.unidade} onChange={(e) => set("unidade", e.target.value)}>
+            {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Preço de venda"><InputMoeda valor={f.preco} onChange={(v) => set("preco", v)} aria-label="Preço" /></Field>
+        {verCusto && (
+          <Field label="Custo" hint="Uso interno."><InputMoeda valor={f.custo} onChange={(v) => set("custo", v)} aria-label="Custo" /></Field>
+        )}
+      </div>
+
+      {/* CALCULADORA RAPIDA DE MARGEM */}
+      {!serv && verCusto && (
+        <div className="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 p-4 space-y-3">
+          <div className="grid sm:grid-cols-2 gap-4 items-end">
+            <Field label="Acréscimo sobre custo (%)" hint="Ex.: R$ 80 + 45% = R$ 116">
+              <Input type="number" min="0" step="0.01" value={f.margemPct ?? ""} placeholder="45" onChange={(e) => {
+                const raw = e.target.value;
+                const margemPct = raw === "" ? "" : num(raw);
+                setF((s) => ({ ...s, margemPct, ...(raw !== "" ? { preco: precoComAcrescimo(s.custo, margemPct) } : {}) }));
+              }} />
+            </Field>
+            <div className="pb-1">
+              <p className="text-[12px] text-emerald-700">Preço calculado</p>
+              <p className="text-[20px] font-semibold text-emerald-900 tabular-nums">{brl(f.preco)}</p>
+              <p className="text-[12px] text-emerald-700">Lucro bruto/un.: {brl(Math.max(0, num(f.preco) - num(f.custo)))}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,
+          usado automaticamente quando uma OS com este item for finalizada */}
+      <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-[14px] font-medium text-slate-800">Tem garantia?</p>
+            <p className="text-[12.5px] text-slate-500 mt-0.5">Vira o prazo padrão deste item no catálogo.</p>
+          </div>
+          <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
+            {[[false, "Não"], [true, "Sim"]].map(([v, label]) => (
+              <button key={label} type="button" onClick={() => setF((st) => ({ ...st, temGarantia: v, prazo: v ? (st.prazo || (serv ? 90 : 12)) : 0 }))}
+                aria-pressed={f.temGarantia === v}
+                className={cx("px-5 py-2 rounded-lg text-[14px] font-medium transition-colors", f.temGarantia === v ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {f.temGarantia && (
+          <div className="flex flex-wrap gap-2 items-end">
+            {atalhos.map((v) => (
+              <button key={v} type="button" onClick={() => set("prazo", v)} aria-pressed={num(f.prazo) === v}
+                className={cx("px-3.5 py-2.5 rounded-xl text-[13px] font-medium transition-colors", ring,
+                  num(f.prazo) === v ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+                {v} {unidadePrazo}
+              </button>
+            ))}
+            <div className="w-[150px]">
+              <Field label="Personalizado">
+                <Input type="number" min="1" value={f.prazo} aria-label={`Prazo em ${unidadePrazo}`}
+                  onChange={(e) => set("prazo", Math.max(1, num(e.target.value)))} />
+              </Field>
+            </div>
+          </div>
+        )}
+      </div>
+      <Field label="Descrição" hint="Opcional.">
+        <CampoVoz rows={2} valor={f.descricao} onChange={(v) => set("descricao", v)} placeholder="O que está incluso" />
+      </Field>
+      <p className="text-[12px] text-slate-400 leading-relaxed">
+        Retorno sugerido, estoque e demais campos continuam no cadastro completo em "Serviços e produtos".
+      </p>
+    </Modal>
   );
 }
 
@@ -2669,7 +3055,7 @@ function FormItemLivre({ onAdicionar, rotulo = "Adicionar ao orçamento" }) {
             {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
           </Select>
         </Field>
-        <Field label="Preço unitário"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => set("preco", num(e.target.value))} /></Field>
+        <Field label="Preço unitário"><InputMoeda valor={f.preco} onChange={(v) => set("preco", v)} aria-label="Preço" /></Field>
         <div className="text-right pb-3">
           <p className="text-[12px] text-slate-400">Total</p>
           <p className="text-[19px] font-semibold text-slate-900 tabular-nums">{brl(total)}</p>
@@ -2769,11 +3155,11 @@ function OrdensServico(p) {
 
 /* Abertura de OS pensada para o campo: descrever o problema já basta.
    O catálogo é atalho, não obrigação. */
-function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual }) {
+function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual, dataInicial = "" }) {
   const [novoCliente, setNovoCliente] = useState(false);
   const [f, setF] = useState({
     clienteId: "", descricaoLivre: "", local: "", localServico: "",
-    itens: [], data: "", hora: "09:00", responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null, obs: "",
+    itens: [], data: dataInicial || "", hora: "09:00", responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null, obs: "",
   });
   const [catalogo, setCatalogo] = useState(false);
   const [abaCat, setAbaCat] = useState("servicos");
@@ -2784,25 +3170,32 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
   };
   const pronto = f.clienteId && (f.descricaoLivre.trim() || f.itens.length > 0);
 
-  const criar = () => {
-    salvarOS({
-      ...f, status: f.data ? "agendada" : "aguardando", checklist: [],
-      responsavel: f.responsavel || empresa.responsavel,
-    });
-    onClose();
+  const [criando, setCriando] = useState(false);
+  const criar = async () => {
+    if (criando) return;
+    setCriando(true);
+    try {
+      await salvarOS({
+        ...f, status: f.data ? "agendada" : "aguardando", checklist: [],
+        responsavel: f.responsavel || empresa.responsavel,
+      });
+      onClose();
+    } finally {
+      setCriando(false);
+    }
   };
 
   return (
     <>
       <Modal open onClose={onClose} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
         footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-          <Btn disabled={!pronto} onClick={criar}>Abrir ordem de serviço</Btn></>}>
+          <Btn disabled={!pronto || criando} onClick={criar}>{criando ? "Criando…" : "Abrir ordem de serviço"}</Btn></>}>
 
         <Field label="Cliente">
           <div className="flex gap-2 flex-wrap sm:flex-nowrap">
             <Select value={f.clienteId} onChange={(e) => escolherCliente(e.target.value)} className="flex-1">
               <option value="">Selecione um cliente</option>
-              {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+              {clientes.filter((c) => !c.excluidoEm).map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
             </Select>
             <Btn variant="soft" icon={Plus} onClick={() => setNovoCliente(true)} className="shrink-0">Cadastrar novo cliente</Btn>
           </div>
@@ -2883,7 +3276,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
       </Modal>
 
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={(novo) => { const id = salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
     </>
   );
 }
@@ -2891,7 +3284,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
 function OSDetalhe(p) {
   const { os, cliente, nomeCliente, setOsAberta, mudarStatusOS, setOrdens, servicos, produtos, orcamentos, setTela, setOrcamentoAberto,
     lancamentos, ordens, agendarOS, desagendarOS, empresa, pedirConfirmacao, garantias, finalizarOS, abrirGarantia, abrirOS,
-    permitido, equipe, usuarioAtual, real, empresaId, aviso, papel, resolverPrecificacao } = p;
+    permitido, equipe, usuarioAtual, real, empresaId, aviso, papel, resolverPrecificacao, excluirRegistro } = p;
   const verValores = permitido("verValores");
   const [precosPendentes, setPrecosPendentes] = useState({});
   const [liberandoCobranca, setLiberandoCobranca] = useState(false);
@@ -2917,7 +3310,19 @@ function OSDetalhe(p) {
     setOrdens((l) => l.map((x) => (x.id === os.id ? { ...x, ...patch } : x)));
     if (real) {
       clearTimeout(persistTimer.current);
-      persistTimer.current = setTimeout(() => { const tarefa = patch.fotos ? persistirFotosOSDB(os.id, patch.fotos, empresaId, usuarioAtual?.id) : persistirEdicaoOSDB(next, patch, empresaId, usuarioAtual?.id, papel); tarefa.then((r) => { if (r?.checklist) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, checklist: r.checklist } : x)); if (r?.fotos) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, fotos: r.fotos } : x)); }).catch((e) => aviso(mensagemErro(e))); }, 500);
+      persistTimer.current = setTimeout(async () => {
+        try {
+          const { fotos: fotosPatch, ...patchSemFotos } = patch;
+          const tarefas = [];
+          if (fotosPatch) tarefas.push(persistirFotosOSDB(os.id, fotosPatch, empresaId, usuarioAtual?.id));
+          if (Object.keys(patchSemFotos).length) tarefas.push(persistirEdicaoOSDB(next, patchSemFotos, empresaId, usuarioAtual?.id, papel));
+          const resultados = await Promise.all(tarefas);
+          resultados.forEach((r) => {
+            if (r?.checklist) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, checklist: r.checklist } : x));
+            if (r?.fotos) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, fotos: r.fotos } : x));
+          });
+        } catch (e) { aviso(mensagemErro(e)); }
+      }, 500);
     }
   };
   const toggleCheck = (id) => up({ checklist: os.checklist.map((k) => (k.id === id ? { ...k, feito: !k.feito } : k)) });
@@ -2927,11 +3332,12 @@ function OSDetalhe(p) {
   const cobrado = totalOS(os);
   const margem = cobrado > 0 ? Math.round(((cobrado - custoTotal) / cobrado) * 100) : 0;
 
+  const podeAdministrarOS = permitido("todasOS");
   const acoes = [];
-  if (os.status === "aguardando") acoes.push({ label: "Agendar", icon: CalendarClock, fn: () => setAgendando(true), principal: true });
+  if (podeAdministrarOS && os.status === "aguardando") acoes.push({ label: "Agendar", icon: CalendarClock, fn: () => setAgendando(true), principal: true });
   if (os.status === "agendada") {
     acoes.push({ label: "Iniciar atendimento", fn: () => mudarStatusOS(os, "andamento"), principal: true });
-    acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
+    if (podeAdministrarOS) acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
   }
   if (os.status === "andamento") acoes.push({ label: "Finalizar atendimento", icon: Check, fn: () => setFinalizando(true), principal: true });
 
@@ -2948,7 +3354,8 @@ function OSDetalhe(p) {
         </div>
         <div className="flex flex-wrap gap-2">
           {acoes.map((a) => <Btn key={a.label} size="sm" icon={a.icon} variant={a.principal ? "primary" : "soft"} onClick={a.fn}>{a.label}</Btn>)}
-          {os.status !== "concluida" && os.status !== "cancelada" && (
+          {papel === "proprietario" && <Btn size="sm" variant="danger" icon={Trash2} onClick={() => excluirRegistro("os", os.id, os.numero, () => setOsAberta(null))}>Excluir OS</Btn>}
+          {podeAdministrarOS && os.status !== "concluida" && os.status !== "cancelada" && (
             <Btn size="sm" variant="danger" onClick={() => pedirConfirmacao({
               titulo: `Cancelar a ${os.numero}?`, texto: "A ordem sai da agenda e da lista de trabalhos em aberto. O histórico continua disponível.",
               confirmar: "Cancelar ordem", acao: () => mudarStatusOS(os, "cancelada"),
@@ -2986,7 +3393,7 @@ function OSDetalhe(p) {
       <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         <div className="lg:col-span-2 space-y-7">
           <section>
-            <Rotulo acao={os.data ? (
+            <Rotulo acao={podeAdministrarOS && os.data ? (
               <button onClick={() => pedirConfirmacao({ titulo: "Remover agendamento?", texto: "A ordem volta para a lista de trabalhos sem data.", confirmar: "Remover", acao: () => desagendarOS(os.id) })}
                 className="text-[13px] font-medium text-slate-500 hover:text-rose-700">Remover agendamento</button>) : null}>Agendamento e local</Rotulo>
             <Panel className="p-5 space-y-5">
@@ -3180,13 +3587,14 @@ function OSDetalhe(p) {
 
           <section>
             <Rotulo>Checklist do atendimento</Rotulo>
-            <Panel className="p-5">
+            <Panel className="p-4 sm:p-5">
+              {papel === "proprietario" && <ChecklistTemplatePicker companyId={empresaId} workOrderId={os.id} onApplied={async()=>{const checklist=await carregarChecklistOSV2DB(os.id);setOrdens(l=>l.map(x=>x.id===os.id?{...x,checklist:checklist.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done),obrigatorio:Boolean(c.required),templateId:c.source_template_id||null}))}:x));}} />}
               {os.checklist.length > 0 && (
                 <div className="space-y-0.5 mb-4">
                   {os.checklist.map((k) => (
-                    <button key={k.id} onClick={() => toggleCheck(k.id)} aria-pressed={k.feito} className={cx("w-full flex items-center gap-3 py-2.5 text-left group", ring)}>
+                    <button key={k.id} onClick={() => toggleCheck(k.id)} aria-pressed={k.feito} className={cx("w-full min-h-11 flex items-center gap-3 py-2.5 text-left group", ring)}>
                       {k.feito ? <CheckCircle2 className="w-5 h-5 text-teal-700 shrink-0" /> : <Circle className="w-5 h-5 text-slate-300 shrink-0 group-hover:text-slate-400" />}
-                      <span className={cx("text-[14px]", k.feito ? "text-slate-400 line-through" : "text-slate-700")}>{k.texto}</span>
+                      <span className={cx("min-w-0 flex-1 break-words text-[14px]", k.feito ? "text-slate-400 line-through" : "text-slate-700")}>{k.texto}</span>{k.obrigatorio&&<span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800">Obrigatório</span>}
                     </button>
                   ))}
                 </div>
@@ -3314,7 +3722,18 @@ function OSDetalhe(p) {
       )}
 
       {finalizando && <FinalizarAtendimento os={os} onClose={() => setFinalizando(false)} servicos={servicos} produtos={produtos}
-        onSalvarParcial={(patch) => up(patch)} onFinalizar={(extras) => { finalizarOS(os.id, extras); setFinalizando(false); }} jaConcluida={os.status === "concluida"} verValores={verValores} />}
+        onSalvarParcial={(patch) => up(patch)} onFinalizar={async(extras) => {
+          if(extras.precisaRetornar){
+            try{
+              up({relato:extras.relato,fotos:extras.fotos,pendencia:extras.pendencia});
+              if(real) await marcarRetornoOSV2DB({workOrderId:os.id,reason:extras.retornoMotivo,materialNeeded:extras.retornoMaterial,notes:extras.retornoObs,priority:extras.retornoPrioridade,expectedReturnDate:extras.retornoPrevisao,requestId:extras.retornoRequestId});
+              setOrdens(l=>l.map(x=>x.id===os.id?{...x,precisaRetorno:true,pendencia:extras.pendencia||x.pendencia,historico:[...(x.historico||[]),{id:uid(),quando:HOJE,texto:`Precisa retornar · ${extras.retornoMotivo}` }]}:x));
+              setFinalizando(false);
+            }catch(e){aviso(mensagemErro(e));}
+            return;
+          }
+          finalizarOS(os.id, extras); setFinalizando(false);
+        }} jaConcluida={os.status === "concluida"} verValores={verValores} />}
     </>
   );
 }
@@ -3344,7 +3763,7 @@ function BlocoRelato({ valor, onChange, placeholder, destaque = true, rows = 5 }
 }
 
 /* --------------------------------------------------- finalizar atendimento */
-function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produtos, jaConcluida, verValores = true }) {
+function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servicos = [], produtos, jaConcluida, verValores = true }) {
   const [etapa, setEtapa] = useState(0);
   const [relato, setRelato] = useState(os.relato || "");
   const [materiais, setMateriais] = useState([]);
@@ -3353,8 +3772,18 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
   const [custosExtras, setCustosExtras] = useState(os.custosExtras || 0);
   const [temPendencia, setTemPendencia] = useState(os.pendencia ? true : null);
   const [pendencia, setPendencia] = useState(os.pendencia || "");
+  /* resultado operacional do atendimento: finalizado, precisa voltar ou não finalizado */
+  const [resultado, setResultado] = useState("finalizado");
+  const [retornoMotivo,setRetornoMotivo]=useState('');
+  const [retornoMaterial,setRetornoMaterial]=useState('');
+  const [retornoObs,setRetornoObs]=useState('');
+  const [retornoPrioridade,setRetornoPrioridade]=useState('normal');
+  const [retornoPrevisao,setRetornoPrevisao]=useState('');
+  const [retornoRequestId]=useState(()=>novoReturnRequestId());
+  const [concluindo, setConcluindo] = useState(false);
   const [fotos, setFotos] = useState(os.fotos || []);
   const [addProduto, setAddProduto] = useState(false);
+  const [garantiaOverrides, setGarantiaOverrides] = useState({});
 
   const anexarFotos = (ev, categoria) => {
     const arquivos = Array.from(ev.target.files || []);
@@ -3362,12 +3791,60 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
   };
 
   const itensFinais = [...os.itens, ...materiais];
+
+  /* Garantia efetiva por linha da OS. O proprietário pode mudar apenas este
+     atendimento; o catálogo continua sendo o padrão dos próximos serviços. */
+  const execucaoPrevista = os.data || HOJE;
+  const itensGarantia = os.emGarantia ? [] : itensFinais.filter((i) =>
+    (i.tipo === "servico" || i.tipo === "produto") && i.catalogoId
+  );
+  const garantiaAtual = (i) => {
+    const local = garantiaOverrides[i.id] || {};
+    const politica = local.policy || i.garantiaPolitica || "catalog";
+    if (i.tipo === "servico") {
+      const cat = servicos.find((x) => x.id === i.catalogoId);
+      const catalogo = Math.max(0, Number(cat?.garantiaDias || 0));
+      const dias = Math.max(1, Math.min(3650, Number(local.days ?? i.garantiaDiasOverride ?? (catalogo || 90))));
+      const efetivo = politica === "disabled" ? 0 : politica === "custom" ? dias : catalogo;
+      return { politica, dias, meses: null, efetivo, unidade: "dias", origem: "Serviço", prazo: efetivo > 0 ? `${efetivo} dias` : "sem garantia", ate: efetivo > 0 ? addDays(execucaoPrevista, efetivo) : null };
+    }
+    const cat = produtos.find((x) => x.id === i.catalogoId);
+    const catalogo = Math.max(0, Number(cat?.garantiaMeses || 0));
+    const meses = Math.max(1, Math.min(120, Number(local.months ?? i.garantiaMesesOverride ?? (catalogo || 12))));
+    const efetivo = politica === "disabled" ? 0 : politica === "custom" ? meses : catalogo;
+    return { politica, dias: null, meses, efetivo, unidade: "meses", origem: "Fabricante", prazo: efetivo > 0 ? `${efetivo} meses` : "sem garantia", ate: efetivo > 0 ? addMeses(execucaoPrevista, efetivo) : null };
+  };
+  const ajustarGarantia = (i, patch) => {
+    const atual = garantiaAtual(i);
+    setGarantiaOverrides((prev) => ({
+      ...prev,
+      [i.id]: { policy: patch.policy ?? atual.politica, days: patch.days ?? atual.dias, months: patch.months ?? atual.meses },
+    }));
+  };
+  const itensComGarantia = itensFinais.map((i) => {
+    if (!itensGarantia.some((x) => x.id === i.id)) return i;
+    const g = garantiaAtual(i);
+    return { ...i, garantiaPolitica: g.politica, garantiaDiasOverride: g.politica === "custom" ? g.dias : null, garantiaMesesOverride: g.politica === "custom" ? g.meses : null };
+  });
+  const garantiaPayload = verValores && !os.emGarantia ? (os.itens || [])
+    .filter((i) => (i.tipo === "servico" || i.tipo === "produto") && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(i.id || "")))
+    .map((i) => {
+      const g = garantiaAtual(i);
+      return { item_id: i.id, policy: g.politica, ...(g.politica === "custom" ? (i.tipo === "servico" ? { days: g.dias } : { months: g.meses }) : {}) };
+    }) : null;
+  const garantiasPrevistas = itensGarantia.map((i) => ({ item: i, ...garantiaAtual(i) })).filter((g) => g.efetivo > 0);
   const adicionaisFinais = temAdicional ? adicionais : [];
   const somaAdd = adicionaisFinais.reduce((t, a) => t + a.qtd * a.preco, 0);
   const total = itensFinais.reduce((t, i) => t + i.qtd * i.preco, 0) + somaAdd;
   const extras = {
-    relato, itens: itensFinais, adicionais: adicionaisFinais, valorAdicional: 0, descricaoAdicional: "",
-    custosExtras: num(custosExtras), pendencia: temPendencia ? pendencia : "", fotos,
+    relato, itens: itensComGarantia, adicionais: adicionaisFinais, valorAdicional: 0, descricaoAdicional: "",
+    custosExtras: num(custosExtras),
+    pendencia: temPendencia ? pendencia : (resultado === "retorno" ? retornoMotivo.trim() : ""),
+    precisaRetornar: resultado === "retorno",
+    retornoMotivo:retornoMotivo.trim(),retornoMaterial:retornoMaterial.trim(),retornoObs:retornoObs.trim(),
+    retornoPrioridade,retornoPrevisao:retornoPrevisao||null,retornoRequestId,
+    garantiaOverrides: garantiaPayload,
+    fotos,
   };
 
   /* edição do registro depois de concluído: sem etapas, só o que faz sentido rever */
@@ -3442,7 +3919,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
           )}
           <Btn variant="soft" icon={Package} onClick={() => setAddProduto(true)} className="w-full">Adicionar material do catálogo</Btn>
           <Field label="Outros custos que você teve" hint="Uso interno, entra no cálculo do resultado deste serviço." className="mt-5">
-            <Input type="number" min="0" step="0.01" value={custosExtras} onChange={(e) => setCustosExtras(e.target.value)} className="max-w-[180px]" />
+            <InputMoeda valor={custosExtras} onChange={setCustosExtras} className="max-w-[180px]" aria-label="Outros custos" />
           </Field>
         </>
       ),
@@ -3541,6 +4018,84 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
               <span className="text-[14px] text-slate-500">Pendência</span>
               <span className="text-[14px] text-slate-800 text-right">{temPendencia && pendencia.trim() ? pendencia : "nenhuma"}</span>
             </div>
+            <div className="px-4 py-3.5">
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-2">Garantias deste atendimento</p>
+              {itensGarantia.length === 0 ? (
+                <p className="text-[13.5px] text-slate-500 leading-relaxed">
+                  {os.emGarantia
+                    ? "Atendimento em garantia: a garantia original continua valendo."
+                    : "Nenhum serviço ou produto deste atendimento está ligado ao catálogo."}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {itensGarantia.map((i) => {
+                    const g = garantiaAtual(i);
+                    return (
+                      <div key={i.id} className="rounded-xl bg-slate-50 ring-1 ring-slate-200 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[13.5px] font-medium text-slate-800 truncate">{i.nome}</p>
+                            <p className="text-[12px] text-slate-400">{g.origem} · {g.prazo}{g.ate ? ` · até ${dataBR(g.ate)}` : ""}</p>
+                          </div>
+                          {!verValores && <span className="text-[12px] text-slate-500 shrink-0">Padrão do catálogo</span>}
+                        </div>
+                        {verValores && (
+                          <div className="grid sm:grid-cols-[1fr_150px] gap-2 mt-3">
+                            <Select value={g.politica} onChange={(e) => ajustarGarantia(i, { policy: e.target.value })} aria-label={`Garantia de ${i.nome}`}>
+                              <option value="catalog">Padrão do catálogo</option>
+                              <option value="disabled">Sem garantia nesta OS</option>
+                              <option value="custom">Prazo personalizado</option>
+                            </Select>
+                            {g.politica === "custom" ? (
+                              <div className="flex items-center gap-2">
+                                <Input type="number" min="1" max={i.tipo === "servico" ? 3650 : 120}
+                                  value={i.tipo === "servico" ? g.dias : g.meses}
+                                  onChange={(e) => i.tipo === "servico"
+                                    ? ajustarGarantia(i, { days: Math.max(1, Math.min(3650, Number(e.target.value) || 1)) })
+                                    : ajustarGarantia(i, { months: Math.max(1, Math.min(120, Number(e.target.value) || 1)) })} />
+                                <span className="text-[12px] text-slate-500 shrink-0">{i.tipo === "servico" ? "dias" : "meses"}</span>
+                              </div>
+                            ) : <div className="hidden sm:block" />}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {verValores && (
+                    <p className="text-[12px] text-slate-400 leading-relaxed">
+                      A mudança feita aqui vale somente para esta OS e não altera o prazo padrão em “Serviços e produtos”.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[13px] font-medium text-slate-600 mb-2">Como este atendimento terminou?</p>
+            <div className="grid sm:grid-cols-3 gap-2">
+              {[["finalizado", "Finalizado"], ["retorno", "Precisa retornar"], ["naoFinalizado", "Não finalizado"]].map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setResultado(v)} aria-pressed={resultado === v}
+                  className={cx("py-3.5 rounded-xl text-[14px] font-medium transition-colors", ring,
+                    resultado === v ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {resultado === "retorno" && (
+              <div className="mt-3 space-y-3 rounded-2xl bg-amber-50 p-3.5 ring-1 ring-amber-200/70">
+                <p className="text-[12.5px] leading-relaxed text-amber-900">A OS continuará em andamento. Nenhuma cobrança, garantia ou relatório final será criado agora.</p>
+                <Field label="Motivo do retorno"><textarea value={retornoMotivo} onChange={e=>setRetornoMotivo(e.target.value.slice(0,3000))} rows={3} placeholder="Ex.: falta peça de acabamento" className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
+                <Field label="Material necessário"><textarea value={retornoMaterial} onChange={e=>setRetornoMaterial(e.target.value.slice(0,3000))} rows={2} placeholder="Peça, cabo, fonte, ferramenta..." className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
+                <Field label="Observação"><textarea value={retornoObs} onChange={e=>setRetornoObs(e.target.value.slice(0,5000))} rows={3} className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
+                <div className="grid gap-3 sm:grid-cols-2"><Field label="Prioridade"><select value={retornoPrioridade} onChange={e=>setRetornoPrioridade(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></Field><Field label="Previsão de retorno"><input type="date" min={HOJE} value={retornoPrevisao} onChange={e=>setRetornoPrevisao(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field></div>
+              </div>
+            )}
+            {resultado === "naoFinalizado" && (
+              <p className="text-[12.5px] text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-xl px-3.5 py-3 mt-3 leading-relaxed">
+                Nada é concluído agora: relato, fotos e pendência ficam salvos e a ordem continua em andamento. Materiais só são lançados quando o atendimento for concluído.
+              </p>
+            )}
           </div>
 
           <div className="rounded-2xl bg-slate-50 ring-1 ring-slate-200 p-4">
@@ -3574,7 +4129,14 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
             <div className="flex items-center gap-3">
               {atual.pular && <Btn variant="ghost" onClick={() => setEtapa(etapa + 1)}>{atual.pular}</Btn>}
               {ultima
-                ? <Btn icon={Check} onClick={() => onFinalizar(extras)}>Concluir atendimento</Btn>
+                ? (resultado === "naoFinalizado"
+                    ? <Btn variant="soft" icon={Check} onClick={() => { onSalvarParcial({ relato, fotos, pendencia: temPendencia ? pendencia : "" }); onClose(); }}>
+                        Salvar sem concluir
+                      </Btn>
+                    : <Btn icon={Check} disabled={concluindo}
+                        onClick={async () => { if (concluindo) return; setConcluindo(true); try { await onFinalizar(extras); } finally { setConcluindo(false); } }}>
+                        {concluindo ? "Concluindo…" : resultado === "retorno" ? "Salvar retorno sem concluir" : "Concluir atendimento"}
+                      </Btn>)
                 : <Btn icon={ArrowRight} disabled={!!atual.bloqueio} onClick={() => setEtapa(etapa + 1)}>Continuar</Btn>}
             </div>
           </div>
@@ -3632,7 +4194,7 @@ function FotosDoAtendimento({ fotos, anexar }) {
 }
 
 /* ================================================================= Compras */
-function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, setCompraAberta, setTela, pedirConfirmacao }) {
+function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, setCompraAberta, setTela, pedirConfirmacao, excluirRegistro, papel }) {
   const [form, setForm] = useState(null);
   const total = (c) => c.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
 
@@ -3650,7 +4212,7 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
               <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{c.numero}</h1>
               <p className="text-[15px] text-slate-500 mt-1">{c.fornecedor} · {dataBR(c.data)}</p>
             </div>
-            <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm({ ...c, jaPago: Boolean(lanc?.pago) })}>Editar</Btn>
+            <div className="flex gap-2 flex-wrap"><Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm({ ...c, jaPago: Boolean(lanc?.pago) })}>Editar</Btn>{papel === "proprietario" && <Btn variant="danger" size="sm" icon={Trash2} onClick={() => excluirRegistro("compra", c.id, `${c.numero} · ${c.fornecedor}`, () => setCompraAberta(null))}>Excluir</Btn>}</div>
           </div>
 
           {lanc && (
@@ -3762,6 +4324,7 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
 
 function CompraForm({ form, setForm, onSave, produtos }) {
   const [novoItem, setNovoItem] = useState(false);
+  const [salvandoCompra, setSalvandoCompra] = useState(false);
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const total = form.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
@@ -3774,8 +4337,9 @@ function CompraForm({ form, setForm, onSave, produtos }) {
       <Modal open onClose={() => setForm(null)} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
         sub={form.id ? "" : "Ao salvar, a conta a pagar é criada no financeiro."}
         footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
-          <Btn disabled={!form.fornecedor || form.itens.length === 0} onClick={() => { onSave(form); setForm(null); }}>
-            {form.id ? "Salvar alterações" : `Registrar compra de ${brl(total)}`}
+          <Btn disabled={!form.fornecedor || form.itens.length === 0 || salvandoCompra}
+            onClick={async () => { if (salvandoCompra) return; setSalvandoCompra(true); try { await onSave(form); setForm(null); } finally { setSalvandoCompra(false); } }}>
+            {salvandoCompra ? "Registrando…" : form.id ? "Salvar alterações" : `Registrar compra de ${brl(total)}`}
           </Btn></>}>
         <div className="grid sm:grid-cols-2 gap-5">
           <Field label="Fornecedor"><Input value={form.fornecedor} onChange={(e) => set("fornecedor", e.target.value)} placeholder="Ex.: Distribuidora Eletro Sul" /></Field>
@@ -3856,11 +4420,14 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 }
 
 /* ============================================================== Financeiro */
-function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId }) {
+function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId, empresa: empresaDados, excluirRegistro, papel }) {
   const [mes, setMes] = useState(mesRef(HOJE));
-  const [aba, setAba] = useState("receber");
+  const [aba, setAba] = useState("visao");
   const [form, setForm] = useState(null);
   const [baixando, setBaixando] = useState(null);
+  const [recibo, setRecibo] = useState(null);
+  const [janela, setJanela] = useState(30);
+  const [filtro, setFiltro] = useState({ status: "todos", origem: "todas", clienteId: "", busca: "" });
 
   /* regra única de período: pago conta no mês do pagamento; em aberto conta no mês do vencimento */
   const noMes = (l) => mesRef(l.pago ? l.pagoEm : l.vencimento) === mes;
@@ -3877,12 +4444,17 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   const futuroReceber = soma(lancamentos.filter((l) => l.tipo === "receita" && !l.pago)) - soma(aReceberMes);
   const futuroPagar = soma(lancamentos.filter((l) => l.tipo === "despesa" && !l.pago)) - soma(aPagarMes);
 
-  /* fluxo de caixa 30 dias: atraso fica separado, previsão olha somente para frente */
+  /* fluxo de caixa: janela escolhida pelo usuário. Atraso fica separado,
+     porque previsão olha só para frente. */
   const saldoAtual = soma(lancamentos.filter((l) => l.tipo === "receita" && l.pago)) - soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago));
-  const limite = addDays(HOJE, 30);
-  const entradas30 = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
-  const saidas30 = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
-  const projetado = saldoAtual + soma(entradas30) - soma(saidas30);
+  const limite = addDays(HOJE, janela);
+  const entradasJanela = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
+  const saidasJanela = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
+  const projetado = saldoAtual + soma(entradasJanela) - soma(saidasJanela);
+
+  /* o que exige ação hoje */
+  const receberHoje = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento === HOJE);
+  const pagarHoje = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento === HOJE);
 
   /* margem dos serviços: usa conclusão real e cobrança efetivamente gerada para a OS */
   const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || HOJE) === mes);
@@ -3906,6 +4478,17 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
     setMes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   };
 
+  /* filtros de leitura: status, origem, cliente e busca livre */
+  const aplicarFiltro = (itens) => itens.filter((l) => {
+    if (filtro.status === "vencido" && !(!l.pago && l.vencimento < HOJE)) return false;
+    if (filtro.status === "aberto" && (l.pago || l.vencimento < HOJE)) return false;
+    if (filtro.status === "pago" && !l.pago) return false;
+    if (filtro.origem !== "todas" && (l.origemTipo || "manual") !== filtro.origem) return false;
+    if (filtro.clienteId && l.clienteId !== filtro.clienteId) return false;
+    if (filtro.busca && !semAcento(l.descricao || "").includes(semAcento(filtro.busca))) return false;
+    return true;
+  }).slice();
+
   const ListaLanc = ({ itens, vazio }) => (
     <Panel className="divide-y divide-slate-100 overflow-hidden">
       {itens.length === 0 ? <Empty icon={Wallet} title="Nada neste período" sub={vazio} /> : itens.map((l) => {
@@ -3919,7 +4502,9 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
                   <p className="font-medium text-slate-800 truncate">{l.descricao}</p>
                 </button>
                 <p className="text-[12px] text-slate-400">
-                  {l.pago ? `${l.tipo === "receita" ? "Recebido" : "Pago"} em ${dataBR(l.pagoEm)}${l.forma ? ` · ${l.forma}` : ""}` : `Vence ${dataBR(l.vencimento)}`} · {l.categoria}
+                  {l.pago ? `${l.tipo === "receita" ? "Recebido" : "Pago"} em ${dataBR(l.pagoEm)}${l.forma ? ` · ${l.forma}` : ""}` : `Vence ${dataBR(l.vencimento)}`}
+                  {" · "}{ORIGEM_LANC[l.origemTipo] || "Lançamento manual"}
+                  {l.clienteId ? ` · ${clientes.find((c) => c.id === l.clienteId)?.fantasia || clientes.find((c) => c.id === l.clienteId)?.nome || ""}` : ""}
                 </p>
               </div>
               <div className="flex items-center gap-3 shrink-0">
@@ -3927,6 +4512,22 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
                 <span className={cx("font-semibold tabular-nums", l.tipo === "receita" ? "text-slate-900" : "text-slate-500")}>
                   {l.tipo === "despesa" ? "− " : ""}{brl(l.valor)}
                 </span>
+                {l.tipo === "receita" && !l.pago && (() => {
+                  const c = clientes.find((x) => x.id === l.clienteId);
+                  if (!c?.whatsapp && !c?.telefone) return null;
+                  return (
+                    <Btn size="sm" variant="ghost" icon={Share2} ariaLabel={`Cobrar ${l.descricao} pelo WhatsApp`} title="Cobrar pelo WhatsApp"
+                      onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp || c.telefone)}?text=${encodeURIComponent(`Olá! Sobre ${l.descricao}: valor de ${brl(l.valor)} com vencimento em ${dataBR(l.vencimento)}.`)}`, "_blank")}>
+                      Cobrar
+                    </Btn>
+                  );
+                })()}
+                {l.tipo === "receita" && (
+                  <Btn size="sm" variant="ghost" icon={Receipt}
+                    title={l.pago ? "Gerar recibo não fiscal" : "Gerar documento de cobrança"}
+                    ariaLabel={`${l.pago ? "Gerar recibo" : "Gerar cobrança"} de ${l.descricao}`}
+                    onClick={() => setRecibo(l)}>{l.pago ? "Recibo" : "Cobrança"}</Btn>                )}
+                {papel === "proprietario" && <Btn size="sm" variant="danger" icon={Trash2} title="Excluir lançamento" ariaLabel={`Excluir ${l.descricao}`} onClick={() => excluirRegistro("financeiro", l.id, l.descricao)}>Excluir</Btn>}
                 {l.pago ? (
                   <Btn size="sm" variant="ghost" onClick={() => pedirConfirmacao({
                     titulo: "Desfazer baixa?", texto: `O lançamento volta para ${l.tipo === "receita" ? "contas a receber" : "contas a pagar"}.`,
@@ -3954,6 +4555,27 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
         <button onClick={() => mudarMes(1)} aria-label="Próximo mês" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700", ring)}><ArrowRight className="w-4 h-4" /></button>
       </div>
 
+      {(receberHoje.length > 0 || pagarHoje.length > 0) && (
+        <Panel className="p-4 sm:p-5 mb-4">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+            <div>
+              <p className="text-[12.5px] text-slate-500">Receber hoje</p>
+              <p className="text-[18px] font-semibold text-emerald-700 tabular-nums">{brl(soma(receberHoje))}
+                <span className="text-[12px] font-normal text-slate-400"> · {receberHoje.length} conta{receberHoje.length > 1 ? "s" : ""}</span></p>
+            </div>
+            <div>
+              <p className="text-[12.5px] text-slate-500">Pagar hoje</p>
+              <p className="text-[18px] font-semibold text-slate-900 tabular-nums">{brl(soma(pagarHoje))}
+                <span className="text-[12px] font-normal text-slate-400"> · {pagarHoje.length} conta{pagarHoje.length > 1 ? "s" : ""}</span></p>
+            </div>
+            <div className="flex gap-2 ml-auto">
+              {receberHoje.length > 0 && <Btn size="sm" variant="soft" onClick={() => setAba("receber")}>Ver a receber</Btn>}
+              {pagarHoje.length > 0 && <Btn size="sm" variant="soft" onClick={() => setAba("pagar")}>Ver a pagar</Btn>}
+            </div>
+          </div>
+        </Panel>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-4">
         <Panel className="p-4 sm:p-5"><p className="text-[12.5px] text-slate-500">Recebido no mês</p>
           <p className="text-[20px] font-semibold text-emerald-700 mt-1 tabular-nums">{brl(soma(recebidoMes))}</p></Panel>
@@ -3977,43 +4599,69 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
       </p>
 
       <Tabs valor={aba} onChange={setAba} className="mb-5"
-        opcoes={[{ id: "receber", label: "A receber" }, { id: "recebido", label: "Recebido" }, { id: "pagar", label: "A pagar" },
-          { id: "pago", label: "Pago" }, { id: "fluxo", label: "Fluxo de caixa" }, { id: "resultado", label: "Meu resultado" }]} />
+        opcoes={[{ id: "visao", label: "Visão geral" }, { id: "receber", label: "A receber" },
+          { id: "pagar", label: "A pagar" }, { id: "documentos", label: "Documentos" }]} />
 
-      {aba === "receber" && (<><Rotulo>A receber neste mês</Rotulo>
-        <ListaLanc itens={aReceberMes.slice().sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Conclua uma ordem de serviço para gerar a cobrança automaticamente." /></>)}
-      {aba === "recebido" && (<><Rotulo>Recebido neste mês</Rotulo><ListaLanc itens={recebidoMes} vazio="Nenhum recebimento registrado neste mês." /></>)}
-      {aba === "pagar" && (<><Rotulo>A pagar neste mês</Rotulo>
-        <ListaLanc itens={aPagarMes.slice().sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Registre uma compra para gerar a conta a pagar automaticamente." /></>)}
-      {aba === "pago" && (<><Rotulo>Pago neste mês</Rotulo><ListaLanc itens={pagoMes} vazio="Nenhum pagamento registrado neste mês." /></>)}
+      {aba === "receber" && (<>
+        <FiltrosLancamento filtro={filtro} setFiltro={setFiltro} clientes={clientes} tipo="receita" />
+        <Rotulo>A receber neste mês</Rotulo>
+        <ListaLanc itens={aplicarFiltro(aReceberMes).sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Conclua uma ordem de serviço para gerar a cobrança automaticamente." />
+        <div className="mt-7"><Rotulo>Já recebido neste mês</Rotulo>
+          <ListaLanc itens={aplicarFiltro(recebidoMes)} vazio="Nenhum recebimento registrado neste mês." /></div>
+      </>)}
 
-      {aba === "fluxo" && (
+      {aba === "pagar" && (<>
+        <FiltrosLancamento filtro={filtro} setFiltro={setFiltro} clientes={clientes} tipo="despesa" />
+        <Rotulo>A pagar neste mês</Rotulo>
+        <ListaLanc itens={aplicarFiltro(aPagarMes).sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Registre uma compra para gerar a conta a pagar automaticamente." />
+        <div className="mt-7"><Rotulo>Já pago neste mês</Rotulo>
+          <ListaLanc itens={aplicarFiltro(pagoMes)} vazio="Nenhum pagamento registrado neste mês." /></div>
+      </>)}
+
+      {aba === "documentos" && (
+        <DocumentosFinanceiro
+          compras={compras} lancamentos={lancamentos} clientes={clientes} ordens={ordens}
+          abrirCompra={abrirCompra} onRecibo={(l) => setRecibo(l)} />
+      )}
+
+      {aba === "visao" && (
         <>
-          <Rotulo>Previsão dos próximos 30 dias</Rotulo>
+          <Rotulo acao={
+            <div className="flex gap-1.5">
+              {[7, 30, 60].map((d) => (
+                <button key={d} type="button" onClick={() => setJanela(d)} aria-pressed={janela === d}
+                  className={cx("px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors", ring,
+                    janela === d ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600")}>
+                  {d} dias
+                </button>
+              ))}
+            </div>
+          }>Previsão dos próximos {janela} dias</Rotulo>
           <Panel className="p-5 sm:p-6">
             <div className="space-y-4 text-[15px]">
               <div className="flex justify-between"><span className="text-slate-500">Saldo registrado</span><span className="font-medium tabular-nums">{brl(saldoAtual)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Entradas previstas</span><span className="font-medium text-emerald-700 tabular-nums">+ {brl(soma(entradas30))}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Saídas previstas</span><span className="font-medium text-rose-700 tabular-nums">− {brl(soma(saidas30))}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Entradas previstas</span><span className="font-medium text-emerald-700 tabular-nums">+ {brl(soma(entradasJanela))}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Saídas previstas</span><span className="font-medium text-rose-700 tabular-nums">− {brl(soma(saidasJanela))}</span></div>
               <div className="flex justify-between items-baseline pt-4 border-t border-slate-200">
                 <span className="font-medium text-slate-700">Saldo projetado</span>
                 <span className={cx("text-2xl font-semibold tabular-nums", projetado >= 0 ? "text-slate-900" : "text-rose-700")}>{brl(projetado)}</span>
               </div>
             </div>
             <p className="text-[12.5px] text-slate-400 mt-4 leading-relaxed">
-              {projetado >= 0 ? "Se todos os recebimentos entrarem no prazo, o mês fecha positivo." : "Atenção: pelas datas atuais, o caixa fica negativo. Antecipe recebimentos ou renegocie vencimentos."}
-              {" "}Saldo registrado considera apenas movimentações que passaram pelo ZiisTec; contas vencidas ficam fora da previsão dos próximos 30 dias.
+              {projetado >= 0 ? "Se todos os recebimentos entrarem no prazo, o período fecha positivo." : "Atenção: pelas datas atuais, o caixa fica negativo. Antecipe recebimentos ou renegocie vencimentos."}
+              {" "}Saldo registrado considera apenas movimentações que passaram pelo ZiisTec; contas vencidas ficam fora da previsão dos próximos {janela} dias.
             </p>
           </Panel>
           <div className="grid sm:grid-cols-2 gap-6 mt-6">
-            <div><Rotulo>Entradas previstas</Rotulo><ListaLanc itens={entradas30} vazio="Nenhuma entrada prevista." /></div>
-            <div><Rotulo>Saídas previstas</Rotulo><ListaLanc itens={saidas30} vazio="Nenhuma saída prevista." /></div>
+            <div><Rotulo>Entradas previstas</Rotulo><ListaLanc itens={entradasJanela} vazio="Nenhuma entrada prevista." /></div>
+            <div><Rotulo>Saídas previstas</Rotulo><ListaLanc itens={saidasJanela} vazio="Nenhuma saída prevista." /></div>
           </div>
         </>
       )}
 
-      {aba === "resultado" && (
+      {aba === "visao" && (
         <>
+          <div className="mt-8" />
           <Rotulo>Meu resultado em {nomeMes(mes).toLowerCase()}</Rotulo>
           <Panel className="p-5 sm:p-6">
             <div className="space-y-4 text-[15px]">
@@ -4059,6 +4707,10 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
         </>
       )}
 
+      <ReciboModal
+        lanc={recibo} onClose={() => setRecibo(null)}
+        empresa={empresaDados} clientes={clientes} ordens={ordens} aviso={aviso} />
+
       {/* baixa com forma de pagamento */}
       {baixando && (
         <Modal open onClose={() => setBaixando(null)} title={baixando.tipo === "receita" ? "Registrar recebimento" : "Registrar pagamento"} sub={`${baixando.descricao} · ${brl(baixando.valor)}`}>
@@ -4093,7 +4745,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
           </div>
           <Field label="Descrição"><Input value={form.descricao || ""} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Ex.: Aluguel da oficina" /></Field>
           <div className="grid sm:grid-cols-2 gap-5">
-            <Field label="Valor"><Input type="number" min="0" value={form.valor} onChange={(e) => setForm({ ...form, valor: Number(e.target.value) })} /></Field>
+            <Field label="Valor"><InputMoeda valor={form.valor} onChange={(v) => setForm({ ...form, valor: v })} aria-label="Valor" /></Field>
             <Field label="Vencimento"><Input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} /></Field>
           </div>
           <Field label="Categoria"><Input value={form.categoria || ""} onChange={(e) => setForm({ ...form, categoria: e.target.value })} /></Field>
@@ -4101,7 +4753,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
             <Field label="Cliente">
               <Select value={form.clienteId || ""} onChange={(e) => setForm({ ...form, clienteId: e.target.value })}>
                 <option value="">Sem vínculo</option>
-                {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+                {clientes.filter((c) => !c.excluidoEm).map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
               </Select>
             </Field>
           )}
@@ -4117,6 +4769,245 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
         </Modal>
       )}
     </>
+  );
+}
+
+/* nome do arquivo: "ORC-0003 - Fabio.pdf", com acentos e símbolos saneados */
+const nomeArquivoDoc = (numero, nomeCliente) => {
+  const limpo = String(nomeCliente || "Cliente").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9 ._-]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40) || "Cliente";
+  return `${numero} - ${limpo}.pdf`;
+};
+
+/* mensagem de WhatsApp com os dados reais do orçamento, em tom humano */
+const mensagemOrcamento = (orc, cliente, empresa) => {
+  const primeiro = String(cliente?.fantasia || cliente?.nome || "").trim().split(/\s+/)[0] || "";
+  const saudacao = primeiro ? `Olá, ${primeiro}! 👋` : "Olá! 👋";
+  const validade = orc.validade ? `\nVálido até ${dataBR(orc.validade)}.` : "";
+  const condicao = orc.condicao ? `\n${orc.condicao}` : "";
+  return `${saudacao}\n\nSegue o orçamento ${orc.numero} preparado pela ${empresa?.nome || "nossa equipe"}.\n\n`
+    + `*Valor total: ${brl(totalDoc(orc))}*${validade}${condicao}\n\nQualquer dúvida, estamos à disposição.`;
+};
+
+const ORIGEM_LANC = { os: "Ordem de serviço", compra: "Compra", contrato: "Contrato", orcamento: "Orçamento", manual: "Lançamento manual" };
+
+/* Filtros de leitura do financeiro. Não alteram dado nenhum: só recortam a
+   lista que a RLS já entregou para o proprietário. */
+function FiltrosLancamento({ filtro, setFiltro, clientes, tipo }) {
+  const set = (k, v) => setFiltro((f) => ({ ...f, [k]: v }));
+  const origens = tipo === "receita"
+    ? [["todas", "Todas as origens"], ["os", "Ordem de serviço"], ["contrato", "Contrato"], ["manual", "Manual"]]
+    : [["todas", "Todas as origens"], ["compra", "Compra"], ["manual", "Manual"]];
+  return (
+    <Panel className="p-4 mb-5">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <SearchBox value={filtro.busca} onChange={(v) => set("busca", v)} placeholder="Buscar na descrição" />
+        <Select value={filtro.status} onChange={(e) => set("status", e.target.value)} aria-label="Situação">
+          <option value="todos">Qualquer situação</option>
+          <option value="aberto">Em dia</option>
+          <option value="vencido">Vencido</option>
+          <option value="pago">{tipo === "receita" ? "Recebido" : "Pago"}</option>
+        </Select>
+        <Select value={filtro.origem} onChange={(e) => set("origem", e.target.value)} aria-label="Origem">
+          {origens.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+        </Select>
+        {tipo === "receita" ? (
+          <Select value={filtro.clienteId} onChange={(e) => set("clienteId", e.target.value)} aria-label="Cliente">
+            <option value="">Todos os clientes</option>
+            {clientes.filter((c) => !c.excluidoEm).map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+          </Select>
+        ) : <div className="hidden lg:block" />}
+      </div>
+    </Panel>
+  );
+}
+
+/* Documentos do financeiro: reúne o que já existe — boletos/notas anexados às
+   compras (bucket privado, URL assinada) e recibos que podem ser gerados sob
+   demanda a partir das contas a receber. Nada novo é persistido em banco. */
+function DocumentosFinanceiro({ compras, lancamentos, clientes, ordens, abrirCompra, onRecibo }) {
+  const [busca, setBusca] = useState("");
+  const t = semAcento(busca);
+
+  const anexos = (compras || []).flatMap((c) => (c.anexos || []).map((a) => ({ ...a, compra: c })))
+    .filter((a) => semAcento(`${a.nome} ${a.compra.fornecedor} ${a.compra.numero}`).includes(t));
+
+  const receitas = (lancamentos || []).filter((l) => l.tipo === "receita")
+    .filter((l) => semAcento(l.descricao || "").includes(t))
+    .sort((a, b) => String(b.pagoEm || b.vencimento).localeCompare(String(a.pagoEm || a.vencimento)))
+    .slice(0, 40);
+
+  return (
+    <>
+      <div className="mb-5 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder="Buscar por fornecedor, cliente ou documento" /></div>
+
+      <Rotulo>Boletos e notas de compras</Rotulo>
+      <Panel className="divide-y divide-slate-100 overflow-hidden">
+        {anexos.length === 0 ? (
+          <Empty icon={Paperclip} title="Nenhum documento anexado" sub="Anexe o boleto ou a nota ao registrar uma compra e ele aparece aqui." />
+        ) : anexos.map((a) => (
+          <Linha key={a.id}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex items-center gap-2.5">
+                <Paperclip className="w-4 h-4 text-slate-400 shrink-0" aria-hidden="true" />
+                <div className="min-w-0">
+                  <p className="text-[14px] font-medium text-slate-800 truncate">{a.nome}</p>
+                  <p className="text-[12px] text-slate-400 truncate">
+                    {a.compra.numero} · {a.compra.fornecedor} · vence {dataBR(a.compra.vencimento)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Btn size="sm" variant="ghost" onClick={() => abrirCompra(a.compra.id)}>Ver compra</Btn>
+                {a.url
+                  ? <a href={a.url} target="_blank" rel="noreferrer"
+                      className={cx("inline-flex items-center gap-2 rounded-xl bg-white ring-1 ring-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50", ring)}>
+                      Abrir documento
+                    </a>
+                  : <span className="text-[12px] text-slate-400">disponível ao salvar a compra</span>}
+              </div>
+            </div>
+          </Linha>
+        ))}
+      </Panel>
+
+      <div className="mt-8">
+        <Rotulo>Documentos e comprovantes para o cliente</Rotulo>
+        <Panel className="divide-y divide-slate-100 overflow-hidden">
+          {receitas.length === 0 ? (
+            <Empty icon={Receipt} title="Nenhuma cobrança registrada" sub="Conclua uma ordem de serviço ou lance uma receita para emitir o recibo." />
+          ) : receitas.map((l) => {
+            const st = statusLanc(l);
+            return (
+              <Linha key={l.id}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[14px] font-medium text-slate-800 truncate">{l.descricao}</p>
+                    <p className="text-[12px] text-slate-400">
+                      {l.pago ? `recebido em ${dataBR(l.pagoEm)}` : `vence ${dataBR(l.vencimento)}`} · {brl(l.valor)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <Pill tone={st.tone}>{st.label}</Pill>
+                    <Btn size="sm" variant="soft" icon={Receipt} onClick={() => onRecibo(l)}>
+                      {l.pago ? "Gerar recibo" : "Gerar cobrança"}
+                    </Btn>                  </div>
+                </div>
+              </Linha>
+            );
+          })}
+        </Panel>
+      </div>
+
+      <Panel className="p-5 mt-6">
+        <div className="flex gap-3">
+          <FileText className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="text-[13px] text-slate-600 leading-relaxed">
+            <span className="font-medium text-slate-800">Nota fiscal:</span> integração ainda não configurada.
+            O recibo do ZiisTec é um comprovante de cobrança e não substitui documento fiscal.
+          </p>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+/* Recibo / documento de cobrança. Não é nota fiscal e o PDF diz isso. */
+function ReciboModal({ lanc, onClose, empresa, clientes, ordens, aviso }) {
+  const [obs, setObs] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => { if (lanc) setObs(""); }, [lanc]);
+  if (!lanc) return null;
+
+  const cli = clientes.find((c) => c.id === lanc.clienteId) || null;
+  const os = lanc.origemTipo === "os" ? (ordens || []).find((o) => o.id === lanc.origemId) : null;
+  const quitado = Boolean(lanc.pago);
+  const numero = `${quitado ? "REC" : "COB"}-${String(lanc.id || "").slice(-6).toUpperCase()}`;
+  const itens = os
+    ? [...(os.itens || []).map((i) => ({ nome: i.nome, qtd: i.qtd, unidade: unidadeLabel(i.unidade), total: i.qtd * i.preco })),
+       ...(os.adicionais || []).map((a) => ({ nome: `${a.nome} (adicional)`, qtd: a.qtd, unidade: unidadeLabel(a.unidade), total: a.qtd * a.preco }))]
+    : [{ nome: lanc.descricao, total: lanc.valor }];
+
+  const dados = {
+    empresa: { nome: empresa?.nome, documento: empresa?.documento, telefone: empresa?.telefone, email: empresa?.email, endereco: empresa?.endereco },
+    cliente: { nome: cli?.nome || cli?.fantasia || "Cliente", documento: cli?.documento, telefone: cli?.telefone, endereco: cli?.endereco },
+    numero,
+    titulo: lanc.pago ? "RECIBO" : "COBRANÇA",    origem: os ? `Ordem de serviço ${os.numero}` : lanc.descricao,
+    itens, valor: lanc.valor,
+    vencimento: lanc.pago ? null : lanc.vencimento,
+    pagoEm: lanc.pago ? lanc.pagoEm : null,
+    forma: lanc.forma || null,
+    observacoes: obs,
+  };
+
+  const dadosComLogo = async () => {
+    if (!empresa?.logoPath && !empresa?.logoUrl) return dados;
+    try {
+      const url = empresa.logoUrl || await resolverLogoEmpresaDB(empresa.logoPath);
+      if (!url) return dados;
+      const r = await fetch(url);
+      if (!r.ok) return dados;
+      const tipo = r.headers.get("content-type") || "";
+      if (!/image\/(png|jpe?g)/i.test(tipo)) return dados;
+      return { ...dados, logoBytes: await r.arrayBuffer(), logoTipo: tipo };
+    } catch { return dados; }
+  };
+
+  const gerar = async () => {
+    if (ocupado) return;
+    setOcupado(true);
+    try { await baixarReciboPDF(await dadosComLogo(), numero); aviso(`${quitado ? "Recibo" : "Documento de cobrança"} gerado. Documento não fiscal.`); }
+    catch (e) { aviso(e?.message || "Não foi possível gerar o recibo."); }
+    finally { setOcupado(false); }
+  };
+
+  const compartilhar = async () => {
+    if (ocupado) return;
+    const texto = `${empresa?.nome || "ZiisTec"} · ${numero}\n${dados.origem}\nValor: ${brl(lanc.valor)}\nDocumento não fiscal.`;
+    setOcupado(true);
+    try {
+      if (suportaCompartilharRecibo()) {
+        const r = await compartilharReciboPDF(await dadosComLogo(), numero, texto);
+        if (r.shared) { setOcupado(false); return; }
+      }
+      window.open(`https://wa.me/55${soDigitos(cli?.whatsapp || cli?.telefone)}?text=${encodeURIComponent(texto)}`, "_blank");
+    } catch (e) { aviso(e?.message || "Não foi possível compartilhar o recibo."); }
+    finally { setOcupado(false); }
+  };
+
+  return (
+    <Modal open onClose={onClose} wide
+      title={lanc.pago ? "Recibo do cliente" : "Documento de cobrança"}
+      sub={`${numero} · ${brl(lanc.valor)}`}      footer={<><Btn variant="ghost" onClick={onClose}>Fechar</Btn>
+        <Btn variant="soft" icon={Share2} disabled={ocupado} onClick={compartilhar}>Enviar pelo WhatsApp</Btn>
+        <Btn icon={Printer} disabled={ocupado} onClick={gerar}>{ocupado ? "Gerando…" : "Gerar PDF"}</Btn></>}>
+      <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3">
+        <p className="text-[13px] font-semibold text-amber-900">DOCUMENTO NÃO FISCAL</p>
+        <p className="text-[12.5px] text-amber-900/90 mt-1 leading-relaxed">
+          {lanc.pago ? "Comprovante de pagamento do serviço." : "Documento de cobrança do serviço."} Este documento não substitui NF-e ou NFS-e.
+        </p>
+        <p className="text-[12px] text-amber-900/80 mt-2">
+          Situação fiscal: <span className="font-medium">não emitida</span> · integração com provedor de NFS-e ainda não configurada.
+        </p>
+      </div>
+
+      <div className="rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100 text-[14px]">
+        <div className="px-4 py-3 flex justify-between gap-3"><span className="text-slate-500">Cliente</span><span className="text-slate-800 text-right">{dados.cliente.nome}</span></div>
+        <div className="px-4 py-3 flex justify-between gap-3"><span className="text-slate-500">Referente a</span><span className="text-slate-800 text-right">{dados.origem}</span></div>
+        <div className="px-4 py-3 flex justify-between gap-3">
+          <span className="text-slate-500">{lanc.pago ? "Pago em" : "Vencimento"}</span>
+          <span className="text-slate-800">{dataBR(lanc.pago ? lanc.pagoEm : lanc.vencimento)}{lanc.forma ? ` · ${lanc.forma}` : ""}</span>
+        </div>
+        <div className="px-4 py-3 flex justify-between items-baseline gap-3">
+          <span className="text-slate-500">Valor</span>
+          <span className="text-xl font-semibold text-slate-900 tabular-nums">{brl(lanc.valor)}</span>
+        </div>
+      </div>
+
+      <Field label="Observações do recibo" hint="Opcional. Sai no documento.">
+        <CampoVoz rows={2} valor={obs} onChange={setObs} placeholder="Ex.: pagamento referente à segunda parcela" />
+      </Field>
+    </Modal>
   );
 }
 
@@ -4254,7 +5145,7 @@ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssina
 /* =============================================================== Garantias
    Consulta e acionamento. As garantias não são cadastradas aqui: elas nascem
    da OS concluída, a partir do prazo configurado em cada serviço.           */
-function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso }) {
+function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, excluirRegistro, papel }) {
   const [filtro, setFiltro] = useState("ativas");
   const [busca, setBusca] = useState("");
   const [acionando, setAcionando] = useState(false);
@@ -4300,7 +5191,7 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
               {g.tipo === "servico" ? "Garantia do serviço executado" : "Garantia do fabricante"} · {st.detalhe}
             </p>
           </div>
-          {st.ativa && <Btn icon={ShieldCheck} onClick={() => { setRelatoProblema(""); setAcionando(true); }}>Abrir atendimento em garantia</Btn>}
+          <div className="flex gap-2 flex-wrap">{papel === "proprietario" && <Btn variant="danger" icon={Trash2} onClick={() => excluirRegistro("garantia", g.id, g.descricao, () => setGarantiaAberta(null))}>Excluir</Btn>}{st.ativa && <Btn icon={ShieldCheck} onClick={() => { setRelatoProblema(""); setAcionando(true); }}>Abrir atendimento em garantia</Btn>}</div>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
@@ -4310,10 +5201,12 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
               <Panel className="divide-y divide-slate-100">
                 {[
                   ["Cliente", nomeCliente(g.clienteId), () => abrirCliente(g.clienteId)],
+                  ["Origem", g.tipo === "servico" ? "Serviço executado" : "Produto instalado", null],
                   ["Local do serviço", g.local || "—", null],
                   ["Executado em", dataBR(g.inicio), null],
                   ["Prazo", g.tipo === "servico" ? `${g.dias} dias` : `${g.meses} meses do fabricante`, null],
                   ["Válida até", dataBR(g.ate), null],
+                  ["Tempo restante", st.detalhe, null],
                   ["Ordem de origem", origem ? origem.numero : "—", origem ? () => abrirOS(origem.id) : null],
                   ...(produto ? [["Equipamento", `${produto.nome}${produto.marca ? " · " + produto.marca : ""} ${produto.modelo || ""}`, null]] : []),
                   ...(g.serie ? [["Número de série", g.serie, null]] : []),
@@ -4441,10 +5334,10 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
                     <p className="font-medium text-slate-900 truncate">{r.descricao}</p>
                     <p className="text-[13px] text-slate-500 truncate">{nomeCliente(r.clienteId)} · retorno em {dataBR(r.data)}</p>
                   </button>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
                     <Pill tone={r.data < HOJE ? "erro" : r.data === HOJE ? "atencao" : "neutro"}>{r.data < HOJE ? "Atrasado" : r.data === HOJE ? "Hoje" : dataBR(r.data)}</Pill>
-                    <Btn size="sm" variant="soft" icon={Check} onClick={()=>mudarRevisao(r,"done")}>Concluir</Btn>
-                    <Btn size="sm" variant="ghost" onClick={()=>mudarRevisao(r,"dismissed")}>Dispensar</Btn>
+                    <Btn size="sm" variant="soft" icon={Check} className="min-h-11 flex-1 sm:flex-none" onClick={()=>mudarRevisao(r,"done")}>Concluir</Btn>
+                    <Btn size="sm" variant="ghost" className="min-h-11 flex-1 sm:flex-none" onClick={()=>mudarRevisao(r,"dismissed")}>Dispensar</Btn>
                   </div>
                 </div>
               </Linha>
@@ -4723,7 +5616,8 @@ function AssinaturaBloqueada({ assinatura, empresa, sair, reativar }) {
   );
 }
 
-function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarColaborador, reenviarAcesso, alternarColaborador, ordens, pedirConfirmacao, aviso }) {
+function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarColaborador, reenviarAcesso, alternarColaborador, ordens, pedirConfirmacao, aviso, produtos, salvarProduto }) {
+  const [aba, setAba] = useState("tecnicos");
   const [form, setForm] = useState(null);
   const [editando, setEditando] = useState(null);
   const [credencial, setCredencial] = useState(null);
@@ -4732,15 +5626,42 @@ function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarCol
     const r = await salvarColaborador(form);
     if (!r) return;
     setForm(null);
-    setCredencial({ nome: form.nome, email: form.email.trim().toLowerCase(), senha: r.senhaTemporaria || null, convite: Boolean(r.convite) });
+    setCredencial({ nome: form.nome, email: form.email.trim().toLowerCase(), senha: r.senhaTemporaria || null, convite: Boolean(r.convite), emailEnviado: Boolean(r.emailEnviado) });
   };
 
   return (
     <>
-      <PageHead title="Equipe" sub="Quem tem acesso à sua empresa e o que cada um enxerga."
-        action={<Btn icon={Plus} onClick={() => setForm({ nome: "", email: "", telefone: "", funcao: "", papel: "tecnico" })}>Adicionar colaborador</Btn>} />
+      <PageHead title="Equipe" sub="Acessos da equipe e produtos liberados para venda em campo."
+        action={aba === "tecnicos" ? <Btn icon={Plus} onClick={() => setForm({ nome: "", email: "", telefone: "", funcao: "", papel: "tecnico" })}>Adicionar colaborador</Btn> : null} />
 
-      <Panel className="divide-y divide-slate-100 overflow-hidden">
+      <Tabs valor={aba} onChange={setAba} className="mb-5" opcoes={[
+        { id: "tecnicos", label: `Técnicos · ${equipe.filter((m) => m.papel !== "proprietario").length}` },
+        { id: "produtos", label: `Produtos para venda · ${(produtos || []).filter((p) => p.ativo && p.vendaHabilitada).length}` },
+      ]} />
+
+      {aba === "produtos" && (
+        <Panel className="divide-y divide-slate-100 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
+            <div><p className="font-medium text-slate-900">Vendas, recebimentos e histórico</p><p className="text-[13px] text-slate-500 mt-1">Veja o que cada técnico vendeu, configure Pix/dinheiro/cartão e consulte o histórico por cliente ou condomínio.</p></div>
+            <Btn icon={ShoppingCart} onClick={() => { const url = new URL(window.location.href); url.searchParams.set("v2", "venda-os"); window.location.assign(`${url.pathname}${url.search}${url.hash}`); }}>Abrir gestão</Btn>
+          </div>
+          {(produtos || []).filter((p) => p.ativo).length === 0 ? <Empty icon={Package} title="Nenhum produto ativo" sub="Cadastre produtos no catálogo antes de liberá-los para a equipe." /> : (produtos || []).filter((p) => p.ativo).map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-900 truncate">{p.nome}</p>
+                <p className="text-[13px] text-slate-500 truncate">{[p.marca, p.modelo].filter(Boolean).join(" · ") || "Produto"}</p>
+                <p className="text-[15px] font-semibold text-teal-800 mt-1 tabular-nums">{brl(p.preco)}</p>
+              </div>
+              <button type="button" onClick={async () => { await salvarProduto({ ...p, vendaHabilitada: !p.vendaHabilitada }); }} aria-pressed={!!p.vendaHabilitada}
+                className={cx("rounded-xl px-3.5 py-2.5 text-[13px] font-medium ring-1 transition-colors", ring, p.vendaHabilitada ? "bg-teal-50 text-teal-800 ring-teal-200" : "bg-white text-slate-500 ring-slate-200")}>
+                {p.vendaHabilitada ? "Liberado para técnico" : "Não liberado"}
+              </button>
+            </div>
+          ))}
+        </Panel>
+      )}
+
+      {aba === "tecnicos" && <Panel className="divide-y divide-slate-100 overflow-hidden">
         {equipe.map((m) => {
           const minhas = ordens.filter((o) => o.responsavelId === m.usuarioId && o.status !== "concluida" && o.status !== "cancelada");
           const pendente = m.convite === "pendente" || m.usuario?.precisaTrocarSenha;
@@ -4788,13 +5709,13 @@ function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarCol
             </Linha>
           );
         })}
-      </Panel>
+      </Panel>}
 
       <Panel className="p-5 mt-6">
         <p className="text-[13px] text-slate-600 leading-relaxed">
-          <span className="font-medium text-slate-800">O que o técnico enxerga:</span> início, agenda e as ordens atribuídas a ele —
-          com cliente, endereço, rota, o que precisa ser feito, relato por voz, fotos, materiais e pendências.
-          A carteira de clientes, orçamentos, garantias, financeiro, compras, equipe e configurações ficam fora do acesso dele.
+          <span className="font-medium text-slate-800">O que o técnico enxerga:</span> início com a lista dos serviços do dia, suas ordens atribuídas e os produtos que você liberou para venda.
+          Ele não cria agendamento nem OS. Dentro do atendimento continua com rota, relato por voz, fotos, materiais e pendências.
+          Custos, margem, carteira de clientes, orçamentos, garantias administrativas, financeiro, compras, equipe e configurações ficam fora do acesso dele.
         </p>
       </Panel>
 
@@ -4859,7 +5780,7 @@ function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarCol
               <div className="flex items-center gap-2"><span className="text-[16px] font-semibold text-slate-900 tracking-wider tabular-nums">{credencial.senha}</span><Btn size="sm" variant="soft" icon={Copy} title="Copiar" ariaLabel="Copiar senha" onClick={() => { navigator.clipboard?.writeText(credencial.senha); aviso("Senha copiada"); }} /></div>
             </div>}
           </div>
-          {credencial.convite ? <><p className="text-[13px] text-slate-600 leading-relaxed">Peça para {credencial.nome?.split(" ")[0]} criar ou entrar na conta com este mesmo e-mail. O ZiisTec vincula o acesso à sua empresa automaticamente.</p><div className="rounded-xl bg-teal-50 ring-1 ring-teal-200/70 px-4 py-3 flex gap-2.5"><Lock className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" aria-hidden="true" /><p className="text-[12.5px] text-teal-900 leading-relaxed">Nenhuma senha é criada ou guardada pelo proprietário. Se a pessoa já possui conta, basta entrar. Se esquecer a senha, usa a recuperação na tela de login.</p></div></> : <><p className="text-[13px] text-slate-600 leading-relaxed">Entregue esta senha a {credencial.nome?.split(" ")[0]}. No primeiro acesso o ZiisTec vai pedir que ela crie uma senha pessoal.</p><div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3 flex gap-2.5"><Lock className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" aria-hidden="true" /><p className="text-[12.5px] text-amber-900 leading-relaxed">Esta senha aparece uma única vez e não fica guardada no sistema.</p></div></>}
+          {credencial.convite ? <><p className="text-[13px] text-slate-600 leading-relaxed">{credencial.emailEnviado ? `Enviamos um e-mail oficial da ZiisTec para ${credencial.email}. A pessoa deve confirmar o próprio e-mail antes de entrar na equipe.` : `O convite ficou pendente para ${credencial.email}. Se a pessoa já possui conta, basta entrar com esse mesmo e-mail confirmado.`}</p><div className="rounded-xl bg-teal-50 ring-1 ring-teal-200/70 px-4 py-3 flex gap-2.5"><Lock className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" aria-hidden="true" /><p className="text-[12.5px] text-teal-900 leading-relaxed">Nenhuma senha é criada ou guardada pelo proprietário. Se a pessoa já possui conta, basta entrar. Se esquecer a senha, usa a recuperação na tela de login.</p></div></> : <><p className="text-[13px] text-slate-600 leading-relaxed">Entregue esta senha a {credencial.nome?.split(" ")[0]}. No primeiro acesso o ZiisTec vai pedir que ela crie uma senha pessoal.</p><div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3 flex gap-2.5"><Lock className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" aria-hidden="true" /><p className="text-[12.5px] text-amber-900 leading-relaxed">Esta senha aparece uma única vez e não fica guardada no sistema.</p></div></>}
         </Modal>
       )}
     </>
@@ -4882,7 +5803,7 @@ function AdminPlataforma({ empresas, usuarios, membresias, assinaturas, mudarAss
     <div className="min-h-screen bg-slate-50 font-sans antialiased">
       <header className="bg-slate-900 px-4 sm:px-8 h-14 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-teal-500 flex items-center justify-center"><span className="text-slate-900 font-bold text-sm">Z</span></div>
+          <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-7 h-7 rounded-lg object-contain" />
           <span className="text-white font-semibold tracking-tight">ZiisTec · plataforma</span>
         </div>
         <button onClick={sair} className="text-slate-300 text-[13px] flex items-center gap-2 px-2 py-1.5"><LogOut className="w-4 h-4" />Sair</button>
@@ -5085,3 +6006,19 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
     </>
   );
 }
+
+/* ROUND 3.8B · modo técnico de campo */
+
+/* ROUND 3.9 · vendas, recebimentos e histórico */
+
+/* ROUND 4.0 · identidade ZiisTec e convite por e-mail */
+
+/* MOBILE HOMOLOGATION · shell/nav/dashboard · wave 1 */
+
+/* MOBILE HOMOLOGATION · team/finance · wave 5 */
+
+/* MOBILE HOMOLOGATION · history/warranty · wave 6 */
+
+/* FIELD WORKFLOW V1 · wave 3b · checklist templates and return flow */
+
+/* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
