@@ -27,7 +27,16 @@ jobs:
         run: npm run build
 
       - name: Apply RC-1A release consolidation
-        run: python3 scripts/rc1a-bootstrap.py
+        shell: bash
+        run: |
+          python3 scripts/rc1a-bootstrap.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/screens/v2/QuoteAIV2.jsx')
+          p.write_text('\n'.join(line.rstrip() for line in p.read_text().splitlines()) + '\n')
+          p = Path('tests/blockers/branding_auth_email_contract.test.mjs')
+          p.write_text(p.read_text().rstrip() + '\n')
+          PY
 
       - name: Commit candidate and prove release lifecycle locally
         shell: bash
