@@ -31,7 +31,8 @@ begin
   end if;
 end $$;
 
--- Role matrix uses owner-only post-sale policy RPC as representative privileged write.
+-- Fixture bootstrap is deliberately outside the authorization behavior being tested.
+set local session_replication_role = replica;
 insert into public.company_members(company_id,user_id,role,status,job_title)
 values ('20000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000004','technician','active','RC1B Tech B')
 on conflict (company_id,user_id) do update set role='technician',status='active';
@@ -39,6 +40,7 @@ on conflict (company_id,user_id) do update set role='technician',status='active'
 insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values ('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000005','authenticated','authenticated','rc1b-no-membership@example.invalid','',now(),'{}','{}',now(),now());
 insert into public.profiles(id,full_name,email) values ('10000000-0000-0000-0000-000000000005','RC1B No Membership','rc1b-no-membership@example.invalid');
+set local session_replication_role = origin;
 
 create temp table rc1b_sd_result(k text primary key, ok boolean) on commit drop;
 grant select,insert on rc1b_sd_result to authenticated,anon;
