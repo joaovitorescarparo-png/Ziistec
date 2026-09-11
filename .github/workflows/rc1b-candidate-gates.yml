@@ -1,0 +1,73 @@
+name: RC1B Candidate Gates
+
+on:
+  push:
+    branches: [rc1b-candidate]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24.x' }
+      - name: Canonical source and foundation
+        run: |
+          node scripts/verify-project-governance.mjs
+          node scripts/verify-foundation-integrity.mjs
+      - name: Install
+        run: npm ci --ignore-scripts --no-fund
+      - name: Clean after install
+        run: test -z "$(git status --porcelain)"
+      - name: Verify V2
+        run: npm run verify:v2
+      - name: Clean after verify
+        run: test -z "$(git status --porcelain)"
+      - name: Security audit
+        run: npm run security:audit
+      - name: Reproducible build
+        run: npm run verify:reproducible-build
+      - name: Clean after build
+        run: test -z "$(git status --porcelain)"
+
+  sql-rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24.x' }
+      - uses: supabase/setup-cli@v1
+        with: { version: 2.116.0 }
+      - name: Start disposable Supabase
+        run: supabase start
+      - name: SQL/RLS regressions
+        run: bash scripts/run-sql-rls-ci.sh
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup
+
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: github/codeql-action/init@v4
+        with: { languages: javascript-typescript }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24.x' }
+      - name: Install
+        run: npm ci --ignore-scripts --no-fund
+      - name: Build
+        run: npm run build
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with: { output: codeql-results }
