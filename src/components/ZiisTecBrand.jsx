@@ -29,3 +29,16 @@ export function ZiisTecIcon({ className = "h-9 w-9", alt = "" }) {
     />
   );
 }
+
+export function ZiisTecAppMark({
+  className = "",
+  iconClassName = "h-12 w-12 sm:h-14 sm:w-14",
+  textClassName = "text-[27px] sm:text-[30px] font-semibold tracking-tight text-slate-900",
+}) {
+  return (
+    <div className={`inline-flex max-w-full items-center justify-center gap-3 overflow-visible ${className}`}>
+      <ZiisTecIcon className={`${iconClassName} shrink-0`} />
+      <span className={`whitespace-nowrap leading-none ${textClassName}`}>ZiisTec</span>
+    </div>
+  );
+}
