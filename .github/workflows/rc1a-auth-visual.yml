@@ -1,0 +1,145 @@
+name: RC1A Auth Visual Check
+
+on:
+  push:
+    branches: [rc1a-auth-visual-check]
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Install app and browser harness
+        run: |
+          npm ci --ignore-scripts --no-fund
+          npm install --no-save --package-lock=false playwright@1.55.0
+
+      - name: Prepare real Onboarding visual harness
+        shell: bash
+        run: |
+          cat > rc1a-visual.html <<'HTML'
+          <!doctype html>
+          <html lang="pt-BR">
+            <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>RC1A Visual</title></head>
+            <body><div id="root"></div><script type="module" src="/rc1a-visual-entry.jsx"></script></body>
+          </html>
+          HTML
+          cat > rc1a-visual-entry.jsx <<'JSX'
+          import React from 'react';
+          import ReactDOM from 'react-dom/client';
+          import Onboarding from './src/screens/Onboarding.jsx';
+          import './src/index.css';
+          ReactDOM.createRoot(document.getElementById('root')).render(
+            <Onboarding perfil={{ full_name: 'João' }} aoCriar={async()=>{}} sair={()=>{}} />
+          );
+          JSX
+          npx vite --host 127.0.0.1 --port 4173 > /tmp/rc1a-vite.log 2>&1 &
+          echo $! > /tmp/rc1a-vite.pid
+          for i in {1..30}; do
+            curl -fsS http://127.0.0.1:4173/rc1a-visual.html >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/rc1a-vite.log
+          exit 1
+
+      - name: Validate Login and Onboarding at release widths
+        env:
+          PREVIEW_URL: https://ziistec-mj73pqvmu-js-connect.vercel.app/?_vercel_share=OFbXFMcrVjASzZgAlDYUJAYMwoOroKbO
+        shell: bash
+        run: |
+          mkdir -p rc1a-visual
+          cat > rc1a-visual.mjs <<'NODE'
+          import { chromium } from 'playwright';
+
+          const executablePath = process.env.CHROME || '/usr/bin/google-chrome';
+          const browser = await chromium.launch({ headless: true, executablePath });
+          const widths = [320, 390, 430, 768];
+
+          async function inspectMark(page, label, width) {
+            const icon = page.locator('img[src="/brand/ziistec-icon.png"]').first();
+            await icon.waitFor({ state: 'visible', timeout: 30000 });
+            const data = await icon.evaluate((img) => {
+              const rect = img.getBoundingClientRect();
+              const style = getComputedStyle(img);
+              const parentStyle = getComputedStyle(img.parentElement);
+              const text = img.parentElement?.querySelector('span')?.textContent?.trim() || '';
+              return {
+                src: img.getAttribute('src'),
+                naturalWidth: img.naturalWidth,
+                naturalHeight: img.naturalHeight,
+                width: rect.width,
+                height: rect.height,
+                left: rect.left,
+                right: rect.right,
+                objectFit: style.objectFit,
+                visibility: style.visibility,
+                display: style.display,
+                opacity: Number(style.opacity),
+                parentOverflow: parentStyle.overflow,
+                text,
+              };
+            });
+            if (data.src !== '/brand/ziistec-icon.png') throw new Error(`${label} ${width}: wrong asset ${JSON.stringify(data)}`);
+            if (data.text !== 'ZiisTec') throw new Error(`${label} ${width}: brand text mismatch ${JSON.stringify(data)}`);
+            if (data.objectFit !== 'contain') throw new Error(`${label} ${width}: object-fit is not contain ${JSON.stringify(data)}`);
+            if (!(data.naturalWidth > 0 && data.naturalHeight > 0 && data.width >= 40 && data.height >= 40)) throw new Error(`${label} ${width}: icon is not materially visible ${JSON.stringify(data)}`);
+            if (data.left < -0.5 || data.right > width + 0.5) throw new Error(`${label} ${width}: brand overflows viewport ${JSON.stringify(data)}`);
+            if (data.visibility !== 'visible' || data.display === 'none' || data.opacity < 0.99) throw new Error(`${label} ${width}: brand hidden ${JSON.stringify(data)}`);
+            if (data.parentOverflow === 'hidden' || data.parentOverflow === 'clip') throw new Error(`${label} ${width}: brand wrapper clips content ${JSON.stringify(data)}`);
+            console.log(`RC1A_VISUAL ${label} ${width}: PASS ${JSON.stringify(data)}`);
+          }
+
+          for (const width of widths) {
+            const page = await browser.newPage({ viewport: { width, height: 900 } });
+            await page.goto(process.env.PREVIEW_URL, { waitUntil: 'networkidle', timeout: 60000 });
+            await page.getByText('Entre na sua conta', { exact: true }).waitFor({ state: 'visible', timeout: 30000 });
+            await inspectMark(page, 'login', width);
+            await page.screenshot({ path: `rc1a-visual/login-${width}.png`, fullPage: true });
+            await page.close();
+          }
+
+          {
+            const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+            await page.goto(process.env.PREVIEW_URL, { waitUntil: 'networkidle', timeout: 60000 });
+            await page.getByRole('button', { name: 'Criar conta' }).last().click();
+            await page.getByText('Criar conta na ZiisTec', { exact: true }).waitFor({ state: 'visible' });
+            await inspectMark(page, 'signup', 390);
+            await page.screenshot({ path: 'rc1a-visual/signup-390.png', fullPage: true });
+            await page.close();
+          }
+
+          for (const width of widths) {
+            const page = await browser.newPage({ viewport: { width, height: 900 } });
+            await page.goto('http://127.0.0.1:4173/rc1a-visual.html', { waitUntil: 'networkidle', timeout: 30000 });
+            await page.getByText('Vamos configurar sua empresa', { exact: true }).waitFor({ state: 'visible' });
+            await inspectMark(page, 'onboarding', width);
+            await page.screenshot({ path: `rc1a-visual/onboarding-${width}.png`, fullPage: true });
+            await page.close();
+          }
+
+          await browser.close();
+          NODE
+          node rc1a-visual.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc1a-auth-visual-screenshots
+          path: rc1a-visual
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Stop visual harness
+        if: always()
+        run: kill $(cat /tmp/rc1a-vite.pid) 2>/dev/null || true
