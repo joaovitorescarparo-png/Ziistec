@@ -1,6 +1,13 @@
 -- ZiisTec RC-1B — SECURITY DEFINER inventory invariants + role/tenant/subscription matrix.
 begin;
 
+show session_replication_role;
+do $$ begin
+  if current_setting('session_replication_role') <> 'origin' then
+    raise exception 'RC1B_SECURITY_ASSERTIONS_REQUIRE_ORIGIN';
+  end if;
+end $$;
+
 -- Inventory invariants for application-owned schemas.
 do $$
 declare v_total int; v_anon int; v_missing_path int; v_private_auth int; v_dynamic int;
@@ -41,6 +48,12 @@ insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_co
 values ('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000005','authenticated','authenticated','rc1b-no-membership@example.invalid','',now(),'{}','{}',now(),now());
 insert into public.profiles(id,full_name,email) values ('10000000-0000-0000-0000-000000000005','RC1B No Membership','rc1b-no-membership@example.invalid');
 set local session_replication_role = origin;
+show session_replication_role;
+do $$ begin
+  if current_setting('session_replication_role') <> 'origin' then
+    raise exception 'RC1B_ROLE_MATRIX_REQUIRES_ORIGIN';
+  end if;
+end $$;
 
 create temp table rc1b_sd_result(k text primary key, ok boolean) on commit drop;
 grant select,insert on rc1b_sd_result to authenticated,anon;
