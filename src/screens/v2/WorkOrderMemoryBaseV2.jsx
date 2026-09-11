@@ -107,7 +107,7 @@ export default function WorkOrderMemoryV2({companyId,companyName='Sua empresa',u
     setUploading(true);setError('');
     try{
       const created=await enviarEvidenciaOSV2DB({workOrder:detail.workOrder,file,companyId,userId,stage,caption});
-      setDetail(d=>({...d,media:[...(d?.media||[]),created]}));
+      setDetail(d=>({...d,media:[...(d?.media||[]).filter(x=>x.id!==created.id),created]}));
       setFile(null);setCaption('');if(fileRef.current) fileRef.current.value='';
     }catch(e){setError(e?.message||'Não consegui enviar a evidência.');}
     finally{setUploading(false);}
