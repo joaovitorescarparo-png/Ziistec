@@ -37,11 +37,11 @@ jobs:
           p = Path('tests/blockers/branding_auth_email_contract.test.mjs')
           p.write_text(p.read_text().rstrip() + '\n')
           PY
+          git checkout -- .github/workflows/verify.yml
 
       - name: Commit candidate and prove release lifecycle locally
         shell: bash
         run: |
-          git rm .github/workflows/rc1a-bootstrap.yml scripts/rc1a-bootstrap.py
           git diff --check
           git config user.name 'joaovitorescarparo-png'
           git config user.email 'joaovitorescarparo@gmail.com'
