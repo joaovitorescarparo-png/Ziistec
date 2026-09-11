@@ -21,11 +21,14 @@ SQL
 trap cleanup EXIT
 cleanup
 
+# Fixture setup must not impersonate an application write; all behavioral calls below run with normal triggers/RLS.
 psql -X -v ON_ERROR_STOP=1 "$DB_URL" <<SQL >/dev/null
+set session_replication_role = replica;
 insert into public.clients(id,company_id,name) values ('$CLIENT','$COMPANY','RC1B Concurrent');
 insert into public.work_orders(id,company_id,number,client_id,status,assigned_to)
 values ('$WO','$COMPANY','RC1B-CONCURRENT','$CLIENT','in_progress','10000000-0000-0000-0000-000000000003');
 update public.subscriptions set status='active',current_period_start=current_date,current_period_end=current_date+30 where company_id='$COMPANY';
+set session_replication_role = origin;
 SQL
 
 call_rpc(){
