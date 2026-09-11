@@ -10,7 +10,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,52 +18,82 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
-      - name: Confirm clean checkout
-        shell: bash
-        run: |
-          echo 'STATUS_BEFORE_NPM_CI<<EOF'
-          git status --porcelain
-          echo 'EOF'
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund
-      - name: Status after npm ci
+      - name: Probe every prebuild mutator
         shell: bash
         run: |
-          echo 'STATUS_AFTER_NPM_CI<<EOF'
-          git status --porcelain
-          echo 'EOF'
-      - name: Run mutable baseline build
-        run: npm run build
-      - name: Capture post-build mutation
-        if: always()
+          cat > /tmp/probe.py <<'PY'
+          import hashlib, pathlib, subprocess, sys
+          label = sys.argv[1]
+          cmd = sys.argv[2:]
+          paths = subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
+          paths = [p for p in paths if p]
+          def snap():
+              out = {}
+              for p in paths:
+                  f = pathlib.Path(p)
+                  out[p] = hashlib.sha256(f.read_bytes()).hexdigest() if f.exists() else '<missing>'
+              return out
+          before = snap()
+          subprocess.run(cmd, check=True)
+          after = snap()
+          changed = [p for p in paths if before[p] != after[p]]
+          print(f'PROBE::{label}::{"|".join(changed) if changed else "<none>"}', flush=True)
+          PY
+          python /tmp/probe.py governance node scripts/verify-project-governance.mjs
+          python /tmp/probe.py reassemble node scripts/reassemble.mjs
+          python /tmp/probe.py prepare-wave4a node scripts/prepare-field-workflow-wave4a.mjs
+          python /tmp/probe.py round34 node scripts/apply-round34.mjs
+          python /tmp/probe.py verify-consolidated node scripts/verify-consolidated-source.mjs
+          python /tmp/probe.py round35 node scripts/apply-round35.mjs
+          python /tmp/probe.py round36 node scripts/apply-round36.mjs
+          python /tmp/probe.py round37 node scripts/apply-round37.mjs
+          python /tmp/probe.py round38b node scripts/apply-round38b.mjs
+          python /tmp/probe.py round39 node scripts/apply-round39.mjs
+          python /tmp/probe.py round40 node scripts/apply-round40.mjs
+          python /tmp/probe.py mobile-homologation node scripts/apply-mobile-homologation.mjs
+          python /tmp/probe.py mobile-wave3 node scripts/apply-mobile-wave3.mjs
+          python /tmp/probe.py mobile-wave5 node scripts/apply-mobile-wave5.mjs
+          python /tmp/probe.py mobile-wave6 node scripts/apply-mobile-wave6.mjs
+          python /tmp/probe.py field-wave1 node scripts/run-field-workflow-wave1.mjs
+          python /tmp/probe.py field-wave3a node scripts/apply-field-workflow-wave3a.mjs
+          python /tmp/probe.py field-wave3b node scripts/apply-field-workflow-wave3b.mjs
+          python /tmp/probe.py field-wave4a node scripts/apply-field-workflow-wave4a.mjs
+          python /tmp/probe.py field-wave4b node scripts/apply-field-workflow-wave4b.mjs
+      - name: Build generated candidate
+        run: npx vite build
+      - name: Capture generated candidate
         shell: bash
         run: |
-          echo 'STATUS_AFTER_BUILD<<EOF'
+          echo 'STATUS_AFTER_PIPELINE<<EOF'
           git status --porcelain
-          echo 'EOF'
-          echo 'CHANGED_TRACKED_FILES<<EOF'
-          git diff --name-only
-          echo 'EOF'
-          echo 'DIFF_STAT<<EOF'
-          git diff --stat
           echo 'EOF'
           git diff --binary > rc1a-generated.patch
-      - name: Upload generated canonical candidate
-        if: always()
+      - name: Upload all generated tracked sources
         uses: actions/upload-artifact@v4
         with:
-          name: rc1a-generated-source
+          name: rc1a-generated-source-all
           path: |
             rc1a-generated.patch
+            api/quote-pdf.js
+            src/App.jsx
             src/legacy/ZiisTecApp.jsx
-            src/screens/v2/AISettingsV2.jsx
-            src/screens/v2/ClientV2.jsx
-            src/screens/v2/CompanySettingsV2.jsx
-            src/screens/v2/DashboardV2.jsx
+            src/lib/dataApi.js
+            src/lib/purchaseV2Api.js
+            src/lib/quoteV2Api.js
+            src/lib/quotesV2Api.js
+            src/lib/runtimeApi.js
+            src/lib/storageExtras.js
+            src/lib/v2Api.js
+            src/screens/v2/ClientLocationsV2.jsx
             src/screens/v2/FinanceV2.jsx
-            src/screens/v2/GuaranteesV2.jsx
-            src/screens/v2/OSV2.jsx
-            src/screens/v2/PeopleV2.jsx
-            src/screens/v2/ProductsV2.jsx
+            src/screens/v2/ManualWarrantyV2.jsx
+            src/screens/v2/ProductStockV2.jsx
+            src/screens/v2/QuoteAIBaseV2.jsx
+            src/screens/v2/QuoteAIV2.jsx
+            src/screens/v2/QuotesManagementV2.jsx
+            src/screens/v2/WorkOrderMemoryBaseV2.jsx
+            src/screens/v2/WorkOrderMemoryV2.jsx
           if-no-files-found: error
           retention-days: 1
