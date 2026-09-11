@@ -36,10 +36,7 @@ bootstrap_applied=0
 
 resolve_baseline_file() {
   local name="$1"
-  if [[ -n "${baseline_alias[$name]:-}" ]]; then
-    printf '%s\n' "${baseline_alias[$name]}"
-    return 0
-  fi
+  if [[ -n "${baseline_alias[$name]:-}" ]]; then printf '%s\n' "${baseline_alias[$name]}"; return 0; fi
   local matches=()
   mapfile -t matches < <(find supabase -maxdepth 1 -type f -name "[0-9][0-9][0-9][0-9]_${name}.sql" | sort)
   if [[ ${#matches[@]} -ne 1 ]]; then
@@ -54,35 +51,20 @@ while IFS=',' read -r version name statements_md5; do
   if [[ "$version" == "version" ]]; then continue; fi
   [[ -n "$version" && -n "$name" ]] || { echo "CI_SQL_RLS: malformed baseline manifest row" >&2; exit 1; }
   sql="$(resolve_baseline_file "$name")"
-  if [[ "$sql" == "__RECONCILE_AFTER_BASELINE__" ]]; then
-    echo "CI_SQL_RLS baseline: $name -> deferred reconciliation"
-    continue
-  fi
+  if [[ "$sql" == "__RECONCILE_AFTER_BASELINE__" ]]; then echo "CI_SQL_RLS baseline: $name -> deferred reconciliation"; continue; fi
   [[ -f "$sql" ]] || { echo "CI_SQL_RLS: resolved file does not exist for '$name': $sql" >&2; exit 1; }
-  if [[ -n "${applied_baseline_files[$sql]:-}" ]]; then
-    echo "CI_SQL_RLS baseline: $name -> consolidated in already applied $sql"
-    continue
-  fi
+  if [[ -n "${applied_baseline_files[$sql]:-}" ]]; then echo "CI_SQL_RLS baseline: $name -> consolidated in already applied $sql"; continue; fi
   apply_sql "$sql"
   applied_baseline_files[$sql]="$name"
-  if [[ "$name" == "0001_ziistec_fundacao_final" ]]; then
-    apply_sql supabase/tests/ci_local_bootstrap.sql
-    bootstrap_applied=1
-  fi
+  if [[ "$name" == "0001_ziistec_fundacao_final" ]]; then apply_sql supabase/tests/ci_local_bootstrap.sql; bootstrap_applied=1; fi
 done < "$BASELINE_MANIFEST"
 
-if [[ "$bootstrap_applied" -ne 1 ]]; then
-  echo 'CI_SQL_RLS: local bootstrap was not applied after 0001' >&2
-  exit 1
-fi
-
+if [[ "$bootstrap_applied" -ne 1 ]]; then echo 'CI_SQL_RLS: local bootstrap was not applied after 0001' >&2; exit 1; fi
 apply_sql supabase/staging/production_baseline_reconciliation.sql
 
 mapfile -t v2_migrations < <(find supabase -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]*.sql' | sort)
 for sql in "${v2_migrations[@]}"; do
-  base="$(basename "$sql")"
-  prefix="${base%%_*}"
-  num=$((10#$prefix))
+  base="$(basename "$sql")"; prefix="${base%%_*}"; num=$((10#$prefix))
   if (( num >= 50 )); then apply_sql "$sql"; fi
 done
 
@@ -108,6 +90,8 @@ regressions=(
   supabase/tests/v2_field_workflow_wave4a_templates_kits_reuse_rollback.sql
   supabase/tests/v2_field_workflow_wave4a1_client_location_rollback.sql
   supabase/tests/v2_field_workflow_wave4b_global_search_post_sale_rollback.sql
+  supabase/tests/v2_rc1b_attachment_upload_idempotency_rollback.sql
+  supabase/tests/v2_rc1b_security_definer_audit_rollback.sql
 )
 
 for sql in "${regressions[@]}"; do
@@ -115,6 +99,7 @@ for sql in "${regressions[@]}"; do
   psql -X -v ON_ERROR_STOP=1 "$DB_URL" -f "$sql"
 done
 
+bash scripts/test-rc1b-upload-concurrency.sh
 node --test tests/blockers/f03_quote_to_wo_authority.test.mjs
 
 echo 'CI_SQL_RLS: OK'
