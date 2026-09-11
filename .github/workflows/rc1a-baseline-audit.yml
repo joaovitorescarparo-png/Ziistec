@@ -1,0 +1,52 @@
+name: RC1A Baseline Audit
+
+on:
+  push:
+    branches: [rc1a-baseline-audit]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+      - name: Confirm clean checkout
+        shell: bash
+        run: |
+          echo 'STATUS_BEFORE_NPM_CI<<EOF'
+          git status --porcelain
+          echo 'EOF'
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-fund
+      - name: Status after npm ci
+        shell: bash
+        run: |
+          echo 'STATUS_AFTER_NPM_CI<<EOF'
+          git status --porcelain
+          echo 'EOF'
+      - name: Run mutable baseline build
+        run: npm run build
+      - name: Capture post-build mutation
+        if: always()
+        shell: bash
+        run: |
+          echo 'STATUS_AFTER_BUILD<<EOF'
+          git status --porcelain
+          echo 'EOF'
+          echo 'CHANGED_TRACKED_FILES<<EOF'
+          git diff --name-only
+          echo 'EOF'
+          echo 'DIFF_STAT<<EOF'
+          git diff --stat
+          echo 'EOF'
+          echo 'DIFF_PATCH<<EOF'
+          git diff -- . ':(exclude)package-lock.json' | sed -n '1,4000p'
+          echo 'EOF'
