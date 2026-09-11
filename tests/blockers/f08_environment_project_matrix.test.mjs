@@ -13,6 +13,8 @@ const INVALID_URL = 'https://projeto-errado.supabase.co';
 const INVALID_KEY = 'sb_publishable_invalid_test';
 const PROD_HOST = 'ziistec.vercel.app';
 const STAGING_HOST = 'ziistec-git-hardening-v2-staging-js-connect.vercel.app';
+const FIELD_WORKFLOW_BRANCH = 'field-workflow-v1';
+const FIELD_WORKFLOW_HOST = 'ziistec-git-field-workflow-v1-js-connect.vercel.app';
 
 const client = ({ deploymentEnv, host, envUrl = '', envKey = '' }) => resolverConfigSupabase({
   deploymentEnv,
@@ -57,6 +59,36 @@ test('F08 server: preview allowlisted aceita somente staging autorizado', () => 
   mustFailClosed(server({ vercelEnv: 'preview', url: INVALID_URL, key: INVALID_KEY }), 'preview com projeto terceiro');
   mustFailClosed(server({ vercelEnv: 'preview', url: STAGING_SUPABASE_URL, key: INVALID_KEY }), 'preview com key errada');
   mustFailClosed(server({ vercelEnv: 'preview', branch: 'outra-branch', url: STAGING_SUPABASE_URL, key: STAGING_KEY }), 'preview desconhecido com staging explícito');
+});
+
+test('F08 field-workflow-v1: branch e host estável aceitam somente Staging', () => {
+  mustConfigure(
+    server({ vercelEnv: 'preview', branch: FIELD_WORKFLOW_BRANCH, url: STAGING_SUPABASE_URL, key: STAGING_KEY }),
+    STAGING_SUPABASE_URL,
+    'field-workflow server staging',
+  );
+  mustFailClosed(
+    server({ vercelEnv: 'preview', branch: FIELD_WORKFLOW_BRANCH, url: PROD_SUPABASE_URL, key: PROD_KEY }),
+    'field-workflow server production',
+  );
+  mustFailClosed(
+    server({ vercelEnv: 'preview', branch: FIELD_WORKFLOW_BRANCH, url: STAGING_SUPABASE_URL, key: INVALID_KEY }),
+    'field-workflow server key incompatível',
+  );
+
+  mustConfigure(
+    client({ deploymentEnv: 'preview', host: FIELD_WORKFLOW_HOST, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }),
+    STAGING_SUPABASE_URL,
+    'field-workflow client staging',
+  );
+  mustFailClosed(
+    client({ deploymentEnv: 'preview', host: FIELD_WORKFLOW_HOST, envUrl: PROD_SUPABASE_URL, envKey: PROD_KEY }),
+    'field-workflow client production',
+  );
+  mustFailClosed(
+    client({ deploymentEnv: 'preview', host: FIELD_WORKFLOW_HOST, envUrl: INVALID_URL, envKey: INVALID_KEY }),
+    'field-workflow client par incompatível',
+  );
 });
 
 test('F08 server: development aceita staging explícito e nunca produção/terceiro', () => {

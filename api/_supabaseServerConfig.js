@@ -7,6 +7,7 @@ const STAGING_BRANCHES = Object.freeze([
   STAGING_BRANCH,
   'ui-v1-v2-merge',
   'hardening-v2-staging',
+  'field-workflow-v1',
 ]);
 
 const clean = (value) => String(value || '').trim();
