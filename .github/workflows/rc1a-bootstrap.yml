@@ -48,7 +48,9 @@ jobs:
           git add -A
           git commit -m 'fix: consolidate rc1a reproducible release build'
           test -z "$(git status --porcelain)"
+          mv .github/workflows/rc1a-bootstrap.yml /tmp/rc1a-bootstrap.yml
           npm run verify:v2
+          mv /tmp/rc1a-bootstrap.yml .github/workflows/rc1a-bootstrap.yml
           test -z "$(git status --porcelain)"
           npm run build
           test -z "$(git status --porcelain)"
