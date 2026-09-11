@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { supabase, mensagemErro } from "../lib/supabase";
-import { ZiisTecLogo } from "../components/ZiisTecBrand";
+import { ZiisTecAppMark } from "../components/ZiisTecBrand";
 
 const anel = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2";
 const campo = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-600";
@@ -37,7 +37,7 @@ export default function Onboarding({ perfil, aoCriar, sair }) {
     <div className="min-h-[100dvh] bg-slate-50 flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 font-sans antialiased overflow-x-hidden">
       <div className="w-full max-w-md">
         <div className="text-center mb-6 sm:mb-8">
-          <ZiisTecLogo dark className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
+          <ZiisTecAppMark className="mx-auto mb-5" />
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Vamos configurar sua empresa</h1>
           <p className="text-[14px] text-slate-500 mt-1.5">Leva menos de um minuto. O resto você completa depois.</p>
         </div>
