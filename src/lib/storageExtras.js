@@ -42,9 +42,12 @@ export async function resolverLogoEmpresaDB(path){
   }
 }
 
+const PRODUCT_IMAGE_BUCKET='zt-product-images';
+const LEGACY_PRODUCT_IMAGE_BUCKET='zt-branding';
+
 export async function resolverImagemProdutoDB(path){
   if(!path) return null;
-  return signed('zt-branding',path);
+  return (await signed(PRODUCT_IMAGE_BUCKET,path)) || signed(LEGACY_PRODUCT_IMAGE_BUCKET,path);
 }
 
 export async function salvarImagemProdutoDB(productId,file,companyId,oldPath=null){
@@ -55,18 +58,24 @@ export async function salvarImagemProdutoDB(productId,file,companyId,oldPath=nul
 
   const ext=(safe(file.name).split('.').pop()||'jpg').toLowerCase();
   const path=`${companyId}/products/${productId}/${crypto.randomUUID()}.${ext}`;
-  const up=await supabase.storage.from('zt-branding').upload(path,file,{contentType:file.type,upsert:false});
+  const up=await supabase.storage.from(PRODUCT_IMAGE_BUCKET).upload(path,file,{contentType:file.type,upsert:false});
   if(up.error) throw up.error;
 
   const row=await supabase.from('products').update({image_path:path}).eq('id',productId).eq('company_id',companyId).select('id,image_path').single();
-  if(row.error){await supabase.storage.from('zt-branding').remove([path]);throw row.error;}
+  if(row.error){await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove([path]);throw row.error;}
 
-  if(oldPath&&oldPath!==path) await supabase.storage.from('zt-branding').remove([oldPath]);
-  return {path,url:await signed('zt-branding',path)};
+  if(oldPath&&oldPath!==path){
+    await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove([oldPath]).catch(()=>{});
+    await supabase.storage.from(LEGACY_PRODUCT_IMAGE_BUCKET).remove([oldPath]).catch(()=>{});
+  }
+  return {path,url:await signed(PRODUCT_IMAGE_BUCKET,path)};
 }
 
 export async function removerImagemProdutoDB(productId,companyId,path){
-  if(path){const r=await supabase.storage.from('zt-branding').remove([path]);if(r.error) throw r.error;}
+  if(path){
+    await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove([path]).catch(()=>{});
+    await supabase.storage.from(LEGACY_PRODUCT_IMAGE_BUCKET).remove([path]).catch(()=>{});
+  }
   const row=await supabase.from('products').update({image_path:null}).eq('id',productId).eq('company_id',companyId);
   if(row.error) throw row.error;
   return true;
@@ -83,3 +92,5 @@ export async function persistirFotosOSDB(osId,fotos,companyId,userId){
   const rows=check(await supabase.from('attachments').select('*').eq('work_order_id',osId).order('created_at',{ascending:true}))||[];
   return {fotos:await Promise.all(rows.map(async a=>({id:a.id,nome:a.file_name,categoria:a.category||'Foto',url:await signed(a.bucket,a.path),path:a.path,bucket:a.bucket,persistido:true})))};
 }
+
+/* FIELD WORKFLOW V1 · wave 1 · product image bucket */

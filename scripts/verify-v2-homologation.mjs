@@ -172,7 +172,7 @@ requireText('api/finance-ai.js', [
   '/rest/v1/rpc/zt_is_owner', '/rest/v1/rpc/zt_consume_ai_quota', 'sanitizeSnapshot',
 ]);
 const pdfApi = requireText('api/quote-pdf.js', [
-  "req.method!=='POST'", "auth.startsWith('Bearer ')", '/auth/v1/user',
+  "req.method !== 'POST'", "auth.startsWith('Bearer ')", '/auth/v1/user',
   '/rest/v1/rpc/zt_is_owner', '/rest/v1/rpc/zt_consume_quote_pdf_quota',
   'select=id,product_id,name,unit,quantity,unit_price,notes,position',
 ]);

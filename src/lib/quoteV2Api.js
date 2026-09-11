@@ -22,9 +22,9 @@ export async function carregarBaseOrcamentoV2DB(companyId) {
   // Não depende de image_path/0050: o orçamento V2 também precisa abrir no preview
   // apontado para o schema atual de produção antes da homologação das migrations.
   const [clients, services, products, company] = await Promise.all([
-    supabase.from('clients').select('id,name,trade_name,phone,whatsapp,address').eq('company_id',companyId).order('name'),
-    supabase.from('services').select('id,name,category,unit,price,cost,active').eq('company_id',companyId).order('name'),
-    supabase.from('products').select('id,name,brand,model,unit,price,cost,active').eq('company_id',companyId).order('name'),
+    supabase.from('clients').select('id,name,trade_name,phone,whatsapp,address').eq('company_id',companyId).is('deleted_at',null).order('name'),
+    supabase.from('services').select('id,name,category,unit,price,cost,active').eq('company_id',companyId).is('deleted_at',null).order('name'),
+    supabase.from('products').select('id,name,brand,model,unit,price,cost,active').eq('company_id',companyId).is('deleted_at',null).order('name'),
     supabase.from('companies').select('default_validity_days,default_payment_terms,default_notes').eq('id',companyId).single(),
   ]);
   const firstError = [clients,services,products,company].find(r=>r.error)?.error;
@@ -204,6 +204,9 @@ export async function salvarOrcamentoV2DB(preview, base, companyId, userId) {
     desconto:n(preview.desconto),
     acrescimo:n(preview.acrescimo),
     condicao:preview.condicao || base.padroes?.condicao || '',
+    mensagemCliente:String(preview.mensagemCliente||'').slice(0,5000),
+    previsaoExecucao:preview.previsaoExecucao||'',
+    mostrarImagensProdutos:Boolean(preview.mostrarImagensProdutos),
     obs:preview.obs || base.padroes?.observacoes || '',
     local:'',
     localServico:'',
@@ -219,3 +222,5 @@ export async function salvarOrcamentoV2DB(preview, base, companyId, userId) {
     })),
   }, companyId, userId);
 }
+
+/* FIELD WORKFLOW V1 · wave 1 · quote workflow fields */

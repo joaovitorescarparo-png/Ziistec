@@ -49,6 +49,9 @@ const mapQuote=(x,clientMap,woMap)=>{
     desconto:n(x.discount),
     acrescimo:n(x.surcharge),
     condicao:x.payment_terms||'',
+    mensagemCliente:x.customer_message||'',
+    previsaoExecucao:dateOnly(x.execution_forecast_date),
+    mostrarImagensProdutos:Boolean(x.show_product_images),
     obs:x.notes||'',
     local:x.address||'',
     localServico:x.service_place||'',
@@ -62,7 +65,7 @@ const mapQuote=(x,clientMap,woMap)=>{
 
 export async function carregarOrcamentosV2DB(companyId){
   const [quotesRes,clientsRes,workOrdersRes]=await Promise.all([
-    supabase.from('quotes').select('id,company_id,number,client_id,status,issue_date,valid_until,discount,surcharge,payment_terms,notes,address,service_place,created_at,updated_at,client_request_id,quote_items(id,kind,service_id,product_id,name,unit,quantity,unit_price,unit_cost,notes,position)').eq('company_id',companyId).order('updated_at',{ascending:false}),
+    supabase.from('quotes').select('id,company_id,number,client_id,status,issue_date,valid_until,discount,surcharge,payment_terms,customer_message,execution_forecast_date,show_product_images,notes,address,service_place,created_at,updated_at,client_request_id,quote_items(id,kind,service_id,product_id,name,unit,quantity,unit_price,unit_cost,notes,position)').eq('company_id',companyId).order('updated_at',{ascending:false}),
     supabase.from('clients').select('id,name,trade_name,phone,whatsapp').eq('company_id',companyId),
     supabase.from('work_orders').select('id,number,quote_id,status,scheduled_date,scheduled_time,assigned_to,created_at').eq('company_id',companyId).not('quote_id','is',null).order('created_at',{ascending:true}),
   ]);
@@ -93,7 +96,7 @@ export async function duplicarOrcamentoSeguroV2DB(quote,companyId,userId){
   return duplicarOrcamentoDB({
     id:quote.id,requestId:quote.requestId,numero:quote.numero,clienteId:quote.clienteId,status:quote.status,
     data:quote.data,validade:quote.validade,desconto:quote.desconto,acrescimo:quote.acrescimo,
-    condicao:quote.condicao,obs:quote.obs,local:quote.local,localServico:quote.localServico,
+    condicao:quote.condicao,mensagemCliente:quote.mensagemCliente,previsaoExecucao:quote.previsaoExecucao,mostrarImagensProdutos:quote.mostrarImagensProdutos,obs:quote.obs,local:quote.local,localServico:quote.localServico,
     itens:(quote.itens||[]).map(i=>({...i})),osId:quote.os?.id||null,
   },companyId,userId,newValid);
 }
@@ -115,3 +118,5 @@ export async function criarOSDoOrcamentoV2DB({quoteId,assignedTo=null,scheduledD
   }
   return result.data;
 }
+
+/* FIELD WORKFLOW V1 · wave 1 · quote list fields */

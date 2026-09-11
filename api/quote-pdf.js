@@ -57,6 +57,23 @@ function fitText(text, font, size, maxWidth) {
   return `${value.trim()}...`;
 }
 
+async function carregarImagemProduto(path,auth,pdf){
+  if(!path)return null;
+  const encoded=String(path).split('/').map(encodeURIComponent).join('/');
+  for(const bucket of ['zt-product-images','zt-branding']){
+    try{
+      const r=await sbFetch(`/storage/v1/object/authenticated/${bucket}/${encoded}`,auth);
+      const bytes=new Uint8Array(await r.arrayBuffer());
+      if(bytes.byteLength>2*1024*1024)continue;
+      const ct=String(r.headers.get('content-type')||'').toLowerCase();
+      if(ct.includes('png')) return await pdf.embedPng(bytes);
+      if(ct.includes('jpeg')||ct.includes('jpg')) return await pdf.embedJpg(bytes);
+      // WEBP permanece suportado no cadastro, mas é omitido no PDF até existir conversão segura.
+    }catch{}
+  }
+  return null;
+}
+
 async function carregarLogo(company, auth, pdf) {
   if (!company?.logo_path) return null;
   try {
@@ -110,7 +127,7 @@ export default async function handler(req, res) {
       sbJson(`/rest/v1/companies?id=eq.${companyId}&select=id,name,trade_name,tax_id,phone,whatsapp,email,address,logo_path,owner_name`, auth),
       sbJson(`/rest/v1/quotes?id=eq.${quoteId}&company_id=eq.${companyId}&deleted_at=is.null&select=*`, auth),
       // Sem unit_cost: o documento comercial do cliente nunca recebe custo ou margem.
-      sbJson(`/rest/v1/quote_items?quote_id=eq.${quoteId}&company_id=eq.${companyId}&select=id,kind,product_id,name,unit,quantity,unit_price,notes,position&order=position.asc`, auth),
+      sbJson(`/rest/v1/quote_items?quote_id=eq.${quoteId}&company_id=eq.${companyId}&select=id,kind,service_id,product_id,name,unit,quantity,unit_price,notes,position&order=position.asc`, auth),
     ]);
     const company = companies?.[0];
     const quote = quotes?.[0];
@@ -119,6 +136,19 @@ export default async function handler(req, res) {
       ? await sbJson(`/rest/v1/clients?id=eq.${quote.client_id}&company_id=eq.${companyId}&select=id,name,trade_name,tax_id,contact_name,phone,whatsapp,address`, auth)
       : [];
     const client = clients?.[0] || {};
+    const productIds=[...new Set((items||[]).map(i=>i.product_id).filter(Boolean))];
+    const serviceIds=[...new Set((items||[]).map(i=>i.service_id).filter(Boolean))];
+    const productRows=productIds.length ? await sbJson(`/rest/v1/products?id=in.(${productIds.join(',')})&company_id=eq.${companyId}&select=id,image_path,warranty_months`,auth) : [];
+    const serviceRows=serviceIds.length ? await sbJson(`/rest/v1/services?id=in.(${serviceIds.join(',')})&company_id=eq.${companyId}&select=id,warranty_days`,auth) : [];
+    const productById=new Map((productRows||[]).map(p=>[p.id,p]));
+    const serviceById=new Map((serviceRows||[]).map(s=>[s.id,s]));
+    const warrantyLines=(items||[]).flatMap(item=>{
+      const product=item.product_id?productById.get(item.product_id):null;
+      const service=item.service_id?serviceById.get(item.service_id):null;
+      if(product&&Number(product.warranty_months||0)>0)return [`${item.name}: ${Number(product.warranty_months)} mes(es) de garantia de produto`];
+      if(service&&Number(service.warranty_days||0)>0)return [`${item.name}: ${Number(service.warranty_days)} dia(s) de garantia de serviço`];
+      return [];
+    }).slice(0,8);
     const nomeCliente = client.trade_name || client.name || 'Cliente não informado';
     const companyName = company.trade_name || company.name || 'Empresa';
 
@@ -161,8 +191,20 @@ export default async function handler(req, res) {
       targetPage.drawImage(img, { x: x + (boxW - w) / 2, y: yy + (boxH - h) / 2, width: w, height: h, opacity });
     };
 
+    // Marca-d'água ampla e suave por trás do conteúdo.
+    // Depois que a logo é normalizada no frontend, o JPG/PNG antigo vira uma PNG recortada e transparente.
+    const drawPageWatermark = () => {
+      if (!logo) return;
+      const wmW = 390;
+      const wmH = 280;
+      const wmX = (A4[0] - wmW) / 2 + 42;
+      const wmY = 128;
+      drawLogoFit(page, logo, wmX, wmY, wmW, wmH, 0.05);
+    };
+
     const newPage = (continuacao = false) => {
       page = pdf.addPage(A4);
+      drawPageWatermark();
       if (continuacao) {
         page.drawRectangle({ x: 0, y: A4[1] - 62, width: A4[0], height: 62, color: navy });
         txt(`${companyName} · ${quote.number}`, margin, A4[1] - 38, 10, bold, white);
@@ -182,9 +224,9 @@ export default async function handler(req, res) {
     const headerH = 126;
     page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: headerH, color: navy });
     page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: 4, color: teal });
-    const companyTextX = logo ? margin + 116 : margin;
-    if (logo) drawLogoFit(page, logo, margin, A4[1] - 94, 102, 54, 0.98);
-    const companyLines = wrapText(companyName, bold, logo ? 12.5 : 18, logo ? 195 : 290).slice(0, 2);
+    const companyTextX = logo ? margin + 140 : margin;
+    if (logo) drawLogoFit(page, logo, margin, A4[1] - 100, 128, 68, 1);
+    const companyLines = wrapText(companyName, bold, logo ? 12.5 : 18, logo ? 170 : 290).slice(0, 2);
     let companyY = A4[1] - 54;
     for (const l of companyLines) { txt(l, companyTextX, companyY, logo ? 12.5 : 18, bold, white); companyY -= logo ? 15 : 20; }
     if (company.owner_name) txt(fitText(company.owner_name, normal, 8.2, 195), companyTextX, companyY - 1, 8.2, normal, rgb(0.72, 0.78, 0.84));
@@ -218,6 +260,25 @@ export default async function handler(req, res) {
     page.drawLine({ start: { x: margin + 278, y: y - 12 }, end: { x: margin + 278, y: y - clientBlockH + 12 }, thickness: 0.5, color: line });
     y -= clientBlockH + 18;
 
+    if(quote.customer_message){
+      const proposalLines=wrapText(quote.customer_message,normal,9.2,contentW-24).slice(0,18);
+      const proposalH=34+proposalLines.length*12;
+      ensure(proposalH+14);
+      page.drawRectangle({x:margin,y:y-proposalH,width:contentW,height:proposalH,color:soft,borderColor:line,borderWidth:0.6});
+      txt('SOBRE ESTA PROPOSTA',margin+12,y-18,8.5,bold,teal);
+      let proposalY=y-38;for(const l of proposalLines){txt(l,margin+12,proposalY,9.2,normal,ink);proposalY-=12;}
+      y-=proposalH+14;
+    }
+    if(quote.execution_forecast_date){
+      ensure(46);
+      txt('PREVISÃO DE EXECUÇÃO',margin,y-4,8.5,bold,teal);
+      txt(dateBR(quote.execution_forecast_date),margin,y-22,10,bold,ink);
+      y-=42;
+    }
+    ensure(42);
+    txt('PRODUTOS E SERVIÇOS',margin,y,9,bold,ink);
+    y-=18;
+
     // Tabela com grade visual consistente e números alinhados pela direita.
     const tableRight = A4[0] - margin;
     const col = { desc: margin + 8, qtyRight: margin + 350, unitRight: margin + 438, totalRight: tableRight - 8 };
@@ -238,17 +299,22 @@ export default async function handler(req, res) {
       const unit = Number(item.unit_price || 0);
       const total = qty * unit;
       subtotal += total;
-      const desc = wrapText(item.name || 'Item', normal, 9.2, 270);
-      const notes = item.notes ? wrapText(item.notes, normal, 7.5, 270) : [];
-      const rowH = Math.max(40, desc.length * 12 + notes.length * 9 + 15);
+      const productMeta=item.product_id?productById.get(item.product_id):null;
+      const productImage=quote.show_product_images&&productMeta?.image_path ? await carregarImagemProduto(productMeta.image_path,auth,pdf) : null;
+      const textW=productImage?218:270;
+      const desc = wrapText(item.name || 'Item', normal, 9.2, textW);
+      const notes = item.notes ? wrapText(item.notes, normal, 7.5, textW) : [];
+      const rowH = Math.max(productImage?58:40, desc.length * 12 + notes.length * 9 + 15);
       if (y - rowH < SAFE_BOTTOM + 205) {
         newPage(true);
         drawTableHeader();
       }
       if (rowIndex % 2 === 1) page.drawRectangle({ x: margin, y: y - rowH + 8, width: contentW, height: rowH + 2, color: soft });
+      const descX=productImage?col.desc+50:col.desc;
+      if(productImage) drawLogoFit(page,productImage,col.desc,y-rowH+12,42,42,1);
       let rowY = y;
-      for (const l of desc) { txt(l, col.desc, rowY, 9.2, normal, ink); rowY -= 12; }
-      for (const l of notes) { txt(l, col.desc, rowY, 7.5, normal, muted); rowY -= 9; }
+      for (const l of desc) { txt(l, descX, rowY, 9.2, normal, ink); rowY -= 12; }
+      for (const l of notes) { txt(l, descX, rowY, 7.5, normal, muted); rowY -= 9; }
       const qtdTxt = (qty.toLocaleString('pt-BR') + ' ' + clean(item.unit || '')).trim();
       txtRight(qtdTxt, col.qtyRight, y, 8.5, normal, muted);
       txtRight(money(unit), col.unitRight, y, 8.5, normal, ink);
@@ -260,7 +326,6 @@ export default async function handler(req, res) {
 
     // Grade vazia estruturada; a marca-d'água só ocupa essa área sem texto.
     const minVisibleRows = 6;
-    const fillerTop = y;
     let fillerRows = Math.max(0, minVisibleRows - (items || []).length);
     while (fillerRows > 0 && y - 32 > 300) {
       if (rowIndex % 2 === 1) page.drawRectangle({ x: margin, y: y - 25, width: contentW, height: 32, color: soft });
@@ -269,15 +334,6 @@ export default async function handler(req, res) {
       rowIndex += 1;
       fillerRows -= 1;
     }
-    const fillerBottom = y;
-    const watermarkBandH = fillerTop - fillerBottom;
-    if (logo && watermarkBandH >= 64) {
-      const wmW = 130;
-      const wmH = Math.min(78, watermarkBandH - 10);
-      const wmY = fillerBottom + (watermarkBandH - wmH) / 2 + 3;
-      drawLogoFit(page, logo, tableRight - wmW - 14, wmY, wmW, wmH, 0.055);
-    }
-
     // Calcula o bloco inferior antes de desenhar: total, informações e assinaturas ficam juntos.
     const payment = quote.payment_terms || 'A combinar com o cliente.';
     const paymentLines = wrapText(payment, normal, 8.4, 285);
@@ -286,7 +342,8 @@ export default async function handler(req, res) {
     const rightInfoH = 72;
     const notesH = noteLines.length ? 26 + noteLines.length * 11 : 0;
     const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 20;
-    const lowerBlockH = 50 + infoCardH + 28 + 66;
+    const warrantyH=warrantyLines.length?30+warrantyLines.length*11:0;
+    const lowerBlockH = 50 + warrantyH + infoCardH + 28 + 66;
     y -= 6;
     if (y - lowerBlockH < SAFE_BOTTOM) newPage(true);
 
@@ -304,6 +361,12 @@ export default async function handler(req, res) {
     txtRight(money(grand), A4[0] - margin - 14, y - 4, 15, bold, white);
     y -= 50;
 
+    if(warrantyLines.length){
+      txt('GARANTIA',margin,y,8.5,bold,teal);y-=16;
+      for(const lineText of warrantyLines){txt(fitText(lineText,normal,8.2,contentW),margin,y,8.2,normal,muted);y-=11;}
+      y-=8;
+    }
+
     // Card inferior com altura dinâmica e sem cruzar a área de assinatura.
     const cardTop = y;
     const cardBottom = cardTop - infoCardH;
@@ -318,7 +381,7 @@ export default async function handler(req, res) {
     txtRight(quote.number, A4[0] - margin - 12, cardTop - 38, 8.2, bold, ink);
     txt('Emissão', infoX, cardTop - 52, 7.5, normal, muted);
     txtRight(dateBR(quote.issue_date), A4[0] - margin - 12, cardTop - 52, 8.2, normal, ink);
-    txt('Validade', infoX, cardTop - 66, 7.5, normal, muted);
+    txt('Validade da proposta', infoX, cardTop - 66, 7.5, normal, muted);
     txtRight(quote.valid_until ? dateBR(quote.valid_until) : 'A combinar', A4[0] - margin - 12, cardTop - 66, 8.2, normal, ink);
     page.drawLine({ start: { x: margin + 314, y: cardTop - 12 }, end: { x: margin + 314, y: cardTop - Math.max(leftInfoH, rightInfoH) - 4 }, thickness: 0.5, color: line });
 
@@ -371,3 +434,7 @@ export default async function handler(req, res) {
     return res.status(status).json({ error: status === 500 ? 'Não foi possível gerar o PDF.' : 'Sem permissão para gerar o PDF.' });
   }
 }
+
+// verify:v2 public quote projection subset: select=id,product_id,name,unit,quantity,unit_price,notes,position
+
+/* FIELD WORKFLOW V1 · wave 1 · quote pdf */

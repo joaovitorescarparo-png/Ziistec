@@ -5,6 +5,7 @@ import { ZiisTecLogo } from "../components/ZiisTecBrand";
 
 const anel = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50";
 const campo = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-600";
+const MENSAGEM_CADASTRO_NEUTRA = "Se o cadastro puder ser concluído, enviaremos as instruções para este e-mail. Se você já possui uma conta, entre normalmente ou use a recuperação de senha.";
 
 function Botao({ children, onClick, variante = "primary", className = "", disabled, tipo = "button" }) {
   const estilos = {
@@ -64,7 +65,7 @@ export default function Login() {
       },
     });
     if (error) setErro(mensagemErro(error));
-    else if (!data.session) setAviso("Conta criada. Confirme o e-mail oficial da ZiisTec e entre em seguida.");
+    else if (!data.session) setAviso(MENSAGEM_CADASTRO_NEUTRA);
     setOcupado(false);
   };
 
@@ -93,7 +94,7 @@ export default function Login() {
     return (
       <div className="min-h-[100dvh] bg-slate-50 flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 font-sans overflow-x-hidden">
         <div className="w-full max-w-md text-center">
-          <ZiisTecLogo className="h-11 w-auto mx-auto mb-6" />
+          <ZiisTecLogo dark className="h-11 w-auto mx-auto mb-6" />
           <h1 className="text-xl font-semibold text-slate-900">Configuração pendente</h1>
           <p className="text-[15px] text-slate-600 mt-3 leading-relaxed">
             Este ambiente da ZiisTec não recebeu uma configuração Supabase válida. Por segurança, o acesso foi bloqueado.
@@ -110,7 +111,7 @@ export default function Login() {
     <div className="min-h-[100dvh] bg-slate-50 flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 font-sans antialiased overflow-x-hidden">
       <div className="w-full max-w-md">
         <div className="text-center mb-6 sm:mb-8">
-          <ZiisTecLogo className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
+          <ZiisTecLogo dark className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
             {criando ? "Criar conta na ZiisTec" : "Entre na sua conta"}
           </h1>

@@ -37,7 +37,7 @@ export default function Onboarding({ perfil, aoCriar, sair }) {
     <div className="min-h-[100dvh] bg-slate-50 flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 font-sans antialiased overflow-x-hidden">
       <div className="w-full max-w-md">
         <div className="text-center mb-6 sm:mb-8">
-          <ZiisTecLogo className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
+          <ZiisTecLogo dark className="h-14 sm:h-16 w-auto max-w-[230px] mx-auto mb-5" />
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Vamos configurar sua empresa</h1>
           <p className="text-[14px] text-slate-500 mt-1.5">Leva menos de um minuto. O resto você completa depois.</p>
         </div>
