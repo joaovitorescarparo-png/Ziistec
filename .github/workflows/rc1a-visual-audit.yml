@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p rc1a-visual
-          cat > /tmp/visual.mjs <<'NODE'
+          cat > rc1a-visual-check.mjs <<'NODE'
           import { chromium } from 'playwright';
           const executablePath = process.env.CHROME || undefined;
           const browser = await chromium.launch({ headless: true, executablePath });
@@ -48,17 +48,10 @@ jobs:
               const rect = img.getBoundingClientRect();
               const style = getComputedStyle(img);
               return {
-                src: img.getAttribute('src'),
-                currentSrc: img.currentSrc,
-                width: rect.width,
-                height: rect.height,
-                left: rect.left,
-                right: rect.right,
-                display: style.display,
-                visibility: style.visibility,
-                opacity: Number(style.opacity),
-                naturalWidth: img.naturalWidth,
-                naturalHeight: img.naturalHeight,
+                src: img.getAttribute('src'), currentSrc: img.currentSrc,
+                width: rect.width, height: rect.height, left: rect.left, right: rect.right,
+                display: style.display, visibility: style.visibility, opacity: Number(style.opacity),
+                naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
               };
             });
             if (!String(data.currentSrc || data.src).includes('ziistec-horizontal-dark.png')) throw new Error(`${width}: wrong logo variant ${JSON.stringify(data)}`);
@@ -81,7 +74,7 @@ jobs:
           console.log('AUTH_VISUAL signup-390: PASS');
           await browser.close();
           NODE
-          node /tmp/visual.mjs
+          node ./rc1a-visual-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
