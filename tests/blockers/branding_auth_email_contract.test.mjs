@@ -81,11 +81,19 @@ test('approved brand assets and legacy shell branding are wired',()=>{
   assert.match(legacy,/\/brand\/ziistec-icon\.png/);
 });
 
-test('RC-1A auth branding and signup feedback stay truthful and enumeration-safe',()=>{
+test('RC-1A auth branding matches the official app mark and signup feedback stays safe',()=>{
+  const brand=read('src/components/ZiisTecBrand.jsx');
   const login=read('src/screens/Login.jsx');
   const onboarding=read('src/screens/Onboarding.jsx');
-  assert.ok((login.match(/<ZiisTecLogo dark\b/g) || []).length >= 2, 'login/configuração devem usar a variante escura sobre fundo claro');
-  assert.match(onboarding,/<ZiisTecLogo dark\b/);
+  assert.match(brand,/export function ZiisTecAppMark/);
+  assert.match(brand,/ZiisTecIcon/);
+  assert.match(brand,/overflow-visible/);
+  assert.match(brand,/whitespace-nowrap/);
+  assert.match(brand,/object-contain/);
+  assert.ok((login.match(/<ZiisTecAppMark\b/g) || []).length >= 2, 'login/configuração devem reutilizar a marca oficial do shell');
+  assert.match(onboarding,/<ZiisTecAppMark\b/);
+  assert.doesNotMatch(login,/<ZiisTecLogo\b/);
+  assert.doesNotMatch(onboarding,/<ZiisTecLogo\b/);
   assert.match(login,/MENSAGEM_CADASTRO_NEUTRA/);
   assert.match(login,/Se o cadastro puder ser concluído, enviaremos as instruções para este e-mail\./);
   assert.match(login,/Se você já possui uma conta, entre normalmente ou use a recuperação de senha\./);
