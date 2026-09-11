@@ -68,6 +68,7 @@ export async function carregarComprasV2DB(companyId) {
       .from('products')
       .select('id,name,brand,model,unit,cost,active,stock_qty,track_stock')
       .eq('company_id',companyId)
+      .is('deleted_at',null)
       .order('name',{ascending:true}),
     supabase
       .from('purchases')

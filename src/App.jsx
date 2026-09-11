@@ -20,6 +20,7 @@ const ManualWarrantyV2 = lazy(() => import("./screens/v2/ManualWarrantyV2"));
 const MaintenanceContractsV2 = lazy(() => import("./screens/v2/MaintenanceContractsV2"));
 const FinanceV2 = lazy(() => import("./screens/v2/FinanceV2"));
 const SettingsV2 = lazy(() => import("./screens/v2/SettingsV2"));
+const PostSaleV2 = lazy(() => import("./screens/v2/PostSaleV2"));
 
 const PAPEL = { owner: "proprietario", technician: "tecnico" };
 const STATUS_ASSINATURA = {
@@ -242,17 +243,18 @@ export default function App() {
   const workspaceProps = { companyId:s.empresaId, companyName, userId:s.perfil.id, onClose:() => navegarV2("home") };
 
   if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo o ZiisTec V2"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={abrirWorkspaceV2} onClose={() => navegarV2(null)}/></Suspense>);
-  if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps} initialProductId={new URLSearchParams(window.location.search).get("product")}/></Suspense>);
   if (workspaceV2 === "compras" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo compras"/>}><PurchasesV2 {...workspaceProps}/></Suspense>);
-  if (workspaceV2 === "clientes-locais" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo clientes e locais"/>}><ClientLocationsV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "clientes-locais" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo clientes e locais"/>}><ClientLocationsV2 {...workspaceProps} initialClientId={new URLSearchParams(window.location.search).get("client")}/></Suspense>);
   if (workspaceV2 === "orcamentos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo gestão de orçamentos"/>}><QuotesManagementV2 {...workspaceProps} onNew={() => { setQuoteSeed(""); navegarV2("orcamento-ia"); }}/></Suspense>);
   if (workspaceV2 === "orcamento-ia" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo orçamento com IA"/>}><QuoteAIV2 {...workspaceProps} initialText={quoteSeed} onClose={() => { setQuoteSeed(""); navegarV2("orcamentos"); }}/></Suspense>);
   if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps} onQuoteFromWarranty={abrirOrcamentoDaGarantia}/></Suspense>);
   if (workspaceV2 === "contratos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo preventivas e contratos"/>}><MaintenanceContractsV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "financeiro" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo financeiro"/>}><FinanceV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "configuracoes" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo configurações"/>}><SettingsV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "pos-venda" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo pós-venda"/>}><PostSaleV2 {...workspaceProps} onClose={() => navegarV2(null)}/></Suspense>);
   if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps}/></Suspense>);
-  if (workspaceV2 === "memoria-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo memória técnica"/>}><WorkOrderMemoryV2 {...workspaceProps} owner={owner}/></Suspense>);
+  if (workspaceV2 === "memoria-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo memória técnica"/>}><WorkOrderMemoryV2 {...workspaceProps} owner={owner} initialWorkOrderId={new URLSearchParams(window.location.search).get("wo")}/></Suspense>);
 
   return comConexao(
     <>
@@ -263,3 +265,5 @@ export default function App() {
     </>
   );
 }
+
+/* FIELD WORKFLOW V1 · wave 4b · global search + post sale */

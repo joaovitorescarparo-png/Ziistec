@@ -14,7 +14,7 @@
 - Frontend React/Vite.
 - Supabase é a autoridade de autenticação, dados, RLS, Storage e RPCs.
 - Vercel hospeda Preview/produção.
-- `src/legacy/ZiisTecApp.jsx` ainda passa por reconstrução + codemods Round 3.x. Não fazer refatoração grande desse pipeline junto com feature/bugfix.
+- `src/legacy/ZiisTecApp.jsx` e as fontes V2 consolidadas são canônicas; build/verify normais são read-only. Reconstrução + codemods históricos só rodam explicitamente via `npm run materialize:legacy`.
 - Recursos V2 devem ser absorvidos pelo shell principal sem criar dois produtos paralelos.
 
 ## Ambientes

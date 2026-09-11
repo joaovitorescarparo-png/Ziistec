@@ -18,6 +18,8 @@ const fromOwnerProduct = (p) => ({
   nome:p.name,
   marca:p.brand||'',
   modelo:p.model||'',
+  sku:p.sku||'',
+  codigoBarras:p.barcode||'',
   descricao:p.description||'',
   unidade:p.unit||'unidade',
   custo:n(p.cost),
@@ -34,7 +36,7 @@ const fromOwnerProduct = (p) => ({
 export async function carregarProdutosEstoqueDB(companyId) {
   const r = await supabase
     .from('products')
-    .select('id,company_id,name,brand,model,description,unit,cost,price,warranty_months,active,image_path,sale_enabled,track_stock,stock_qty,low_stock_threshold')
+    .select('id,company_id,name,brand,model,sku,barcode,description,unit,cost,price,warranty_months,active,image_path,sale_enabled,track_stock,stock_qty,low_stock_threshold')
     .eq('company_id', companyId)
     .order('name', { ascending:true });
   return (check(r) || []).map(fromOwnerProduct);
@@ -96,9 +98,9 @@ export async function venderProdutoNaOSDB(workOrderId, productId, quantidade=1, 
 
 export async function carregarOpcoesGarantiaManualDB(companyId) {
   const [clients,services,products] = await Promise.all([
-    supabase.from('clients').select('id,name,trade_name,address').eq('company_id',companyId).order('name',{ascending:true}),
-    supabase.from('services').select('id,name,category,warranty_days,active').eq('company_id',companyId).eq('active',true).order('name',{ascending:true}),
-    supabase.from('products').select('id,name,brand,model,warranty_months,active').eq('company_id',companyId).eq('active',true).order('name',{ascending:true}),
+    supabase.from('clients').select('id,name,trade_name,address').eq('company_id',companyId).is('deleted_at',null).order('name',{ascending:true}),
+    supabase.from('services').select('id,name,category,warranty_days,active').eq('company_id',companyId).eq('active',true).is('deleted_at',null).order('name',{ascending:true}),
+    supabase.from('products').select('id,name,brand,model,warranty_months,active').eq('company_id',companyId).eq('active',true).is('deleted_at',null).order('name',{ascending:true}),
   ]);
   const first=[clients,services,products].find(x=>x.error)?.error; if(first) throw first;
   return {
@@ -185,3 +187,5 @@ export async function v2Seguro(fn) {
   try { return { data:await fn(), error:null }; }
   catch (e) { return { data:null, error:mensagemErro(e) }; }
 }
+
+/* FIELD WORKFLOW V1 · wave 1 · owner product metadata */

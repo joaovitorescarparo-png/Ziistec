@@ -69,14 +69,14 @@ O sistema também possui catálogo, compras, equipe, permissões owner/technicia
 - Venda e baixa de estoque devem ocorrer atomicamente ou ser protegidas contra concorrência/retry.
 - Financeiro deve manter origem rastreável do lançamento (OS, compra, venda em campo etc.).
 
-## 8. Pipeline legado — não quebrar
+## 8. Fonte canônica e scripts históricos — não reintroduzir build mutável
 
-`src/legacy/ZiisTecApp.jsx` é reconstruído por `scripts/reassemble.mjs` e recebe codemods Round 3.x durante dev/build/verify.
+`src/legacy/ZiisTecApp.jsx` e as fontes V2 versionadas são a fonte canônica compilada. Dev, build e verify normais não podem reconstruir nem reescrever arquivos versionados.
 
-- Não substituir esse pipeline em uma tarefa pequena.
-- Não criar novos artefatos Base64/gzip para evoluir funcionalidade.
-- Não editar somente o JSX reconstruído se a mudança precisa sobreviver ao próximo `reassemble`; atualize o codemod/fonte canônica correspondente.
-- Refatoração para fonte canônica limpa é dívida técnica separada e deve ocorrer apenas com cobertura dos fluxos principais.
+- `scripts/reassemble.mjs` e os codemods Round 3.x/mobile/Field Workflow permanecem apenas para arqueologia/materialização explícita via `npm run materialize:legacy`.
+- Não recolocar esses materializadores em `predev`, `prebuild` ou `verify:v2`.
+- `npm run build` e `npm run verify:v2` devem terminar com `git status --porcelain` vazio em checkout limpo.
+- Não criar novos artefatos Base64/gzip para evoluir funcionalidade; refatoração estrutural do legado continua sendo trabalho separado.
 
 ## 9. Comandos canônicos
 

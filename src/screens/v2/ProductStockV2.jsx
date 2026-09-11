@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft, Boxes, CircleDollarSign, History, ImagePlus, Loader2, Minus, Package,
-  Pencil, Plus, RefreshCcw, Search, ShieldCheck, TrendingUp, TriangleAlert, X,
+  Pencil, Plus, RefreshCcw, ScanLine, Search, ShieldCheck, TrendingUp, TriangleAlert, X,
 } from 'lucide-react';
 import { salvarProdutoDB } from '../../lib/dataApi';
 import {
@@ -17,13 +17,14 @@ import {
   salvarImagemProdutoDB,
 } from '../../lib/storageExtras';
 import { mensagemErro } from '../../lib/supabase';
+import BarcodeScanner from '../../components/BarcodeScanner';
 
 const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
 const n = (v) => Number(String(v ?? '').replace(',', '.')) || 0;
 const hojeHora = (v) => v ? new Date(v).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' }) : '—';
 
 const VAZIO = {
-  nome:'', marca:'', modelo:'', descricao:'', unidade:'unidade', custo:'', preco:'', garantiaMeses:12,
+  nome:'', marca:'', modelo:'', sku:'', codigoBarras:'', descricao:'', unidade:'unidade', custo:'', preco:'', garantiaMeses:12,
   ativo:true, vendaHabilitada:true, controlaEstoque:true, estoqueMinimo:1, estoqueInicial:0,
   imagemPath:null,
 };
@@ -62,7 +63,7 @@ function Kpi({ icon:Icon, label, value, detail }) {
   </div>;
 }
 
-export default function ProductStockV2({ companyId, companyName='Sua empresa', onClose }) {
+export default function ProductStockV2({ companyId, companyName='Sua empresa', onClose, initialProductId=null }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [available, setAvailable] = useState(null);
@@ -78,6 +79,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
   const [movementProduct, setMovementProduct] = useState(null);
   const [movements, setMovements] = useState([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
+  const [scanner, setScanner] = useState(false);
 
   const load = async () => {
     setLoading(true); setError('');
@@ -108,19 +110,30 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return products.filter(p => {
-      const hay = `${p.nome} ${p.marca} ${p.modelo}`.toLowerCase();
+      const hay = `${p.nome} ${p.marca} ${p.modelo} ${p.sku||''} ${p.codigoBarras||''}`.toLowerCase();
       const low = !p.controlaEstoque || p.estoque > p.estoqueMinimo;
       return (!q || hay.includes(q)) && (!onlyLow || !low);
     });
   }, [products, search, onlyLow]);
 
-  const openNew = () => { setForm({ ...VAZIO }); setImageFile(null); setRemoveImage(false); };
+  const openNew = (seed={}) => { setForm({ ...VAZIO, ...seed }); setImageFile(null); setRemoveImage(false); };
   const openEdit = (p) => { setForm({ ...p, estoqueInicial:0 }); setImageFile(null); setRemoveImage(false); };
+  useEffect(()=>{ if(initialProductId&&products.length){ const p=products.find(x=>x.id===initialProductId); if(p&&!form) openEdit(p); } },[initialProductId,products]);
+  const onBarcodeDetected = (raw) => {
+    const code=String(raw||'').replace(/\D/g,'');
+    setScanner(false);
+    if(!code)return;
+    const existing=products.find(p=>String(p.codigoBarras||'')===code);
+    if(existing) openEdit(existing);
+    else openNew({codigoBarras:code});
+  };
 
   const saveProduct = async (e) => {
     e.preventDefault();
     if (!form?.nome?.trim()) { setError('Informe o nome do produto.'); return; }
     if (n(form.custo) < 0 || n(form.preco) < 0) { setError('Custo e preço não podem ser negativos.'); return; }
+    const barcode=String(form.codigoBarras||'').replace(/\D/g,'');
+    if(barcode&&!/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(barcode)){ setError('Código de barras deve ser EAN, UPC ou GTIN com 8, 12, 13 ou 14 dígitos.'); return; }
     setSaving(true); setError('');
     try {
       const editing = Boolean(form.id);
@@ -236,9 +249,10 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
       </>}
     </main>
 
+    {scanner && <BarcodeScanner onDetected={onBarcodeDetected} onClose={()=>setScanner(false)}/>}
     {form && <Modal title={form.id ? 'Editar produto' : 'Novo produto'} onClose={()=>!saving&&setForm(null)} wide>
       <form onSubmit={saveProduct} className="space-y-5 p-5">
-        <div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><Input label="Nome do produto *" value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} autoFocus/></div><Input label="Marca" value={form.marca} onChange={e=>setForm({...form,marca:e.target.value})}/><Input label="Modelo" value={form.modelo} onChange={e=>setForm({...form,modelo:e.target.value})}/><Input label="Preço de venda" inputMode="decimal" value={form.preco} onChange={e=>setForm({...form,preco:e.target.value})}/><Input label="Custo" inputMode="decimal" value={form.custo} onChange={e=>setForm({...form,custo:e.target.value})}/><Input label="Garantia (meses)" type="number" min="0" value={form.garantiaMeses} onChange={e=>setForm({...form,garantiaMeses:e.target.value})}/><Input label="Unidade" value={form.unidade} onChange={e=>setForm({...form,unidade:e.target.value})}/></div>
+        <div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><Input label="Nome do produto *" value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} autoFocus/></div><Input label="Marca" value={form.marca} onChange={e=>setForm({...form,marca:e.target.value})}/><Input label="Modelo" value={form.modelo} onChange={e=>setForm({...form,modelo:e.target.value})}/><Input label="SKU / código interno" value={form.sku||''} onChange={e=>setForm({...form,sku:e.target.value})}/><label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-600">Código de barras</span><div className="flex gap-2"><input inputMode="numeric" value={form.codigoBarras||''} onChange={e=>setForm({...form,codigoBarras:e.target.value.replace(/\D/g,'').slice(0,14)})} placeholder="EAN / UPC / GTIN" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"/><button type="button" onClick={()=>setScanner(true)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"><ScanLine size={17}/>Escanear</button></div></label><Input label="Preço de venda" inputMode="decimal" value={form.preco} onChange={e=>setForm({...form,preco:e.target.value})}/><Input label="Custo" inputMode="decimal" value={form.custo} onChange={e=>setForm({...form,custo:e.target.value})}/><Input label="Garantia (meses)" type="number" min="0" value={form.garantiaMeses} onChange={e=>setForm({...form,garantiaMeses:e.target.value})}/><Input label="Unidade" value={form.unidade} onChange={e=>setForm({...form,unidade:e.target.value})}/></div>
 
         <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-600">Descrição</span><textarea rows="3" value={form.descricao} onChange={e=>setForm({...form,descricao:e.target.value})} className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"/></label>
 
@@ -265,3 +279,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
     </Modal>}
   </div>;
 }
+
+/* FIELD WORKFLOW V1 · wave 1 · product barcode */
+
+/* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
