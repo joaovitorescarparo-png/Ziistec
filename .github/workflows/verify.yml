@@ -25,7 +25,7 @@ jobs:
       - name: Verify canonical source and foundation integrity
         run: |
           node scripts/verify-project-governance.mjs
-          echo "80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd  supabase/0001_ziistec_fundacao_FINAL.sql" | sha256sum -c -
+          node scripts/verify-foundation-integrity.mjs
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund
