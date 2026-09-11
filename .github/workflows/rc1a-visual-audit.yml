@@ -1,0 +1,91 @@
+name: RC1A Visual Audit
+
+on:
+  push:
+    branches: [rc1a-candidate]
+
+permissions:
+  contents: read
+
+jobs:
+  auth-visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+      - name: Install browser harness without changing lockfile
+        run: npm install --no-save --package-lock=false playwright@1.55.0
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          if command -v google-chrome >/dev/null; then echo "CHROME=$(command -v google-chrome)" >> "$GITHUB_ENV";
+          elif command -v chromium >/dev/null; then echo "CHROME=$(command -v chromium)" >> "$GITHUB_ENV";
+          else npx playwright install chromium; echo "CHROME=" >> "$GITHUB_ENV"; fi
+      - name: Validate auth logo at release viewports
+        env:
+          PREVIEW_URL: https://ziistec-git-field-workflow-v1-js-connect.vercel.app/?_vercel_share=ziQ8zQGO3IgbYVG3GDMrgza0qfK90Mqe
+        shell: bash
+        run: |
+          mkdir -p rc1a-visual
+          cat > /tmp/visual.mjs <<'NODE'
+          import { chromium } from 'playwright';
+          const executablePath = process.env.CHROME || undefined;
+          const browser = await chromium.launch({ headless: true, executablePath });
+          const widths = [320, 390, 430, 768];
+          for (const width of widths) {
+            const page = await browser.newPage({ viewport: { width, height: 900 } });
+            await page.goto(process.env.PREVIEW_URL, { waitUntil: 'networkidle', timeout: 60000 });
+            const title = await page.title();
+            if (!title.includes('ZiisTec')) throw new Error(`${width}: unexpected title ${title}`);
+            const logo = page.locator('img[alt="ZiisTec"]').first();
+            await logo.waitFor({ state: 'visible', timeout: 30000 });
+            const data = await logo.evaluate((img) => {
+              const rect = img.getBoundingClientRect();
+              const style = getComputedStyle(img);
+              return {
+                src: img.getAttribute('src'),
+                currentSrc: img.currentSrc,
+                width: rect.width,
+                height: rect.height,
+                left: rect.left,
+                right: rect.right,
+                display: style.display,
+                visibility: style.visibility,
+                opacity: Number(style.opacity),
+                naturalWidth: img.naturalWidth,
+                naturalHeight: img.naturalHeight,
+              };
+            });
+            if (!String(data.currentSrc || data.src).includes('ziistec-horizontal-dark.png')) throw new Error(`${width}: wrong logo variant ${JSON.stringify(data)}`);
+            if (!(data.width > 100 && data.height > 20 && data.naturalWidth > 0 && data.naturalHeight > 0)) throw new Error(`${width}: logo not materially visible ${JSON.stringify(data)}`);
+            if (data.left < 0 || data.right > width + 0.5) throw new Error(`${width}: logo overflows viewport ${JSON.stringify(data)}`);
+            if (data.visibility !== 'visible' || data.display === 'none' || data.opacity < 0.9) throw new Error(`${width}: logo hidden ${JSON.stringify(data)}`);
+            const bodyText = await page.locator('body').innerText();
+            if (bodyText.includes('ZiisTec V2 sem banco de homologação')) throw new Error(`${width}: staging preview is not configured`);
+            await page.screenshot({ path: `rc1a-visual/auth-${width}.png`, fullPage: true });
+            console.log(`AUTH_VISUAL ${width}: PASS ${JSON.stringify(data)}`);
+            await page.close();
+          }
+          const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+          await page.goto(process.env.PREVIEW_URL, { waitUntil: 'networkidle', timeout: 60000 });
+          await page.getByRole('button', { name: 'Criar conta' }).click();
+          await page.locator('img[alt="ZiisTec"]').first().waitFor({ state: 'visible' });
+          const createSrc = await page.locator('img[alt="ZiisTec"]').first().getAttribute('src');
+          if (!String(createSrc).includes('ziistec-horizontal-dark.png')) throw new Error(`signup: wrong logo ${createSrc}`);
+          await page.screenshot({ path: 'rc1a-visual/signup-390.png', fullPage: true });
+          console.log('AUTH_VISUAL signup-390: PASS');
+          await browser.close();
+          NODE
+          node /tmp/visual.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc1a-auth-visual
+          path: rc1a-visual
+          if-no-files-found: warn
+          retention-days: 1
