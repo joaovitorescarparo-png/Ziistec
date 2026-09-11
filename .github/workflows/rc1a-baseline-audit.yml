@@ -47,6 +47,23 @@ jobs:
           echo 'DIFF_STAT<<EOF'
           git diff --stat
           echo 'EOF'
-          echo 'DIFF_PATCH<<EOF'
-          git diff -- . ':(exclude)package-lock.json' | sed -n '1,4000p'
-          echo 'EOF'
+          git diff --binary > rc1a-generated.patch
+      - name: Upload generated canonical candidate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc1a-generated-source
+          path: |
+            rc1a-generated.patch
+            src/legacy/ZiisTecApp.jsx
+            src/screens/v2/AISettingsV2.jsx
+            src/screens/v2/ClientV2.jsx
+            src/screens/v2/CompanySettingsV2.jsx
+            src/screens/v2/DashboardV2.jsx
+            src/screens/v2/FinanceV2.jsx
+            src/screens/v2/GuaranteesV2.jsx
+            src/screens/v2/OSV2.jsx
+            src/screens/v2/PeopleV2.jsx
+            src/screens/v2/ProductsV2.jsx
+          if-no-files-found: error
+          retention-days: 1
