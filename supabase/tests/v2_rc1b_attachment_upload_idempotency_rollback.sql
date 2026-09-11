@@ -18,6 +18,12 @@ insert into public.work_orders(id,company_id,number,client_id,status,assigned_to
  ('32000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000001','RC1B-A3','31000000-0000-0000-0000-000000000001','done','10000000-0000-0000-0000-000000000003'),
  ('32000000-0000-0000-0000-000000000004','20000000-0000-0000-0000-000000000002','RC1B-B1','31000000-0000-0000-0000-000000000002','in_progress','10000000-0000-0000-0000-000000000004');
 set local session_replication_role = origin;
+show session_replication_role;
+do $$ begin
+  if current_setting('session_replication_role') <> 'origin' then
+    raise exception 'RC1B_ASSERTIONS_REQUIRE_ORIGIN';
+  end if;
+end $$;
 
 create temp table rc1b_result(k text primary key, ok boolean, detail text) on commit drop;
 grant select,insert,update on rc1b_result to authenticated,anon;
@@ -130,7 +136,7 @@ reset role;
 do $$ declare failed text; begin
   select string_agg(k||coalesce(' ('||detail||')',''),', ') into failed from rc1b_result where not ok;
   if failed is not null then raise exception 'RC1B_ATTACHMENT_TEST_FAILED: %',failed; end if;
-  if (select count(*) from rc1b_result) <> 11 then raise exception 'RC1B_ATTACHMENT_TEST_INCOMPLETE'; end if;
+  if (select count(*) from rc1b_result) <> 12 then raise exception 'RC1B_ATTACHMENT_TEST_INCOMPLETE'; end if;
 end $$;
 
 select 'RC1B_ATTACHMENT_IDEMPOTENCY_RLS_OK' as test, count(*) as assertions from rc1b_result where ok;
