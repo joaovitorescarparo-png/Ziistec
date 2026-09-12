@@ -35,6 +35,14 @@ role_before="$(psql -X -At "$DB_URL" -c 'show session_replication_role')"
 echo "RC1B_CONCURRENCY session_replication_role before assertions=$role_before"
 [[ "$role_before" == "origin" ]] || { echo "RC1B_CONCURRENCY: assertions require origin, got $role_before" >&2; exit 1; }
 
+# The forward-only reconciliation must remove only the superseded work-order index.
+old_index="$(psql -X -At "$DB_URL" -c "select count(*) from pg_indexes where schemaname='public' and indexname='uq_attachments_wo_content'")"
+new_index="$(psql -X -At "$DB_URL" -c "select count(*) from pg_indexes where schemaname='public' and indexname='uq_attachments_wo_stage_content' and indexdef ilike 'CREATE UNIQUE INDEX%'")"
+purchase_index="$(psql -X -At "$DB_URL" -c "select count(*) from pg_indexes where schemaname='public' and indexname='uq_attachments_purchase_content' and indexdef ilike 'CREATE UNIQUE INDEX%'")"
+[[ "$old_index" == "0" ]] || { echo "RC1B_CONCURRENCY: legacy uq_attachments_wo_content still exists" >&2; exit 1; }
+[[ "$new_index" == "1" ]] || { echo "RC1B_CONCURRENCY: stage-aware unique index missing" >&2; exit 1; }
+[[ "$purchase_index" == "1" ]] || { echo "RC1B_CONCURRENCY: purchase idempotency index missing" >&2; exit 1; }
+
 call_rpc(){
   local out="$1"
   local role_out="$2"
@@ -66,5 +74,22 @@ role2="$(cat /tmp/rc1b-concurrency-2.role)"
 
 count="$(psql -X -At "$DB_URL" -c "select count(*) from public.attachments where company_id='$COMPANY' and work_order_id='$WO' and media_stage='before' and content_sha256='$HASH'")"
 [[ "$count" == "1" ]] || { echo "RC1B_CONCURRENCY: expected 1 attachment, got $count" >&2; cat /tmp/rc1b-concurrency-*.out >&2; exit 1; }
-
 echo "RC1B_CONCURRENCY: PASS — two simultaneous registrations resolved attachment=$id1; final_count=$count; roles=$role1/$role2"
+
+# Same bytes in another stage are a distinct logical attachment even when the textual category is identical.
+# This is the exact case the legacy 0043 index incorrectly blocked.
+after_id="$(psql -X -Atq -v ON_ERROR_STOP=1 "$DB_URL" <<SQL
+begin;
+select set_config('request.jwt.claim.sub','$OWNER',true);
+set local role authenticated;
+select public.zt_register_work_order_evidence(
+ '$COMPANY','$WO','$COMPANY/work-orders/$WO/after/$HASH.jpg','same.jpg','image/jpeg',123,'after',null,'Antes','$HASH')->>'id';
+commit;
+SQL
+)"
+after_id="$(printf '%s\n' "$after_id" | grep -E '^[0-9a-fA-F-]{36}$' | tail -n1)"
+[[ -n "$after_id" && "$after_id" != "$id1" ]] || { echo "RC1B_STAGE_RECONCILIATION: different stage did not produce a distinct attachment" >&2; exit 1; }
+total_same_hash="$(psql -X -At "$DB_URL" -c "select count(*) from public.attachments where company_id='$COMPANY' and work_order_id='$WO' and content_sha256='$HASH'")"
+stages_same_category="$(psql -X -At "$DB_URL" -c "select count(distinct media_stage) from public.attachments where company_id='$COMPANY' and work_order_id='$WO' and content_sha256='$HASH' and category='Antes'")"
+[[ "$total_same_hash" == "2" && "$stages_same_category" == "2" ]] || { echo "RC1B_STAGE_RECONCILIATION: expected same hash/category across two stages; rows=$total_same_hash stages=$stages_same_category" >&2; exit 1; }
+echo "RC1B_STAGE_RECONCILIATION: PASS — same hash/category allowed across before/after; distinct_ids=$id1/$after_id"

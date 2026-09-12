@@ -47,6 +47,14 @@ test('RC-1B database is final dedupe authority and RPC stays SECURITY INVOKER',(
   assert.doesNotMatch(sql,/security definer/i);
 });
 
+test('RC-1B forward-only reconciliation drops only the superseded work-order uniqueness',()=>{
+  const sql=read('supabase/0090_rc1b_reconcile_legacy_attachment_idempotency.sql');
+  assert.match(sql,/drop index if exists public\.uq_attachments_wo_content\s*;/i);
+  assert.doesNotMatch(sql,/drop\s+index[\s\S]*uq_attachments_purchase_content/i);
+  assert.doesNotMatch(sql,/drop\s+index[\s\S]*uq_attachments_wo_stage_content/i);
+  assert.doesNotMatch(sql,/alter\s+table|create\s+table|create\s+policy|drop\s+policy|disable\s+row\s+level\s+security|drop\s+trigger/i);
+});
+
 test('RC-1B UI never appends the same attachment id twice after an idempotent retry',()=>{
   const ui=read('src/screens/v2/WorkOrderMemoryBaseV2.jsx');
   assert.match(ui,/filter\(x=>x\.id!==created\.id\)/);
