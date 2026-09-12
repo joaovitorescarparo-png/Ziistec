@@ -1,0 +1,23 @@
+name: RC1B Final Staging Smoke Temp
+
+on:
+  push:
+    branches: [rc1b-final-staging-smoke-temp]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24.x' }
+      - run: npm ci --ignore-scripts --no-fund
+      - name: Run authenticated Storage + RPC smoke against Staging only
+        env:
+          RC1B_SMOKE_RUN: final-20260912-b
+        run: node scripts/rc1b-final-staging-external-smoke-temp.mjs
