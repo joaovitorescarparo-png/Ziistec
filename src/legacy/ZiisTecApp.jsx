@@ -32,6 +32,7 @@ import { chamarIAReal } from "../lib/aiApi";
 import { resolverLogoEmpresaDB, persistirFotosOSDB } from "../lib/storageExtras";
 import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
+import useSpeechInput from "../hooks/useSpeechInput";
 
 /* ================================================================ helpers */
 const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -487,96 +488,66 @@ const Endereco = ({ valor, local, className, compacto }) => {
 
 /* =============================================== voz + interpretação por IA */
 function usarReconhecimento() {
-  const [suportado] = useState(() => typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition));
-  const [ouvindo, setOuvindo] = useState(false);
-  const [erro, setErro] = useState(null);
-  const rec = useRef(null);
-
-  const iniciar = (aoTexto) => {
-    if (!suportado) return;
-    setErro(null);
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const r = new Rec();
-    r.lang = "pt-BR"; r.continuous = true; r.interimResults = true;
-    let finalizado = "";
-    r.onresult = (ev) => {
-      let parcial = "";
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const t = ev.results[i][0].transcript;
-        if (ev.results[i].isFinal) finalizado += t + " "; else parcial += t;
-      }
-      aoTexto((finalizado + parcial).trim());
-    };
-    r.onerror = (ev) => {
-      const msgs = {
-        "not-allowed": "Permissão de microfone negada. Libere o microfone nas configurações do navegador.",
-        "service-not-allowed": "O navegador bloqueou o reconhecimento de voz neste site.",
-        "no-speech": "Não ouvi nada. Toque no microfone e fale mais perto do aparelho.",
-        "audio-capture": "Nenhum microfone disponível neste aparelho.",
-        network: "Sem conexão para transcrever agora.",
-        aborted: null,
-      };
-      const m = msgs[ev.error];
-      if (m !== null) setErro(m || "Não consegui capturar o áudio.");
-      setOuvindo(false);
-    };
-    r.onend = () => setOuvindo(false);
-    rec.current = r;
-    try { r.start(); setOuvindo(true); } catch { setErro("Microfone indisponível."); }
+  const callbackRef = useRef(null);
+  const speech = useSpeechInput({ onText: ({ text }) => { if (text) callbackRef.current?.(text); } });
+  const iniciar = (aoTexto) => { callbackRef.current = aoTexto; return speech.start(); };
+  return {
+    suportado: speech.supported, ouvindo: speech.listening, processando: speech.processing,
+    sucesso: speech.success, estado: speech.status, erro: speech.error || null,
+    iniciar, parar: speech.stop, cancelar: speech.cancel,
   };
-  const parar = () => { rec.current?.stop(); setOuvindo(false); };
-  return { suportado, ouvindo, erro, iniciar, parar };
 }
 
-/* Componente único de ditado. Usado em TODO campo de texto livre do ZiisTec.
+/* Componente único de ditado./* Componente único de ditado. Usado em TODO campo de texto livre do ZiisTec.
    A voz complementa o campo: o texto ditado é acrescentado ao que já existe,
    nunca substitui, e continua editável à mão. */
 function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica }) {
-  const { suportado, ouvindo, erro, iniciar, parar } = usarReconhecimento();
+  const { suportado, ouvindo, processando, sucesso, erro, iniciar, parar, cancelar } = usarReconhecimento();
   const baseRef = useRef("");
   const comecar = () => {
     baseRef.current = valor.trim() ? valor.trimEnd() + " " : "";
-    iniciar((t) => onChange(baseRef.current + t));
+    iniciar((t) => onChange((baseRef.current + t).trimEnd()));
   };
-  const alternar = () => (ouvindo ? parar() : comecar());
+  const ativo = ouvindo || processando;
+  const alternar = () => (ouvindo ? parar() : processando ? cancelar() : comecar());
 
   return (
     <div>
       <div className="relative">
         <Textarea rows={rows} value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
-          className={cx(suportado && !destaque && "pr-14", ouvindo && "ring-2 ring-teal-600")} />
+          className={cx(suportado && !destaque && "pr-14", ativo && "ring-2 ring-teal-600")} />
         {suportado && !destaque && (
-          <button onClick={alternar} aria-label={ouvindo ? "Parar de gravar" : "Ditar por voz"} title={ouvindo ? "Parar de gravar" : "Ditar por voz"}
-            className={cx("absolute right-2.5 bottom-2.5 p-2.5 rounded-lg transition-colors", ring,
-              ouvindo ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700")}>
-            {ouvindo ? <MicOff className="w-[18px] h-[18px]" /> : <Mic className="w-[18px] h-[18px]" />}
+          <button type="button" onClick={alternar} aria-label={ouvindo ? "Parar ditado" : processando ? "Cancelar transcrição" : "Ditar por voz"}
+            title={ouvindo ? "Parar ditado" : processando ? "Cancelar transcrição" : "Ditar por voz"}
+            className={cx("absolute right-2.5 bottom-2.5 min-h-11 min-w-11 p-2.5 rounded-lg transition-colors", ring,
+              ativo ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700")}>
+            {ativo ? <MicOff className="w-[18px] h-[18px]" /> : <Mic className="w-[18px] h-[18px]" />}
           </button>
         )}
       </div>
 
       {suportado && destaque && (
-        <Btn className="w-full mt-3" size="lg" variant={ouvindo ? "dark" : "primary"} icon={ouvindo ? MicOff : Mic} onClick={alternar}>
-          {ouvindo ? "Parar de gravar" : valor.trim() ? "Continuar falando" : "Falar o que foi feito"}
-        </Btn>
+        <div className="mt-3 grid gap-2 min-[390px]:grid-cols-[1fr_auto]">
+          <Btn className="w-full" size="lg" variant={ativo ? "dark" : "primary"} icon={ativo ? MicOff : Mic} onClick={alternar}>
+            {ouvindo ? "Parar ditado" : processando ? "Transcrevendo..." : valor.trim() ? "Continuar falando" : "Falar o que foi feito"}
+          </Btn>
+          {ativo && <Btn variant="ghost" onClick={cancelar}>Cancelar</Btn>}
+        </div>
       )}
 
       <div className="flex items-center gap-3 mt-2 flex-wrap min-h-[18px]">
-        {ouvindo ? (
-          <span className="inline-flex items-center gap-2 text-[12.5px] font-medium text-teal-800">
-            <span className="w-2 h-2 rounded-full bg-rose-500" aria-hidden="true" />
-            Ouvindo… pode falar. O texto entra depois do que já está escrito.
-          </span>
-        ) : (
-          <>
-            {!suportado && <span className="text-[12px] text-slate-400">Ditado indisponível neste navegador — funciona no Chrome. Pode digitar normalmente.</span>}
-            {suportado && dica && <span className="text-[12px] text-slate-400">{dica}</span>}
-          </>
-        )}
+        {ouvindo ? <span className="inline-flex items-center gap-2 text-[12.5px] font-medium text-teal-800"><span className="w-2 h-2 rounded-full bg-rose-500" aria-hidden="true" />Ouvindo... pode falar.</span>
+          : processando ? <span className="text-[12.5px] font-medium text-sky-700">Transcrevendo...</span>
+          : sucesso ? <span className="text-[12.5px] font-medium text-emerald-700">Texto inserido.</span>
+          : <>{!suportado && <span className="text-[12px] text-slate-400">Ditado indisponível neste navegador. No iPhone/Android, use também o microfone do teclado; a digitação continua disponível.</span>}{suportado && dica && <span className="text-[12px] text-slate-400">{dica}</span>}</>}
+        {ativo && !destaque && <button type="button" onClick={cancelar} className="min-h-11 px-3 rounded-lg text-[12px] font-semibold text-slate-600 hover:bg-slate-100">Cancelar</button>}
       </div>
-      {erro && <p className="text-[12.5px] text-rose-700 mt-1">{erro} Você pode continuar digitando.</p>}
+      {erro && <div className="mt-1 flex flex-wrap items-center gap-2"><p className="text-[12.5px] text-rose-700">{erro}</p><button type="button" onClick={comecar} className="min-h-11 px-3 rounded-lg text-[12px] font-semibold text-teal-800 hover:bg-teal-50">Tentar novamente</button></div>}
     </div>
   );
 }
+
+async function chamarIA(prompt) {
 
 async function chamarIA(prompt) {
   return chamarIAReal(prompt);
