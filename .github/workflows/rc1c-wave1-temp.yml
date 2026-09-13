@@ -5,17 +5,16 @@ on:
     branches: [rc1c-wave1-temp]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   apply-and-test:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          persist-credentials: false
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -38,17 +37,32 @@ jobs:
           PY
       - name: Apply focused voice stabilization
         run: node scripts/rc1c-wave1-apply.mjs
+      - name: Remove temporary harness from verification workspace
+        run: rm .github/workflows/rc1c-wave1-temp.yml scripts/rc1c-wave1-apply.mjs
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund
       - name: Voice state-machine regression
         run: node --test tests/blockers/rc1c_voice_state_machine.test.mjs
       - name: Canonical V2 verification
         run: npm run verify:v2
-      - name: Commit tested implementation
+      - name: Check implementation diff
         run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add package.json src/lib/speechStateMachine.js src/hooks/useSpeechInput.js src/legacy/ZiisTecApp.jsx src/screens/v2/WorkOrderMemoryBaseV2.jsx src/screens/v2/QuoteAIBaseV2.jsx tests/blockers/rc1c_voice_state_machine.test.mjs
-          git diff --cached --check
-          git commit -m "fix: stabilize mobile voice input"
-          git push origin HEAD:rc1c-wave1-temp
+          git diff --check
+          git status --short
+      - name: Package tested implementation
+        run: |
+          mkdir -p /tmp/rc1c-wave1/src/lib /tmp/rc1c-wave1/src/hooks /tmp/rc1c-wave1/src/legacy /tmp/rc1c-wave1/src/screens/v2 /tmp/rc1c-wave1/tests/blockers
+          cp package.json /tmp/rc1c-wave1/package.json
+          cp src/lib/speechStateMachine.js /tmp/rc1c-wave1/src/lib/
+          cp src/hooks/useSpeechInput.js /tmp/rc1c-wave1/src/hooks/
+          cp src/legacy/ZiisTecApp.jsx /tmp/rc1c-wave1/src/legacy/
+          cp src/screens/v2/WorkOrderMemoryBaseV2.jsx /tmp/rc1c-wave1/src/screens/v2/
+          cp src/screens/v2/QuoteAIBaseV2.jsx /tmp/rc1c-wave1/src/screens/v2/
+          cp tests/blockers/rc1c_voice_state_machine.test.mjs /tmp/rc1c-wave1/tests/blockers/
+          tar -C /tmp -czf rc1c-wave1-tested.tar.gz rc1c-wave1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc1c-wave1-tested
+          path: rc1c-wave1-tested.tar.gz
+          if-no-files-found: error
+          retention-days: 1
