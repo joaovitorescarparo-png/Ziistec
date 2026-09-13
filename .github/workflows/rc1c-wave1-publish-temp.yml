@@ -1,0 +1,91 @@
+name: RC1C Wave1 Publish Temp
+
+on:
+  push:
+    branches: [rc1c-wave1-temp]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tested-tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+      - name: Confirm candidate still at exact RC-1B base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
+      - name: Repair temporary applicator quoting
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/rc1c-wave1-apply.mjs')
+          s=p.read_text()
+          old1="  return left ? \\\`${'${left}'} ${'${right}'}\\\` : right;\\n"
+          new1="  return left ? left + ' ' + right : right;\\n"
+          old2="if(event.results[i].isFinal) finalText+=\\\`${'${text}'} \\\`; else interimText+=text;"
+          new2="if(event.results[i].isFinal) finalText+=text+' '; else interimText+=text;"
+          if old1 not in s or old2 not in s: raise SystemExit('temporary applicator targets changed')
+          p.write_text(s.replace(old1,new1).replace(old2,new2))
+          PY
+      - name: Apply exact tested implementation
+        run: node scripts/rc1c-wave1-apply.mjs
+      - name: Remove all temporary harness files before gates
+        run: rm .github/workflows/rc1c-wave1-temp.yml .github/workflows/rc1c-wave1-publish-temp.yml scripts/rc1c-wave1-apply.mjs
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-fund
+      - name: Re-run targeted and canonical gates
+        run: |
+          node --test tests/blockers/rc1c_voice_state_machine.test.mjs
+          npm run verify:v2
+          git diff --check
+      - name: Create immutable tested commit object without moving refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64,json,os,subprocess,urllib.request
+          repo=os.environ['GITHUB_REPOSITORY']
+          token=os.environ['GH_TOKEN']
+          parent='01bb1259b2081ec87f4508c1b8e4cea1c1d92023'
+          paths=[
+            'package.json',
+            'src/lib/speechStateMachine.js',
+            'src/hooks/useSpeechInput.js',
+            'src/legacy/ZiisTecApp.jsx',
+            'src/screens/v2/WorkOrderMemoryBaseV2.jsx',
+            'src/screens/v2/QuoteAIBaseV2.jsx',
+            'tests/blockers/rc1c_voice_state_machine.test.mjs',
+          ]
+          api='https://api.github.com/repos/'+repo
+          def request(path,payload=None):
+            data=None if payload is None else json.dumps(payload).encode()
+            req=urllib.request.Request(api+path,data=data,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},method='GET' if payload is None else 'POST')
+            with urllib.request.urlopen(req) as r: return json.load(r)
+          base_tree=subprocess.check_output(['git','rev-parse',parent+'^{tree}'],text=True).strip()
+          entries=[]
+          for path in paths:
+            raw=open(path,'rb').read()
+            blob=request('/git/blobs',{'content':base64.b64encode(raw).decode(),'encoding':'base64'})
+            entries.append({'path':path,'mode':'100644','type':'blob','sha':blob['sha']})
+          tree=request('/git/trees',{'base_tree':base_tree,'tree':entries})
+          commit=request('/git/commits',{'message':'fix: stabilize mobile voice input','tree':tree['sha'],'parents':[parent]})
+          open('rc1c-wave1-candidate-sha.txt','w').write(commit['sha']+'\n'+tree['sha']+'\n')
+          print('RC1C_WAVE1_COMMIT_OBJECT='+commit['sha'])
+          print('RC1C_WAVE1_TREE='+tree['sha'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc1c-wave1-candidate-sha
+          path: rc1c-wave1-candidate-sha.txt
+          if-no-files-found: error
+          retention-days: 1
