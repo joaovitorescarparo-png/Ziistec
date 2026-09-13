@@ -1,18 +1,37 @@
 import { createClient } from "@supabase/supabase-js";
+import { resolverConfigSupabase } from "./supabaseConfig";
 
 /*
-  Preferimos variáveis de ambiente. Como o Vercel conectado nesta fase não
-  permite gravá-las pelo conector, usamos como fallback SOMENTE dados públicos
-  do Supabase: URL do projeto e publishable key. A service_role/secret key
+  Separação de ambientes:
+  - Produção usa somente o Supabase principal nos hosts oficiais da main.
+  - Previews de homologação allowlisted usam somente o Supabase de staging.
+  - Development aceita staging apenas quando configurado explicitamente.
+  - Par parcial, project ref/key incompatível ou preview desconhecido falha fechado.
+
+  As chaves abaixo são publishable e podem existir no bundle. Service role/secret key
   jamais entra no frontend. A autorização real continua sendo feita pela RLS.
 */
-const url = import.meta.env.VITE_SUPABASE_URL || "https://diztevlpbcfqleizswxr.supabase.co";
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
+const PROD_URL = "https://diztevlpbcfqleizswxr.supabase.co";
+const PROD_PUBLISHABLE_KEY = "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
+const STAGING_URL = "https://xadoktssibuuebzzjrhv.supabase.co";
+const STAGING_PUBLISHABLE_KEY = "sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e";
 
-export const configurado = Boolean(url && anonKey && !url.includes("SEU-PROJETO"));
+const runtimeConfig = resolverConfigSupabase({
+  deploymentEnv: import.meta.env.VITE_VERCEL_ENV,
+  host: typeof window !== "undefined" ? window.location.hostname : "",
+  envUrl: import.meta.env.VITE_SUPABASE_URL,
+  envKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+  prodUrl: PROD_URL,
+  prodKey: PROD_PUBLISHABLE_KEY,
+  stagingUrl: STAGING_URL,
+  stagingKey: STAGING_PUBLISHABLE_KEY,
+});
+
+export const ambienteSupabase = runtimeConfig.origem;
+export const configurado = runtimeConfig.configurado;
 
 export const supabase = configurado
-  ? createClient(url, anonKey, {
+  ? createClient(runtimeConfig.url, runtimeConfig.anonKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
     })
   : null;
@@ -39,7 +58,40 @@ export function mensagemErro(erro) {
   if (texto.includes("Failed to fetch") || texto.includes("NetworkError")) {
     return "Sem conexão com o servidor. Verifique sua internet.";
   }
+
+  /* Erros estruturais do PostgREST/Postgres não devem chegar ao prestador com
+     texto técnico. Traduzimos os conhecidos e registramos o original só no
+     console, para diagnóstico. */
+  if (codigo === "PGRST201" || /more than one relationship|could not embed/i.test(texto)) {
+    registrarTecnico(erro);
+    return "Não foi possível recarregar os dados. Se você acabou de salvar, atualize a tela antes de tentar novamente.";
+  }
+  if (codigo === "PGRST200" || /schema cache/i.test(texto)) {
+    registrarTecnico(erro);
+    return "Não foi possível carregar os dados agora. Tente novamente.";
+  }
+  if (codigo === "PGRST116") return "Registro não encontrado ou já removido.";
+  if (codigo === "PGRST204") { registrarTecnico(erro); return "Não foi possível salvar: um campo esperado não existe mais. Recarregue a página."; }
+  if (codigo === "23502") return "Preencha os campos obrigatórios antes de salvar.";
+  if (codigo === "22P02" || codigo === "22007") return "Há um valor ou data em formato inválido.";
+  if (codigo === "40001" || codigo === "55P03") return "Outra operação está usando este registro. Tente de novo em instantes.";
+  if (codigo === "57014" || /timeout/i.test(texto)) return "A operação demorou demais. Tente novamente.";
+  if (codigo === "42P01" || codigo === "42703" || /relation .* does not exist|column .* does not exist/i.test(texto)) {
+    registrarTecnico(erro);
+    return "Esta função ainda não está disponível neste ambiente.";
+  }
+  if (/^PGRST/.test(codigo) || /^[0-9A-Z]{5}$/.test(codigo)) {
+    registrarTecnico(erro);
+    return "Não foi possível concluir a operação agora. Tente novamente.";
+  }
+
   return texto || "Não foi possível concluir a operação.";
+}
+
+/* Detalhe técnico fica no console para diagnóstico; nunca na tela do usuário. */
+function registrarTecnico(erro) {
+  if (typeof console === "undefined") return;
+  console.warn("[ZiisTec] erro técnico:", erro?.code || "sem código", erro?.message || erro);
 }
 
 export function sessaoExpirou(erro) {
