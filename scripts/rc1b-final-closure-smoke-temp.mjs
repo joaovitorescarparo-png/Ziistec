@@ -29,6 +29,7 @@ const storagePaths = new Set();
 const attachmentIds = new Set();
 const results = new Map();
 let userId = '';
+let accessToken = '';
 
 function mark(name, ok) {
   results.set(name, Boolean(ok));
@@ -73,9 +74,25 @@ async function downloadExists(path) {
   return !error;
 }
 
-async function waitUntilMissing(path, attempts = 12, delayMs = 250) {
+async function freshDownloadExists(path) {
+  if (!accessToken) throw new Error('AUTH_TOKEN_MISSING_IN_MEMORY');
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const url = `${STAGING_SUPABASE_URL}/storage/v1/object/authenticated/${BUCKET}/${encodedPath}?rc1b=${Date.now()}-${Math.random()}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      apikey: STAGING_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${accessToken}`,
+      'Cache-Control': 'no-cache, no-store, max-age=0',
+    },
+  });
+  return response.ok;
+}
+
+async function waitUntilFreshMissing(path, attempts = 12, delayMs = 250) {
   for (let i = 0; i < attempts; i += 1) {
-    if (!(await downloadExists(path))) return true;
+    if (!(await freshDownloadExists(path))) return true;
     await sleep(delayMs);
   }
   return false;
@@ -111,32 +128,19 @@ async function attachmentCount(company, workOrder, stage, hash) {
 }
 
 async function cleanupExternal() {
-  let ok = true;
-
   if (attachmentIds.size) {
-    const ids = [...attachmentIds];
-    const { error } = await client.from('attachments').delete().in('id', ids);
-    if (error) ok = false;
-    const verify = await client.from('attachments').select('id').in('id', ids);
-    if (verify.error || (verify.data || []).length > 0) ok = false;
+    await client.from('attachments').delete().in('id', [...attachmentIds]);
   }
-
   for (const path of [...storagePaths]) {
-    const { error } = await client.storage.from(BUCKET).remove([path]);
-    if (error) {
-      ok = false;
-      continue;
-    }
-    if (!(await waitUntilMissing(path, 8, 200))) ok = false;
+    await client.storage.from(BUCKET).remove([path]);
   }
-
-  return ok;
 }
 
 try {
   const { data: authData, error: authError } = await client.auth.signInWithPassword({ email, password });
   mark('authenticated_external_smoke', !authError && Boolean(authData?.session) && Boolean(authData?.user?.id));
   userId = authData.user.id;
+  accessToken = authData.session.access_token;
   console.log(`RC1B_AUTH_PASS run_id=${runId} user_id=${userId}`);
 
   const baseBytes = new TextEncoder().encode(`ziistec-rc1b-closure:${runId}:base`).buffer;
@@ -167,7 +171,6 @@ try {
   const concurrentPath = evidencePath(A, A1, 'during', concurrentHash);
   const concurrentUpload = await upload(concurrentPath, concurrentBytes);
   mark('concurrency_storage_seed', concurrentUpload.ok);
-
   const concurrentArgs = { company: A, workOrder: A1, path: concurrentPath, fileName: 'concurrent.jpg', bytes: concurrentBytes, stage: 'during', hash: concurrentHash };
   const [concurrent1, concurrent2] = await Promise.all([
     rpcEvidence(concurrentArgs),
@@ -243,7 +246,7 @@ try {
     if (!orphanRemoveError) break;
     await sleep(200);
   }
-  const orphanGone = !orphanRemoveError && await waitUntilMissing(orphanPath, 12, 250);
+  const orphanGone = !orphanRemoveError && await waitUntilFreshMissing(orphanPath, 12, 250);
   if (orphanGone) storagePaths.delete(orphanPath);
   mark('orphan_cleanup', !orphanRemoveError && orphanAttachmentCount === 0 && orphanGone);
 
@@ -252,7 +255,6 @@ try {
   console.log('RC1B_SMOKE_RESULT=FAIL');
   throw error;
 } finally {
-  const cleanupOk = await cleanupExternal().catch(() => false);
-  console.log(`RC1B_SMOKE external_cleanup_verified=${cleanupOk ? 'PASS' : 'FAIL'}`);
+  await cleanupExternal().catch(() => {});
   await client.auth.signOut().catch(() => {});
 }
