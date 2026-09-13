@@ -1,0 +1,26 @@
+name: RC1B Final Closure Auth Probe Temp
+
+on:
+  push:
+    branches: [rc1b-final-closure-smoke-temp]
+
+permissions:
+  contents: read
+
+jobs:
+  auth-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RC1B_STAGING_TEST_EMAIL: ${{ secrets.RC1B_STAGING_TEST_EMAIL }}
+      RC1B_STAGING_TEST_PASSWORD: ${{ secrets.RC1B_STAGING_TEST_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+      - run: npm ci --ignore-scripts --no-fund
+      - name: Authenticate against Supabase Staging
+        run: node scripts/rc1b-final-closure-auth-probe-temp.mjs
