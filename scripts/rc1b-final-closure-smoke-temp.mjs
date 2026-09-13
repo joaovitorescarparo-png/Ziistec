@@ -36,6 +36,8 @@ function mark(name, ok) {
   if (!ok) throw new Error(`RC1B_SMOKE_FAILED:${name}`);
 }
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function sha256(bytes) {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
@@ -69,6 +71,14 @@ async function upload(path, bytes, { expectExisting = false, expectBlocked = fal
 async function downloadExists(path) {
   const { error } = await client.storage.from(BUCKET).download(path);
   return !error;
+}
+
+async function waitUntilMissing(path, attempts = 12, delayMs = 250) {
+  for (let i = 0; i < attempts; i += 1) {
+    if (!(await downloadExists(path))) return true;
+    await sleep(delayMs);
+  }
+  return false;
 }
 
 async function rpcEvidence({ company, workOrder, path, fileName, bytes, stage, hash, category = CATEGORY, caption = 'RC1B closure' }) {
@@ -107,11 +117,17 @@ async function cleanupExternal() {
     const ids = [...attachmentIds];
     const { error } = await client.from('attachments').delete().in('id', ids);
     if (error) ok = false;
+    const verify = await client.from('attachments').select('id').in('id', ids);
+    if (verify.error || (verify.data || []).length > 0) ok = false;
   }
 
   for (const path of [...storagePaths]) {
     const { error } = await client.storage.from(BUCKET).remove([path]);
-    if (error) ok = false;
+    if (error) {
+      ok = false;
+      continue;
+    }
+    if (!(await waitUntilMissing(path, 8, 200))) ok = false;
   }
 
   return ok;
@@ -220,10 +236,16 @@ try {
     .eq('path', orphanPath);
   mark('orphan_metadata_rejected', Boolean(orphanBadMeta.error) && !orphanCountError && orphanAttachmentCount === 0);
 
-  const orphanRemove = await client.storage.from(BUCKET).remove([orphanPath]);
-  if (!orphanRemove.error) storagePaths.delete(orphanPath);
-  const orphanGone = !(await downloadExists(orphanPath));
-  mark('orphan_cleanup', !orphanRemove.error && orphanAttachmentCount === 0 && orphanGone);
+  let orphanRemoveError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const removed = await client.storage.from(BUCKET).remove([orphanPath]);
+    orphanRemoveError = removed.error || null;
+    if (!orphanRemoveError) break;
+    await sleep(200);
+  }
+  const orphanGone = !orphanRemoveError && await waitUntilMissing(orphanPath, 12, 250);
+  if (orphanGone) storagePaths.delete(orphanPath);
+  mark('orphan_cleanup', !orphanRemoveError && orphanAttachmentCount === 0 && orphanGone);
 
   console.log('RC1B_SMOKE_RESULT=PASS');
 } catch (error) {
@@ -231,6 +253,6 @@ try {
   throw error;
 } finally {
   const cleanupOk = await cleanupExternal().catch(() => false);
-  console.log(`RC1B_SMOKE external_resource_cleanup=${cleanupOk ? 'PASS' : 'FAIL'}`);
+  console.log(`RC1B_SMOKE external_cleanup_verified=${cleanupOk ? 'PASS' : 'FAIL'}`);
   await client.auth.signOut().catch(() => {});
 }
