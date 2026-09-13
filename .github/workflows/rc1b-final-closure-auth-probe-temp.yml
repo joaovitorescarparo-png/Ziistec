@@ -1,4 +1,4 @@
-name: RC1B Final Closure Smoke Temp
+name: RC1B Final Closure Cleanup Temp
 
 on:
   push:
@@ -8,9 +8,9 @@ permissions:
   contents: read
 
 jobs:
-  authenticated-smoke:
+  authenticated-cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       RC1B_STAGING_TEST_EMAIL: ${{ secrets.RC1B_STAGING_TEST_EMAIL }}
       RC1B_STAGING_TEST_PASSWORD: ${{ secrets.RC1B_STAGING_TEST_PASSWORD }}
@@ -22,5 +22,5 @@ jobs:
         with:
           node-version: '24.x'
       - run: npm ci --ignore-scripts --no-fund
-      - name: Run authenticated Supabase Staging smoke
-        run: node scripts/rc1b-final-closure-smoke-temp.mjs
+      - name: Remove RC1B external fixture resources
+        run: node scripts/rc1b-final-closure-cleanup-temp.mjs
