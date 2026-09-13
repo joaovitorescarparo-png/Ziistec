@@ -22,6 +22,20 @@ jobs:
           node-version: '24.x'
       - name: Confirm exact RC-1B ancestry
         run: git merge-base --is-ancestor 01bb1259b2081ec87f4508c1b8e4cea1c1d92023 HEAD
+      - name: Repair temporary applicator quoting
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/rc1c-wave1-apply.mjs')
+          s=p.read_text()
+          old1="  return left ? \\\`${'${left}'} ${'${right}'}\\\` : right;\\n"
+          new1="  return left ? left + ' ' + right : right;\\n"
+          old2="if(event.results[i].isFinal) finalText+=\\\`${'${text}'} \\\`; else interimText+=text;"
+          new2="if(event.results[i].isFinal) finalText+=text+' '; else interimText+=text;"
+          if old1 not in s: raise SystemExit('missing appendSpeechText quoting target')
+          if old2 not in s: raise SystemExit('missing finalText quoting target')
+          p.write_text(s.replace(old1,new1).replace(old2,new2))
+          PY
       - name: Apply focused voice stabilization
         run: node scripts/rc1c-wave1-apply.mjs
       - name: Install locked dependencies
