@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const legacy = fs.readFileSync(new URL('../src/legacy/ZiisTecApp.jsx', import.meta.url), 'utf8');
+const legacy = fs.readFileSync(new URL('../../src/legacy/ZiisTecApp.jsx', import.meta.url), 'utf8');
 
 test('shared mobile controls keep comfortable touch targets and safe-area modals', () => {
   assert.match(legacy, /const sizes = \{ sm: "min-h-11/);
