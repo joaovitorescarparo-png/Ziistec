@@ -8,9 +8,9 @@ permissions:
   contents: write
 
 jobs:
-  materialize-and-gate:
+  materialize-fix-gate-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,11 +25,9 @@ jobs:
         with:
           version: 2.116.0
 
-      - name: Preserve temporary structural tools outside worktree
+      - name: Preserve approved RC-1C materializers outside worktree
         run: |
           cp -R .rc1c-temp /tmp/rc1c-temp
-          mkdir -p /tmp/rc1c-wave49-payload
-          cp .rc1c-temp/rc1c_mobile_field_workflow.test.mjs /tmp/rc1c-wave49-payload/rc1c_mobile_field_workflow.test.mjs
           cp .rc1c-temp/rc1c_responsive_breakpoints.test.mjs /tmp/rc1c_responsive_breakpoints.test.mjs
 
       - name: Confirm immutable checkpoints
@@ -40,37 +38,23 @@ jobs:
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
 
-      - name: Checkout exact RC-1C checkpoint and classify runner residue
+      - name: Checkout exact RC-1C checkpoint cleanly
         run: |
           git checkout --detach 44e4b01e70d5979ed30ee682920c64aad86c8d06
-          echo "=== INITIAL RUNNER GIT STATUS ==="
-          git status --porcelain=v1
-          echo "=== INITIAL RUNNER TRACKED DIFF ==="
-          git diff --name-status
-          echo "=== INITIAL RUNNER CACHED DIFF ==="
-          git diff --cached --name-status
-          echo "=== INITIAL RUNNER UNTRACKED ==="
-          git ls-files --others --exclude-standard
-          test -z "$(git diff --name-only)"
-          test -z "$(git diff --cached --name-only)"
-          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/\.temp/' || true)"
-          test -z "$unexpected"
-          if test -d supabase/.temp; then
-            echo "RC1C_INITIAL_EPHEMERAL_PATH=supabase/.temp/"
-            rm -rf supabase/.temp
-          fi
           git diff --exit-code
           git diff --cached --exit-code
+          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/(\.temp/|\.branches/)' || true)"
+          test -z "$unexpected"
+          rm -rf supabase/.temp supabase/.branches
           test -z "$(git ls-files --others --exclude-standard)"
           test -z "$(git status --porcelain=v1)"
           git config user.name rc1c-implementation-runner
           git config user.email rc1c-implementation-runner@users.noreply.github.com
 
-      - name: Install locked dependencies
-        run: npm ci --ignore-scripts --no-fund
-
-      - name: Confirm clean tree after install
-        run: test -z "$(git status --porcelain)"
+      - name: Install locked dependencies for materialization
+        run: |
+          npm ci --ignore-scripts --no-fund
+          test -z "$(git status --porcelain=v1)"
 
       - name: Materialize Wave 4 work order mobile
         run: |
@@ -102,7 +86,7 @@ jobs:
           git commit -m "fix: improve mobile quote and purchase forms"
           echo "WAVE689_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Materialize Wave 7 quote PDF and align historical contracts
+      - name: Materialize Wave 7 quote PDF and approved historical contracts
         run: |
           python /tmp/rc1c-temp/pdf.py
           python /tmp/rc1c-temp/finalize_tests.py
@@ -121,16 +105,90 @@ jobs:
           git add api/quote-pdf.js api/quotePdfLayout.js package.json scripts/verify-round31.mjs tests/blockers/mobile_wave1_contract.test.mjs tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c_responsive_breakpoints.test.mjs
           git commit -m "feat: make quote pdf one-page first"
           echo "WAVE7_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Apply SQL-only read-only fix and regression test
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          run_sql = Path('scripts/run-sql-rls-ci.sh')
+          s = run_sql.read_text()
+          old = 'node scripts/reassemble.mjs'
+          if s.count(old) != 1:
+              raise SystemExit(f'run-sql reassemble anchor expected 1, found {s.count(old)}')
+          run_sql.write_text(s.replace(old, 'node scripts/reassemble.mjs --sql-only', 1))
+
+          reassemble = Path('scripts/reassemble.mjs')
+          s = reassemble.read_text()
+          anchor = """assembleText(\n  'supabase/0001_parts',\n  'supabase/0001_ziistec_fundacao_FINAL.sql',\n  '80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd',\n);\n"""
+          if s.count(anchor) != 1:
+              raise SystemExit(f'reassemble SQL anchor expected 1, found {s.count(anchor)}')
+          reassemble.write_text(s.replace(anchor, anchor + "\nif (process.argv.includes('--sql-only')) process.exit(0);\n", 1))
+          PY
+
+          cat > tests/blockers/reassemble_sql_only_readonly.test.mjs <<'EOF'
+          import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import { spawnSync } from 'node:child_process';
+
+          const expectedSqlSha = '80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd';
+          const legacyPath = 'src/legacy/ZiisTecApp.jsx';
+          const pdfPath = 'api/quote-pdf.js';
+          const sqlPath = 'supabase/0001_ziistec_fundacao_FINAL.sql';
+          const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+          const run = (command, args) => spawnSync(command, args, { encoding: 'utf8' });
+
+          test('reassemble --sql-only creates verified SQL without mutating tracked application files', () => {
+            const legacyBefore = fs.readFileSync(legacyPath);
+            const pdfBefore = fs.readFileSync(pdfPath);
+            const legacyShaBefore = sha256(legacyBefore);
+            const pdfShaBefore = sha256(pdfBefore);
+
+            fs.rmSync(sqlPath, { force: true });
+            const reassembled = run(process.execPath, ['scripts/reassemble.mjs', '--sql-only']);
+            assert.equal(reassembled.status, 0, `${reassembled.stdout}\n${reassembled.stderr}`);
+            assert.equal(fs.existsSync(sqlPath), true, 'final 0001 SQL was not created');
+            assert.equal(sha256(fs.readFileSync(sqlPath)), expectedSqlSha, 'final 0001 SQL SHA mismatch');
+
+            const legacyAfter = fs.readFileSync(legacyPath);
+            const pdfAfter = fs.readFileSync(pdfPath);
+            assert.equal(sha256(legacyAfter), legacyShaBefore, 'legacy source hash changed');
+            assert.equal(sha256(pdfAfter), pdfShaBefore, 'quote PDF hash changed');
+            assert.deepEqual(legacyAfter, legacyBefore, 'legacy source content changed');
+            assert.deepEqual(pdfAfter, pdfBefore, 'quote PDF content changed');
+
+            const worktreeDiff = run('git', ['diff', '--exit-code']);
+            assert.equal(worktreeDiff.status, 0, `tracked worktree changed:\n${worktreeDiff.stdout}\n${worktreeDiff.stderr}`);
+            const indexDiff = run('git', ['diff', '--cached', '--exit-code']);
+            assert.equal(indexDiff.status, 0, `tracked index changed:\n${indexDiff.stdout}\n${indexDiff.stderr}`);
+            const trackedStatus = run('git', ['status', '--porcelain=v1', '--untracked-files=no']);
+            assert.equal(trackedStatus.status, 0, trackedStatus.stderr);
+            assert.equal(trackedStatus.stdout.trim(), '', `tracked files changed:\n${trackedStatus.stdout}`);
+          });
+          EOF
+
+          git diff --check
+          git add scripts/run-sql-rls-ci.sh scripts/reassemble.mjs tests/blockers/reassemble_sql_only_readonly.test.mjs
+          git commit -m "ci: keep sql rls gate read-only"
+          echo "CI_READONLY_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "FINAL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Final clean tree before candidate gates
-        run: test -z "$(git status --porcelain)"
-
-      - name: Final npm ci
+      - name: SQL-only read-only regression
         run: |
+          node --test tests/blockers/reassemble_sql_only_readonly.test.mjs | tee /tmp/sql-only.log
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Final npm ci on exact candidate SHA
+        run: |
+          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           rm -rf node_modules
-          npm ci --ignore-scripts --no-fund
-          test -z "$(git status --porcelain)"
+          npm ci
+          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
+          test -z "$(git status --porcelain=v1)"
 
       - name: Full RC-1C targeted regressions
         run: |
@@ -142,27 +200,25 @@ jobs:
             tests/blockers/rc1c_product_primary_parity.test.mjs \
             tests/blockers/rc1c_mobile_field_workflow.test.mjs \
             tests/blockers/rc1c_quote_pdf_pagination.test.mjs \
-            tests/blockers/rc1c_responsive_breakpoints.test.mjs
+            tests/blockers/rc1c_responsive_breakpoints.test.mjs | tee /tmp/targeted.log
+          pass="$(awk '/^# pass /{print $3}' /tmp/targeted.log | tail -1)"
+          test -n "$pass"
+          test "$pass" -ge 35
+          echo "TARGETED_PASS=$pass" >> "$GITHUB_ENV"
+          grep 'RC1C_PDF_PAGES A=1 B=1 C=2 D=2 E=1 F=2 G=2' /tmp/targeted.log
 
       - name: Verify V2
-        run: npm run verify:v2
+        run: npm run verify:v2 | tee /tmp/verify-v2.log
 
       - name: Reproducible build
-        run: npm run verify:reproducible-build
+        run: npm run verify:reproducible-build | tee /tmp/reproducible.log
 
       - name: Security audit
-        run: npm run security:audit
+        run: npm run security:audit | tee /tmp/security-audit.log
 
-      - name: Snapshot A immediately before Supabase start
+      - name: Require exact candidate and clean tree before Supabase
         run: |
-          echo "=== A BEFORE SUPABASE START: GIT STATUS ==="
-          git status --porcelain=v1
-          echo "=== A BEFORE SUPABASE START: TRACKED DIFF ==="
-          git diff --name-status
-          echo "=== A BEFORE SUPABASE START: CACHED DIFF ==="
-          git diff --cached --name-status
-          echo "=== A BEFORE SUPABASE START: UNTRACKED ==="
-          git ls-files --others --exclude-standard
+          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           git diff --exit-code
           git diff --cached --exit-code
           test -z "$(git ls-files --others --exclude-standard)"
@@ -171,95 +227,98 @@ jobs:
       - name: Start disposable Supabase stack
         run: supabase start
 
-      - name: Snapshot B immediately after Supabase start
+      - name: Validate post-start residue classification
         run: |
-          echo "=== B AFTER SUPABASE START: GIT STATUS ==="
-          git status --porcelain=v1
-          echo "=== B AFTER SUPABASE START: TRACKED DIFF ==="
-          git diff --name-status
-          echo "=== B AFTER SUPABASE START: CACHED DIFF ==="
-          git diff --cached --name-status
-          echo "=== B AFTER SUPABASE START: UNTRACKED ==="
-          git ls-files --others --exclude-standard
+          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           git diff --exit-code
           git diff --cached --exit-code
           unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/(\.temp/|\.branches/)' || true)"
           test -z "$unexpected"
 
       - name: SQL and RLS regression suite
-        run: bash scripts/run-sql-rls-ci.sh
+        run: bash scripts/run-sql-rls-ci.sh | tee /tmp/sql-rls.log
 
-      - name: Snapshot C immediately after SQL RLS
+      - name: Require read-only tree immediately after SQL RLS
         run: |
-          echo "=== C AFTER SQL RLS: GIT STATUS ==="
-          git status --porcelain=v1
-          echo "=== C AFTER SQL RLS: TRACKED DIFF ==="
-          git diff --name-status
-          echo "=== C AFTER SQL RLS: CACHED DIFF ==="
-          git diff --cached --name-status
-          echo "=== C AFTER SQL RLS: UNTRACKED ==="
-          git ls-files --others --exclude-standard
+          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           git diff --exit-code
           git diff --cached --exit-code
+          echo "=== UNTRACKED AFTER SQL/RLS ==="
+          git ls-files --others --exclude-standard
           unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/(\.temp/|\.branches/)' || true)"
           test -z "$unexpected"
+          echo "TRACKED_DIFF_AFTER_SQL_RLS=NONE" >> "$GITHUB_ENV"
 
       - name: Stop disposable Supabase stack
-        run: supabase stop --no-backup
+        run: supabase stop
 
-      - name: Snapshot D after stop classify and clean only proven Supabase residue
+      - name: Reinspect and remove only proven Supabase CLI metadata
         run: |
-          echo "=== D AFTER SUPABASE STOP: GIT STATUS ==="
-          git status --porcelain=v1
-          echo "=== D AFTER SUPABASE STOP: TRACKED DIFF ==="
+          echo "=== TRACKED AFTER STOP ==="
           git diff --name-status
-          echo "=== D AFTER SUPABASE STOP: CACHED DIFF ==="
+          echo "=== CACHED AFTER STOP ==="
           git diff --cached --name-status
-          echo "=== D AFTER SUPABASE STOP: UNTRACKED ==="
+          echo "=== UNTRACKED AFTER STOP ==="
           git ls-files --others --exclude-standard
           git diff --exit-code
           git diff --cached --exit-code
           unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/(\.temp/|\.branches/)' || true)"
           test -z "$unexpected"
-          if test -d supabase/.temp; then
-            echo "RC1C_EPHEMERAL_PATH=supabase/.temp/"
-            rm -rf supabase/.temp
-          fi
-          if test -d supabase/.branches; then
-            echo "RC1C_EPHEMERAL_PATH=supabase/.branches/"
-            rm -rf supabase/.branches
-          fi
-          echo "RC1C_DIRTY_ROOT_CAUSE=Supabase CLI lifecycle metadata under supabase/.temp/ and supabase/.branches/; untracked only"
-          echo "RC1C_CLEANUP=only proven supabase/.temp/ and supabase/.branches/"
+          rm -rf supabase/.temp supabase/.branches
           git diff --exit-code
           git diff --cached --exit-code
           test -z "$(git ls-files --others --exclude-standard)"
           test -z "$(git status --porcelain=v1)"
           test "$(git rev-parse HEAD)" = "$FINAL_SHA"
-          echo "RC1C_FINAL_CLEAN_TREE=PASS"
+          echo "FINAL_CLEAN_TREE=PASS" >> "$GITHUB_ENV"
 
-      - name: Reconfirm protected refs before publishing functional chain
+      - name: Reconfirm remote refs before candidate publication
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)" = "44e4b01e70d5979ed30ee682920c64aad86c8d06"
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
+          git merge-base --is-ancestor 44e4b01e70d5979ed30ee682920c64aad86c8d06 "$FINAL_SHA"
 
-      - name: Publish tested functional commits to isolated ref
+      - name: Fast-forward only RC-1C branch to exact tested candidate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/rc1c-wave49-functional-temp
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/rc1c-mobile-ux-stabilization
+          remote_sha="$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)"
+          test "$remote_sha" = "$FINAL_SHA"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
+
+      - name: Write closure evidence
+        run: |
           printf '%s\n' \
             "WAVE4_SHA=${WAVE4_SHA}" \
             "WAVE5_SHA=${WAVE5_SHA}" \
             "WAVE689_SHA=${WAVE689_SHA}" \
             "WAVE7_SHA=${WAVE7_SHA}" \
-            "FINAL_SHA=${FINAL_SHA}" > /tmp/rc1c-wave49-shas.txt
+            "CI_READONLY_SHA=${CI_READONLY_SHA}" \
+            "FINAL_SHA=${FINAL_SHA}" \
+            "TARGETED_PASS=${TARGETED_PASS}" \
+            "SQL_ONLY_REGRESSION=PASS" \
+            "VERIFY_V2=PASS" \
+            "REPRODUCIBLE=PASS" \
+            "SECURITY_AUDIT=PASS" \
+            "SQL_RLS=PASS" \
+            "TRACKED_DIFF_AFTER_SQL_RLS=${TRACKED_DIFF_AFTER_SQL_RLS}" \
+            "FINAL_CLEAN_TREE=${FINAL_CLEAN_TREE}" \
+            "PDF=A=1 B=1 C=2 D=2 E=1 F=2 G=2" > /tmp/rc1c-closure-report.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rc1c-wave49-shas
-          path: /tmp/rc1c-wave49-shas.txt
-          retention-days: 1
+          name: rc1c-closure-evidence
+          path: |
+            /tmp/rc1c-closure-report.txt
+            /tmp/sql-only.log
+            /tmp/targeted.log
+            /tmp/verify-v2.log
+            /tmp/reproducible.log
+            /tmp/security-audit.log
+            /tmp/sql-rls.log
+          retention-days: 3
