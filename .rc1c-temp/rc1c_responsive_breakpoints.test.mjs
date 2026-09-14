@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from '../src/lib/mobileNavigation.js';
+import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from '../../src/lib/mobileNavigation.js';
 
-const legacy = fs.readFileSync(new URL('../src/legacy/ZiisTecApp.jsx', import.meta.url), 'utf8');
+const legacy = fs.readFileSync(new URL('../../src/legacy/ZiisTecApp.jsx', import.meta.url), 'utf8');
 const widths = [360, 390, 430, 768, 1024, 1366, 1440];
 
 test('RC-1C responsive contract covers every required homologation width', () => {
