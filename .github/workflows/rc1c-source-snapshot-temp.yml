@@ -15,16 +15,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          fetch-depth: 1
-      - name: Verify exact candidate snapshot
+          fetch-depth: 3
+      - name: Verify exact candidate snapshot parent
         run: |
-          test "$(git rev-parse HEAD^)" = "8483ffd84c1a7f513b8a54873251ce77d8e3a441" || true
+          git merge-base --is-ancestor 8483ffd84c1a7f513b8a54873251ce77d8e3a441 HEAD
           git diff --check
       - name: Package source
-        run: tar --exclude=.git -czf rc1c-source.tar.gz .
+        run: tar --exclude=.git -czf /tmp/rc1c-source.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
           name: rc1c-source-snapshot
-          path: rc1c-source.tar.gz
+          path: /tmp/rc1c-source.tar.gz
           if-no-files-found: error
           retention-days: 1
