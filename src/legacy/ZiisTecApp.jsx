@@ -2031,9 +2031,9 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
       )}
       <div className="grid sm:grid-cols-2 gap-5">
         <Field label={pj ? "CNPJ" : "CPF"}><Input value={form.documento || ""} onChange={(e) => set("documento", e.target.value)} /></Field>
-        <Field label="Telefone"><Input value={form.telefone || ""} onChange={(e) => set("telefone", e.target.value)} placeholder="(00) 0000-0000" /></Field>
+        <Field label="Telefone"><Input inputMode="tel" value={form.telefone || ""} onChange={(e) => set("telefone", e.target.value)} placeholder="(00) 0000-0000" /></Field>
       </div>
-      <Field label="WhatsApp"><Input value={form.whatsapp || ""} onChange={(e) => set("whatsapp", e.target.value)} placeholder="(00) 00000-0000" /></Field>
+      <Field label="WhatsApp"><Input inputMode="tel" value={form.whatsapp || ""} onChange={(e) => set("whatsapp", e.target.value)} placeholder="(00) 00000-0000" /></Field>
       <Field label="Endereço"><Input value={form.endereco || ""} onChange={(e) => set("endereco", e.target.value)} placeholder="Rua, número, bairro, cidade" /></Field>
       <Field label="Observações" hint="Aparecem na ficha do cliente e na ordem de serviço.">
         <CampoVoz rows={3} valor={form.obs || ""} onChange={(v) => set("obs", v)} placeholder="Ex.: portaria libera acesso das 8h às 18h, falar com a síndica" />
@@ -2904,20 +2904,20 @@ function OrcamentoEditor(p) {
                         <button onClick={() => rmItem(i.id)} aria-label={`Remover ${i.nome}`}
                           className={cx("p-1.5 -m-1 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 shrink-0", ring)}><Trash2 className="w-4 h-4" /></button>
                       </div>
-                      <div className="grid grid-cols-3 gap-3 sm:gap-4 items-end">
+                      <div className="grid grid-cols-1 min-[430px]:grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 items-end">
                         <Field label={`Qtd em ${unidadeLabel(i.unidade)}`}>
                           <div className="flex items-stretch gap-1.5">
                             <button type="button" aria-label={`Diminuir quantidade de ${i.nome}`}
                               onClick={() => upItem(i.id, "qtd", Math.max(0, num(i.qtd) - 1))}
                               className={cx("w-11 shrink-0 rounded-xl ring-1 ring-slate-200 text-slate-600 text-lg leading-none hover:bg-slate-50", ring)}>−</button>
-                            <Input type="number" min="0" step="0.5" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", num(e.target.value))} className="text-center" />
+                            <Input type="number" inputMode="decimal" min="0" step="0.5" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", num(e.target.value))} className="text-center" />
                             <button type="button" aria-label={`Aumentar quantidade de ${i.nome}`}
                               onClick={() => upItem(i.id, "qtd", num(i.qtd) + 1)}
                               className={cx("w-11 shrink-0 rounded-xl ring-1 ring-slate-200 text-slate-600 text-lg leading-none hover:bg-slate-50", ring)}>+</button>
                           </div>
                         </Field>
                         <Field label="Valor unitário"><InputMoeda valor={i.preco} onChange={(v) => upItem(i.id, "preco", v)} aria-label={`Valor unitário de ${i.nome}`} /></Field>
-                        <div className="text-right pb-3">
+                        <div className="text-left sm:text-right pb-1 sm:pb-3">
                           <p className="text-[12px] text-slate-400">Total</p>
                           <p className="text-[19px] font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</p>
                         </div>
@@ -2975,7 +2975,7 @@ function OrcamentoEditor(p) {
       </div>
 
       {/* barra fixa no celular/tablet: total e ação principal sempre à mão */}
-      <div className="lg:hidden sticky bottom-0 -mx-4 sm:-mx-8 mt-6 border-t border-slate-200 bg-white/95 backdrop-blur px-4 sm:px-8 py-3 flex items-center justify-between gap-4 z-20">
+      <div className="lg:hidden sticky bottom-0 -mx-4 sm:-mx-8 mt-6 border-t border-slate-200 bg-white/95 backdrop-blur px-4 sm:px-8 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex items-center justify-between gap-4 z-20">
         <div>
           <p className="text-[11px] text-slate-500 leading-none">Total</p>
           <p className="text-[20px] font-semibold text-slate-900 tabular-nums leading-tight">{brl(totalDoc(d))}</p>
@@ -4505,10 +4505,10 @@ function CompraForm({ form, setForm, onSave, produtos }) {
                     <button onClick={() => setForm({ ...form, itens: form.itens.filter((x) => x.id !== i.id) })} aria-label="Remover item"
                       className={cx("p-2 rounded-lg text-slate-300 hover:text-rose-600 shrink-0", ring)}><Trash2 className="w-4 h-4" /></button>
                   </div>
-                  <div className="grid grid-cols-3 gap-3 items-end mt-3">
-                    <Field label="Quantidade"><Input type="number" min="1" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", Number(e.target.value))} /></Field>
-                    <Field label="Custo unitário"><Input type="number" min="0" value={i.custo} onChange={(e) => upItem(i.id, "custo", Number(e.target.value))} /></Field>
-                    <div className="text-right pb-3"><p className="text-[12px] text-slate-400">Total</p>
+                  <div className="grid grid-cols-1 min-[430px]:grid-cols-2 sm:grid-cols-3 gap-3 items-end mt-3">
+                    <Field label="Quantidade"><Input type="number" inputMode="numeric" min="1" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", Number(e.target.value))} /></Field>
+                    <Field label="Custo unitário"><Input type="number" inputMode="decimal" step="0.01" min="0" value={i.custo} onChange={(e) => upItem(i.id, "custo", Number(e.target.value))} /></Field>
+                    <div className="text-left sm:text-right pb-1 sm:pb-3"><p className="text-[12px] text-slate-400">Total</p>
                       <p className="text-[17px] font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.custo)}</p></div>
                   </div>
                 </div>
