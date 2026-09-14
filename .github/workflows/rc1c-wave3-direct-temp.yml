@@ -26,7 +26,8 @@ jobs:
       - name: Apply deterministic canonical agenda edits
         run: |
           python scripts/rc1c-wave3-direct.py
-          rm scripts/rc1c-wave3-direct.py .github/workflows/rc1c-wave3-direct-temp.yml
+          python scripts/rc1c-wave3-contract-fix.py
+          rm scripts/rc1c-wave3-direct.py scripts/rc1c-wave3-contract-fix.py .github/workflows/rc1c-wave3-direct-temp.yml
           git diff --check
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund
@@ -51,7 +52,7 @@ jobs:
           import base64,json,os,subprocess,urllib.request
           repo=os.environ['GITHUB_REPOSITORY']; token=os.environ['GH_TOKEN']
           parent='1d7e9b18d44f073b8f5ffe143e9141d0c60c3965'
-          paths=['package.json','src/legacy/ZiisTecApp.jsx','src/lib/agendaMobile.js','tests/blockers/rc1c_agenda_mobile.test.mjs']
+          paths=['package.json','scripts/verify-round38.mjs','src/legacy/ZiisTecApp.jsx','src/lib/agendaMobile.js','tests/blockers/rc1c_agenda_mobile.test.mjs']
           api='https://api.github.com/repos/'+repo
           def post(endpoint,payload):
             req=urllib.request.Request(api+endpoint,data=json.dumps(payload).encode(),headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},method='POST')
