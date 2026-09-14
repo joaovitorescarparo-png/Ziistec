@@ -498,7 +498,7 @@ function usarReconhecimento() {
   };
 }
 
-/* Componente único de ditado./* Componente único de ditado. Usado em TODO campo de texto livre do ZiisTec.
+/* Componente único de ditado. Usado em TODO campo de texto livre do ZiisTec.
    A voz complementa o campo: o texto ditado é acrescentado ao que já existe,
    nunca substitui, e continua editável à mão. */
 function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica }) {
@@ -546,8 +546,6 @@ function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica 
     </div>
   );
 }
-
-async function chamarIA(prompt) {
 
 async function chamarIA(prompt) {
   return chamarIAReal(prompt);
