@@ -34,6 +34,7 @@ import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
 import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
+import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
 
 /* ================================================================ helpers */
 const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -241,7 +242,7 @@ const ST_ASSINATURA = {
 /* permissões por papel. A lista é curta de propósito: dois papéis, regras claras. */
 const PERMISSOES = {
   proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "equipe", "config", "assinatura", "verValores", "todasOS"],
-  tecnico: ["inicio", "ordens", "registrarMateriais", "vendaCampo"],
+  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo"],
 };
 const pode = (papel, chave) => (PERMISSOES[papel] || []).includes(chave);
 
@@ -1542,10 +1543,12 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
 }
 
 /* =================================================================== Agenda */
-function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, salvarOS, salvarCliente, usuarioAtual, pedirConfirmacao }) {
+function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao }) {
+  const tecnico = papel === "tecnico";
   const [dia, setDia] = useState(HOJE);
-  const [visao, setVisao] = useState("semana");
+  const [visao, setVisao] = useState(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "lista" : "semana"));
   const [filtro, setFiltro] = useState("proximos");
+  const [tecnicoId, setTecnicoId] = useState("");
   const [busca, setBusca] = useState("");
   const [agendando, setAgendando] = useState(null);
   const [novaOS, setNovaOS] = useState(false);
@@ -1568,109 +1571,132 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
   const gradeInicio = inicioSemana(primeiroMes);
   const diasMes = Array.from({ length: 42 }, (_, i) => addDays(gradeInicio, i));
   const termo = semAcento(busca.trim());
-  const bateBusca = (o) => !termo || semAcento([o.numero,nomeCliente(o.clienteId),o.local,o.localServico,resumoOS(o)].filter(Boolean).join(" ")).includes(termo);
-  const bateFiltro = (o) => filtro === "concluidos" ? o.status === "concluida"
-    : filtro === "proximos" ? o.status !== "concluida" && (!o.data || o.data >= HOJE)
-    : true;
-  const base = ordens.filter((o) => o.status !== "cancelada" && bateFiltro(o) && bateBusca(o));
-  const doDia = base.filter((o) => o.data === dia).sort((a,b)=>(a.hora||"").localeCompare(b.hora||""));
-  const semAgenda = base.filter((o) => !o.data && o.status !== "concluida");
-  const concluidosMes = ordens.filter((o)=>o.status==="concluida" && (o.concluidaEm||o.data||"").slice(0,7)===mesAtual && bateBusca(o));
+  const bateBusca = (o) => !termo || semAcento([o.numero, nomeCliente(o.clienteId), o.local, o.localServico, resumoOS(o), o.responsavel].filter(Boolean).join(" ")).includes(termo);
+  const baseBusca = ordens.filter(bateBusca);
+  const ownerLista = filterOwnerAgenda(baseBusca, { filter: filtro, today: HOJE, technicianId: tecnicoId });
+  const ownerGrupos = groupAgendaOrders(ownerLista, filtro);
+  const meuDia = technicianDayAgenda(baseBusca, { userId: usuarioAtual?.id, day: dia, today: HOJE });
+  const tecnicos = equipe.filter((m) => m.papel === "tecnico" && m.ativo !== false);
+  const nomeTecnico = (os) => equipe.find((m) => m.usuarioId === os.responsavelId)?.usuario?.nome || os.responsavel || "Sem técnico";
+  const semAgenda = filterOwnerAgenda(baseBusca, { filter: "semdata", today: HOJE, technicianId: tecnicoId });
 
-  const abrirHoje = () => { setDia(HOJE); setVisao("dia"); };
-  const tituloLista = visao === "mes" && filtro === "concluidos"
-    ? `Serviços feitos em ${nomeMes(mesAtual)} · ${concluidosMes.length}`
-    : `${diaSemana(dia)}, ${dataBR(dia)}${dia===HOJE?" · hoje":""}`;
-  const lista = visao === "mes" && filtro === "concluidos"
-    ? [...concluidosMes].sort((a,b)=>((b.concluidaEm||b.data||"")+" "+(b.hora||"")).localeCompare((a.concluidaEm||a.data||"")+" "+(a.hora||"")))
-    : doDia;
+  const rotuloGrupo = (data) => {
+    if (data === "sem-data") return "Sem data";
+    if (data === HOJE) return "Hoje";
+    if (data === addDays(HOJE, 1)) return "Amanhã";
+    return `${diaSemana(data).replace("-feira", "")}, ${dataBR(data)}`;
+  };
+  const rotuloFiltro = { hoje: "Hoje", proximos: "Próximos", semdata: "Sem data", concluidos: "Concluídos" }[filtro] || "Agenda";
+  const abrirHoje = () => { setDia(HOJE); setVisao("lista"); if (!tecnico) setFiltro("hoje"); };
+  const selecionarFiltro = (id) => { setFiltro(id); setVisao("lista"); if (id === "hoje") setDia(HOJE); };
+
+  const CardAgenda = ({ os, atraso = false }) => {
+    const st = ST_OS[os.status] || { label: os.status || "Status", tone: "neutro" };
+    return <Linha onClick={() => abrirOS(os.id)} className="py-3.5 sm:py-4">
+      <div className="flex gap-3 sm:gap-4 items-start">
+        <div className="w-14 sm:w-16 shrink-0">
+          <p className={cx("text-[16px] font-semibold tabular-nums", atraso ? "text-rose-700" : "text-slate-900")}>{os.hora || "—"}</p>
+          <p className="text-[11px] text-slate-400 mt-1 truncate">{os.numero}</p>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
+            <Pill tone={st.tone}>{st.label}</Pill>
+          </div>
+          <p className="text-[13px] text-slate-600 mt-1 line-clamp-2">{resumoOS(os)}</p>
+          <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 text-[12px] min-w-0">
+            <Endereco valor={os.local} local={os.localServico} compacto className="max-w-full" />
+            {empresa.temEquipe && <span className="flex items-center gap-1.5 text-slate-400 truncate"><User className="w-3.5 h-3.5 shrink-0" />{nomeTecnico(os)}</span>}
+          </div>
+          {atraso && <p className="mt-2 text-[11px] font-medium text-rose-700">Atrasado desde {dataBR(os.data)}</p>}
+          {!tecnico && os.data && os.status !== "concluida" && <button onClick={(e) => { e.stopPropagation(); pedirConfirmacao({ titulo: "Remover da agenda?", texto: `${os.numero} continuará existindo como OS, mas ficará sem data e horário.`, confirmar: "Remover agendamento", perigo: true, acao: () => desagendarOS(os.id) }); }} className="mt-2 min-h-11 px-1 text-[12px] font-medium text-rose-600 hover:underline">Remover da agenda</button>}
+        </div>
+      </div>
+    </Linha>;
+  };
 
   return (
     <>
-      <PageHead title="Agenda" sub="Próximos atendimentos e histórico completo do que já foi feito."
-        action={<Btn icon={Plus} onClick={() => setNovaOS(true)}>Novo agendamento</Btn>} />
+      <PageHead title={tecnico ? "Meu dia" : "Agenda"} sub={tecnico ? "Seus atendimentos atribuídos, em ordem de execução." : "Planejamento da operação e próximos atendimentos."}
+        action={!tecnico && <Btn icon={Plus} onClick={() => setNovaOS(true)}>Novo agendamento</Btn>} />
 
-      <Panel className="p-3 sm:p-4 mb-5">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+      {tecnico ? <Panel className="p-3 sm:p-4 mb-5">
+        <div className="flex items-center justify-between gap-2">
+          <button onClick={() => setDia(addDays(dia, -1))} aria-label="Dia anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-500 hover:bg-slate-50", ring)}><ArrowLeft className="w-4 h-4" /></button>
+          <div className="text-center min-w-0">
+            <p className="font-semibold text-slate-900 truncate">{dia === HOJE ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`}</p>
+            {dia !== HOJE && <button onClick={() => setDia(HOJE)} className="min-h-11 text-[12px] text-teal-700 hover:underline">Voltar para hoje</button>}
+          </div>
+          <button onClick={() => setDia(addDays(dia, 1))} aria-label="Próximo dia" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-500 hover:bg-slate-50", ring)}><ArrowRight className="w-4 h-4" /></button>
+        </div>
+        <div className="relative mt-3">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Cliente, OS ou endereço" className="pl-9" />
+        </div>
+      </Panel> : <Panel className="p-3 sm:p-4 mb-5">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2 items-center">
+            {[["lista", "Lista"], ["semana", "Semana"], ["mes", "Mês"]].map(([id, label]) => <button key={id} onClick={() => setVisao(id)} className={cx("min-h-11 px-4 py-2 rounded-xl text-[13px] font-medium", ring, visao === id ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100")}>{label}</button>)}
+          </div>
           <div className="flex flex-wrap gap-2">
-            {[['dia','Hoje'],['semana','Semana'],['mes','Mês']].map(([id,label])=>(
-              <button key={id} onClick={()=>id==='dia'?abrirHoje():setVisao(id)}
-                className={cx("px-4 py-2 rounded-xl text-[13px] font-medium",ring,visao===id?"bg-slate-900 text-white":"bg-slate-50 text-slate-600 hover:bg-slate-100")}>{label}</button>
-            ))}
-            <span className="w-px bg-slate-200 mx-1 hidden sm:block" />
-            {[['proximos','Próximos'],['concluidos','Concluídos'],['todos','Todos']].map(([id,label])=>(
-              <button key={id} onClick={()=>setFiltro(id)}
-                className={cx("px-3 py-2 rounded-xl text-[13px] font-medium",ring,filtro===id?"bg-teal-50 text-teal-800 ring-1 ring-teal-200":"text-slate-500 hover:bg-slate-50")}>{label}</button>
-            ))}
+            {[["hoje", "Hoje"], ["proximos", "Próximos"], ["semdata", "Sem data"], ["concluidos", "Concluídos"]].map(([id, label]) => <button key={id} onClick={() => selecionarFiltro(id)} className={cx("min-h-11 px-3 py-2 rounded-xl text-[13px] font-medium", ring, filtro === id ? "bg-teal-50 text-teal-800 ring-1 ring-teal-200" : "text-slate-500 hover:bg-slate-50")}>{label}</button>)}
           </div>
-          <div className="relative min-w-0 lg:w-72">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input value={busca} onChange={(e)=>setBusca(e.target.value)} placeholder="Cliente, OS, prédio ou endereço" className="pl-9" />
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="relative min-w-0">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Cliente, OS, prédio ou endereço" className="pl-9" />
+            </div>
+            {empresa.temEquipe && <Select value={tecnicoId} onChange={(e) => setTecnicoId(e.target.value)} aria-label="Filtrar por técnico">
+              <option value="">Todos os técnicos</option>
+              {tecnicos.map((m) => <option key={m.usuarioId} value={m.usuarioId}>{m.usuario?.nome || "Técnico"}</option>)}
+            </Select>}
           </div>
-        </div>
-      </Panel>
-
-      {visao === "semana" && <div className="flex items-center gap-1 sm:gap-2 mb-6">
-        <button onClick={()=>setDia(addDays(dia,-7))} aria-label="Semana anterior" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0",ring)}><ArrowLeft className="w-4 h-4" /></button>
-        <div className="grid grid-cols-7 gap-1.5 sm:gap-2 flex-1">
-          {semana.map((d)=>{
-            const qtd=ordens.filter((o)=>o.data===d&&o.status!=="cancelada").length;
-            const feitos=ordens.filter((o)=>(o.concluidaEm||o.data)===d&&o.status==="concluida").length;
-            const sel=d===dia;
-            return <button key={d} onClick={()=>setDia(d)} className={cx("rounded-2xl py-3 text-center transition-colors",ring,sel?"bg-slate-900 text-white":"bg-white ring-1 ring-slate-200/70 text-slate-600 hover:ring-slate-300")}>
-              <p className={cx("text-[11px] uppercase tracking-wide",sel?"text-slate-300":d===HOJE?"text-teal-700 font-semibold":"text-slate-400")}>{diaCurto(d)}</p>
-              <p className={cx("text-[19px] font-semibold leading-tight mt-0.5 tabular-nums",d===HOJE&&!sel&&"text-teal-800")}>{d.slice(8)}</p>
-              <div className="h-2 flex justify-center items-center gap-1">{qtd>0&&<span className={cx("w-1.5 h-1.5 rounded-full",sel?"bg-teal-400":"bg-teal-600")} />}{feitos>0&&<span className={cx("w-1.5 h-1.5 rounded-full",sel?"bg-emerald-300":"bg-emerald-500")} />}</div>
-            </button>;
-          })}
-        </div>
-        <button onClick={()=>setDia(addDays(dia,7))} aria-label="Próxima semana" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0",ring)}><ArrowRight className="w-4 h-4" /></button>
-      </div>}
-
-      {visao === "mes" && <Panel className="p-3 sm:p-5 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <button onClick={()=>setDia(moverMes(dia,-1))} className={cx("p-2 rounded-xl hover:bg-slate-50 text-slate-500",ring)}><ArrowLeft className="w-4 h-4" /></button>
-          <div className="text-center"><p className="font-semibold text-slate-900">{nomeMes(mesAtual)}</p><button onClick={abrirHoje} className="text-[12px] text-teal-700 mt-0.5 hover:underline">Voltar para hoje</button></div>
-          <button onClick={()=>setDia(moverMes(dia,1))} className={cx("p-2 rounded-xl hover:bg-slate-50 text-slate-500",ring)}><ArrowRight className="w-4 h-4" /></button>
-        </div>
-        <div className="grid grid-cols-7 text-center text-[11px] uppercase tracking-wide text-slate-400 mb-1">{['seg','ter','qua','qui','sex','sáb','dom'].map(x=><span key={x} className="py-1">{x}</span>)}</div>
-        <div className="grid grid-cols-7 gap-1 sm:gap-2">
-          {diasMes.map((d)=>{
-            const doMes=d.slice(0,7)===mesAtual;
-            const qtd=ordens.filter((o)=>o.data===d&&o.status!=="cancelada"&&o.status!=="concluida").length;
-            const feitos=ordens.filter((o)=>(o.concluidaEm||o.data)===d&&o.status==="concluida").length;
-            const sel=d===dia;
-            return <button key={d} onClick={()=>setDia(d)} className={cx("min-h-[58px] sm:min-h-[72px] rounded-xl p-1.5 sm:p-2 text-left border transition-colors",ring,sel?"border-slate-900 bg-slate-900 text-white":doMes?"border-slate-200 bg-white hover:border-slate-300":"border-transparent bg-slate-50/40 text-slate-300")}>
-              <span className={cx("text-[13px] font-medium tabular-nums",d===HOJE&&!sel&&"text-teal-700")}>{Number(d.slice(8))}</span>
-              <div className="mt-2 space-y-1">{qtd>0&&<span className={cx("block text-[10px] sm:text-[11px] truncate",sel?"text-teal-300":"text-teal-700")}>{qtd} próximo{qtd>1?'s':''}</span>}{feitos>0&&<span className={cx("block text-[10px] sm:text-[11px] truncate",sel?"text-emerald-300":"text-emerald-700")}>{feitos} feito{feitos>1?'s':''}</span>}</div>
-            </button>;
-          })}
         </div>
       </Panel>}
 
-      <Rotulo>{tituloLista}</Rotulo>
-      <Panel className="divide-y divide-slate-100 overflow-hidden mb-8">
-        {lista.length===0 ? <Empty icon={CalendarDays} title={filtro==='concluidos'?"Nenhum serviço encontrado":"Nenhum atendimento neste período"} sub={busca?"Tente outro cliente, número de OS ou endereço.":"Use Novo agendamento para marcar um atendimento."} />
-        : lista.map((os)=><Linha key={os.id} onClick={()=>abrirOS(os.id)}>
-          <div className="flex gap-4 items-start">
-            <div className="w-16 shrink-0"><p className="text-[16px] font-semibold text-slate-900 tabular-nums">{os.hora||"—"}</p><p className="text-[11px] text-slate-400 mt-1">{os.status==='concluida'?dataCurta(os.concluidaEm||os.data):os.numero}</p></div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-start justify-between gap-3"><p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p><Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill></div>
-              <p className="text-[13px] text-slate-600 mt-1 line-clamp-2">{os.itens.length?os.itens.map((i)=>`${i.qtd}× ${i.nome}`).join(" · "):resumoOS(os)}</p>
-              <div className="flex items-center gap-4 mt-2 text-[12px] flex-wrap"><Endereco valor={os.local} local={os.localServico} compacto className="max-w-full" />{empresa.temEquipe&&<span className="flex items-center gap-1.5 text-slate-400"><User className="w-3.5 h-3.5" />{os.responsavel}</span>}</div>
-              {os.data && os.status !== "concluida" && <button onClick={(e) => { e.stopPropagation(); pedirConfirmacao({ titulo:"Remover da agenda?", texto:`${os.numero} continuará existindo como OS, mas ficará sem data e horário.`, confirmar:"Remover agendamento", perigo:true, acao:()=>desagendarOS(os.id) }); }} className="mt-2 text-[12px] font-medium text-rose-600 hover:underline">Remover da agenda</button>}
-            </div>
-          </div>
-        </Linha>)}
-      </Panel>
+      {!tecnico && visao === "semana" && <div className="flex items-center gap-1 sm:gap-2 mb-6">
+        <button onClick={() => setDia(addDays(dia, -7))} aria-label="Semana anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowLeft className="w-4 h-4" /></button>
+        <div className="grid grid-cols-7 gap-1.5 sm:gap-2 flex-1 min-w-0">
+          {semana.map((d) => {
+            const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length;
+            const sel = d === dia;
+            return <button key={d} onClick={() => setDia(d)} className={cx("min-w-0 rounded-2xl py-3 text-center transition-colors", ring, sel ? "bg-slate-900 text-white" : "bg-white border border-slate-200 hover:border-slate-300")}>
+              <p className={cx("text-[10px] uppercase font-semibold", sel ? "text-slate-300" : "text-slate-400")}>{diaSemana(d).slice(0, 3)}</p>
+              <p className="text-lg font-semibold leading-tight mt-0.5">{d.slice(8)}</p>
+              <p className={cx("text-[10px] mt-1", sel ? "text-teal-300" : "text-slate-400")}>{qtd || "·"}</p>
+            </button>;
+          })}
+        </div>
+        <button onClick={() => setDia(addDays(dia, 7))} aria-label="Próxima semana" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowRight className="w-4 h-4" /></button>
+      </div>}
 
-      {filtro!=="concluidos" && semAgenda.length>0 && <section>
-        <Rotulo>Aguardando agendamento · {semAgenda.length}</Rotulo>
-        <Panel className="divide-y divide-slate-100 overflow-hidden">{semAgenda.map((os)=><Linha key={os.id}><div className="flex items-center justify-between gap-3"><button onClick={()=>abrirOS(os.id)} className={cx("min-w-0 text-left",ring)}><p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p><p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p></button><Btn size="sm" variant="soft" icon={CalendarClock} onClick={()=>setAgendando(os)}>Agendar</Btn></div></Linha>)}</Panel>
-      </section>}
+      {!tecnico && visao === "mes" && <Panel className="p-3 sm:p-4 mb-6">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <button onClick={() => setDia(moverMes(dia, -1))} aria-label="Mês anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl hover:bg-slate-50", ring)}><ArrowLeft className="w-4 h-4" /></button>
+          <button onClick={abrirHoje} className={cx("min-h-11 px-3 text-sm font-semibold text-slate-800", ring)}>{new Date(primeiroMes + "T12:00:00").toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}</button>
+          <button onClick={() => setDia(moverMes(dia, 1))} aria-label="Próximo mês" className={cx("min-h-11 min-w-11 p-3 rounded-xl hover:bg-slate-50", ring)}><ArrowRight className="w-4 h-4" /></button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase font-semibold text-slate-400 mb-1">{["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((x) => <span key={x}>{x}</span>)}</div>
+        <div className="grid grid-cols-7 gap-1">
+          {diasMes.map((d) => { const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length; const fora = !d.startsWith(mesAtual); return <button key={d} onClick={() => { setDia(d); setFiltro("hoje"); setVisao("lista"); }} className={cx("min-h-11 rounded-xl text-sm flex flex-col items-center justify-center", ring, d === HOJE ? "ring-1 ring-teal-300" : "", fora ? "text-slate-300" : "text-slate-700", qtd ? "bg-slate-50" : "hover:bg-slate-50")}><span>{Number(d.slice(8))}</span>{qtd > 0 && <span className="text-[9px] text-teal-700 font-semibold">{qtd}</span>}</button>; })}
+        </div>
+      </Panel>}
 
-      <AgendarModal os={agendando} onClose={()=>setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />
-      {novaOS && <NovaOS onClose={()=>setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} />}
+      {tecnico ? <>
+        {meuDia.overdue.length > 0 && <section className="mb-6"><Rotulo>Atrasados · {meuDia.overdue.length}</Rotulo><Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.overdue.map((os) => <CardAgenda key={os.id} os={os} atraso />)}</Panel></section>}
+        <section><Rotulo>{dia === HOJE ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`} · {meuDia.scheduled.length}</Rotulo>{meuDia.scheduled.length ? <Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.scheduled.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel> : <Empty icon={CalendarClock} title="Nenhum atendimento atribuído" text="Não há OS autorizadas para você neste dia." />}</section>
+      </> : <>
+        {ownerLista.length === 0 ? <Empty icon={CalendarClock} title={`Nenhum item em ${rotuloFiltro.toLowerCase()}`} text="Altere o filtro ou escolha outro período." />
+        : <div className="space-y-5 mb-8">{ownerGrupos.map((grupo) => <section key={grupo.date}><Rotulo>{rotuloGrupo(grupo.date)} · {grupo.orders.length}</Rotulo><Panel className="divide-y divide-slate-100 overflow-hidden">{grupo.orders.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel></section>)}</div>}
+
+        {filtro !== "semdata" && filtro !== "concluidos" && semAgenda.length > 0 && <section>
+          <Rotulo>Aguardando agendamento · {semAgenda.length}</Rotulo>
+          <Panel className="divide-y divide-slate-100 overflow-hidden">{semAgenda.map((os) => <Linha key={os.id}><div className="flex items-center justify-between gap-3"><button onClick={() => abrirOS(os.id)} className={cx("min-w-0 text-left min-h-11", ring)}><p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p><p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p></button><Btn size="sm" variant="soft" icon={CalendarClock} onClick={() => setAgendando(os)}>Agendar</Btn></div></Linha>)}</Panel>
+        </section>}
+      </>}
+
+      {!tecnico && <AgendarModal os={agendando} onClose={() => setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />}
+      {!tecnico && novaOS && <NovaOS onClose={() => setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} />}
     </>
   );
 }

@@ -4,10 +4,15 @@ const legacy=readFileSync('src/legacy/ZiisTecApp.jsx','utf8');
 const sales=readFileSync('src/screens/v2/TechnicianSalesV2.jsx','utf8');
 const api=readFileSync('src/lib/fieldSalesApi.js','utf8');
 const migration=readFileSync('supabase/0072_field_sales_for_technicians.sql','utf8');
+const workOrderRls=readFileSync('supabase/0028_optimize_rls_auth_initplans.sql','utf8');
+const agendaMobile=readFileSync('src/lib/agendaMobile.js','utf8');
 
 const must=(ok,label)=>{if(!ok) throw new Error(`ROUND 3.8: ${label}`);};
 
-must(legacy.includes('tecnico: ["inicio", "ordens", "registrarMateriais", "vendaCampo"]'),'technician must not have Agenda permission');
+must(legacy.includes('tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo"]'),'technician Meu dia Agenda permission missing');
+must(legacy.includes('const ordensEmp = doTenant(ordens).filter((o) => permitido("todasOS") || o.responsavelId === usuarioAtual?.id);'),'technician Agenda/OS projection must remain assigned-only');
+must(agendaMobile.includes('order?.responsavelId === userId'),'technician Agenda client defense must remain assigned-only');
+must(workOrderRls.includes('assigned_to=(select auth.uid())'),'work_orders RLS must remain assigned-to authority');
 must(legacy.includes('{ id: "vendaCampo", label: "Produtos", icon: ShoppingCart }'),'technician Products nav missing');
 must(legacy.includes('podeAdministrarOS && os.status === "aguardando"'),'schedule must be owner-only');
 must(legacy.includes('if (podeAdministrarOS) acoes.push({ label: "Reagendar"'),'reschedule must be owner-only');
