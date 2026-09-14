@@ -33,6 +33,7 @@ import { resolverLogoEmpresaDB, persistirFotosOSDB } from "../lib/storageExtras"
 import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
+import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
 
 /* ================================================================ helpers */
 const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -590,6 +591,9 @@ export default function ZiisTec({ contexto }) {
   const [drawer, setDrawer] = useState(false);
   const [menuExpandido, setMenuExpandido] = useState(false);
   const menuTouchX = useRef(null);
+  const mobileEdgeSwipe = useRef(null);
+  const drawerSwipe = useRef(null);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [busca, setBusca] = useState(false);
   /* --- identidade e acesso --- */
   const [empresas, setEmpresas] = useState(() => (real ? [contexto.empresa] : EMPRESAS_SEED));
@@ -639,6 +643,54 @@ export default function ZiisTec({ contexto }) {
   const empresa = empresas.find((e) => e.id === empresaId) || EMPRESA_SEED;
   const assinatura = assinaturas.find((a) => a.empresaId === empresaId) || null;
   const permitido = (chave) => pode(papel, chave);
+
+  useEffect(() => {
+    if (!drawer) return undefined;
+    const fecharComEsc = (event) => { if (event.key === "Escape") setDrawer(false); };
+    window.addEventListener("keydown", fecharComEsc);
+    return () => window.removeEventListener("keydown", fecharComEsc);
+  }, [drawer]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) { setKeyboardOpen(false); return undefined; }
+    const atualizarTeclado = () => setKeyboardOpen(isKeyboardViewportOpen({ layoutHeight: window.innerHeight, visualHeight: viewport.height }));
+    atualizarTeclado();
+    viewport.addEventListener("resize", atualizarTeclado);
+    viewport.addEventListener("scroll", atualizarTeclado);
+    window.addEventListener("orientationchange", atualizarTeclado);
+    return () => {
+      viewport.removeEventListener("resize", atualizarTeclado);
+      viewport.removeEventListener("scroll", atualizarTeclado);
+      window.removeEventListener("orientationchange", atualizarTeclado);
+    };
+  }, []);
+
+  const alvoBloqueiaSwipe = (target) => Boolean(target?.closest?.("input, textarea, select, button, a, [role='slider'], [data-no-edge-swipe]"));
+  const iniciarEdgeSwipe = (event) => {
+    if (window.innerWidth >= 768 || drawer || alvoBloqueiaSwipe(event.target)) return;
+    const touch = event.touches?.[0];
+    mobileEdgeSwipe.current = touch ? beginEdgeSwipe({ x: touch.clientX, y: touch.clientY, viewportWidth: window.innerWidth }) : null;
+  };
+  const finalizarEdgeSwipe = (event) => {
+    const start = mobileEdgeSwipe.current;
+    mobileEdgeSwipe.current = null;
+    if (!start || window.innerWidth >= 768) return;
+    const touch = event.changedTouches?.[0];
+    if (touch && classifyHorizontalSwipe(start, { x: touch.clientX, y: touch.clientY }, "open") === "open") setDrawer(true);
+  };
+  const iniciarDrawerSwipe = (event) => {
+    if (window.innerWidth >= 768 || alvoBloqueiaSwipe(event.target)) return;
+    const touch = event.touches?.[0];
+    drawerSwipe.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+  };
+  const finalizarDrawerSwipe = (event) => {
+    const start = drawerSwipe.current;
+    drawerSwipe.current = null;
+    if (!start || window.innerWidth >= 768) return;
+    const touch = event.changedTouches?.[0];
+    if (touch && classifyHorizontalSwipe(start, { x: touch.clientX, y: touch.clientY }, "close") === "close") setDrawer(false);
+  };
 
   /* Fase 2: quando há sessão real, os módulos operacionais vêm do Supabase.
      RLS continua sendo a autoridade: o técnico recebe apenas o que pode ler. */
@@ -1082,7 +1134,7 @@ export default function ZiisTec({ contexto }) {
     { id: "financeiro", label: "Financeiro", icon: Wallet },
     { id: "config", label: "Configurações", icon: Settings },
   ];
-  const NAV_MOBILE = ["inicio", "agenda", "orcamentos", "ordens", "vendaCampo"];
+  const NAV_MOBILE = ["inicio", "agenda", "orcamentos", "ordens"];
 
   const Marca = ({ rail }) => (
     <div className={cx("flex items-center gap-3 px-5 h-[68px]", rail && !menuExpandido && "md:px-0 md:justify-center lg:px-5 lg:justify-start")}>
@@ -1169,7 +1221,7 @@ export default function ZiisTec({ contexto }) {
   );
 
   return (
-    <div className="min-h-[100dvh] overflow-x-hidden bg-slate-50 text-slate-800 font-sans antialiased">
+    <div className="min-h-[100dvh] overflow-x-hidden bg-slate-50 text-slate-800 font-sans antialiased" onTouchStart={iniciarEdgeSwipe} onTouchEnd={finalizarEdgeSwipe}>
       {estiloGlobal}
 
       <aside
@@ -1189,7 +1241,7 @@ export default function ZiisTec({ contexto }) {
         <Marca rail /><Nav rail /><Empresa rail />
       </aside>
 
-      <header className="zt-nao-imprime md:hidden sticky top-0 z-30 bg-slate-900 flex items-center justify-between px-4 h-14">
+      <header className="zt-nao-imprime md:hidden sticky top-0 z-30 bg-slate-900 flex items-center justify-between px-4 h-[calc(3.5rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]">
         <div className="flex items-center gap-2.5">
           <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-7 h-7 rounded-lg object-contain" />
           <span className="text-white font-semibold tracking-tight">ZiisTec</span>
@@ -1203,7 +1255,7 @@ export default function ZiisTec({ contexto }) {
       {drawer && (
         <div className="zt-nao-imprime md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menu">
           <div className="absolute inset-0 bg-slate-900/50" onClick={() => setDrawer(false)} />
-          <div className="absolute inset-y-0 left-0 w-72 bg-slate-900 flex flex-col">
+          <div className="absolute inset-y-0 left-0 w-[min(18rem,calc(100vw-3rem))] bg-slate-900 flex flex-col pt-[env(safe-area-inset-top)]" onTouchStart={iniciarDrawerSwipe} onTouchEnd={finalizarDrawerSwipe} style={{ touchAction: "pan-y" }}>
             <div className="flex items-center justify-between pr-2">
               <Marca />
               <button onClick={() => setDrawer(false)} aria-label="Fechar menu" className="min-h-11 min-w-11 p-2.5 text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><X className="w-5 h-5" /></button>
@@ -1221,7 +1273,7 @@ export default function ZiisTec({ contexto }) {
             Buscar cliente, OS, produto, serial...
           </button>
         </div>
-        <div className="max-w-[1180px] mx-auto px-4 sm:px-8 lg:px-10 py-6 sm:py-7 pb-28 md:pb-16">
+        <div className={cx("max-w-[1180px] mx-auto px-4 sm:px-8 lg:px-10 py-6 sm:py-7 md:pb-16", keyboardOpen ? "pb-8" : "pb-28")}>
           {!permitido(tela) ? <SemPermissao papel={papel} /> : <>
           {tela === "inicio" && <Inicio {...props} />}
           {tela === "agenda" && <Agenda {...props} />}
@@ -1238,7 +1290,7 @@ export default function ZiisTec({ contexto }) {
         </div>
       </main>
 
-      <nav className="zt-nao-imprime md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 flex pb-[env(safe-area-inset-bottom)]" aria-label="Navegação rápida">
+      <nav className={cx("zt-nao-imprime md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)]", keyboardOpen ? "hidden" : "flex")} aria-label="Navegação rápida">
         {NAV.filter((n) => NAV_MOBILE.includes(n.id) && permitido(n.id)).map((n) => {
           const ativo = tela === n.id;
           return (
