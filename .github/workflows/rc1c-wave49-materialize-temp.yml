@@ -28,6 +28,8 @@ jobs:
       - name: Preserve approved RC-1C materializers outside worktree
         run: |
           cp -R .rc1c-temp /tmp/rc1c-temp
+          mkdir -p /tmp/rc1c-wave49-payload
+          cp .rc1c-temp/rc1c_mobile_field_workflow.test.mjs /tmp/rc1c-wave49-payload/rc1c_mobile_field_workflow.test.mjs
           cp .rc1c-temp/rc1c_responsive_breakpoints.test.mjs /tmp/rc1c_responsive_breakpoints.test.mjs
 
       - name: Confirm immutable checkpoints
