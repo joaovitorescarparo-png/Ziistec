@@ -26,7 +26,11 @@ jobs:
           version: 2.116.0
 
       - name: Preserve materializers outside worktree
-        run: cp -R .rc1c-temp /tmp/rc1c-temp
+        run: |
+          cp -R .rc1c-temp /tmp/rc1c-temp
+          mkdir -p /tmp/rc1c-wave49-payload
+          cp .rc1c-temp/rc1c_mobile_field_workflow.test.mjs /tmp/rc1c-wave49-payload/rc1c_mobile_field_workflow.test.mjs
+          cp .rc1c-temp/rc1c_responsive_breakpoints.test.mjs /tmp/rc1c_responsive_breakpoints.test.mjs
 
       - name: Checkout exact official checkpoint and clear only setup-cli residue
         run: |
