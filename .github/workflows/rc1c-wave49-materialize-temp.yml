@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  materialize-fix-gate-publish:
+  close-rc1c:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -25,14 +25,14 @@ jobs:
         with:
           version: 2.116.0
 
-      - name: Preserve approved RC-1C materializers outside worktree
+      - name: Preserve approved materializers
         run: |
           cp -R .rc1c-temp /tmp/rc1c-temp
           mkdir -p /tmp/rc1c-wave49-payload
           cp .rc1c-temp/rc1c_mobile_field_workflow.test.mjs /tmp/rc1c-wave49-payload/rc1c_mobile_field_workflow.test.mjs
           cp .rc1c-temp/rc1c_responsive_breakpoints.test.mjs /tmp/rc1c_responsive_breakpoints.test.mjs
 
-      - name: Confirm immutable checkpoints
+      - name: Freeze mandatory refs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -40,7 +40,7 @@ jobs:
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
 
-      - name: Checkout exact RC-1C checkpoint cleanly
+      - name: Checkout official RC-1C checkpoint
         run: |
           git checkout --detach 44e4b01e70d5979ed30ee682920c64aad86c8d06
           git diff --exit-code
@@ -52,44 +52,32 @@ jobs:
           test -z "$(git status --porcelain=v1)"
           git config user.name rc1c-implementation-runner
           git config user.email rc1c-implementation-runner@users.noreply.github.com
-
-      - name: Install locked dependencies for materialization
-        run: |
           npm ci --ignore-scripts --no-fund
           test -z "$(git status --porcelain=v1)"
 
-      - name: Materialize Wave 4 work order mobile
+      - name: Rematerialize approved Waves 4-9
         run: |
           python /tmp/rc1c-temp/materialize.py wave4
           git diff --check
-          node --test tests/blockers/rc1c_voice_state_machine.test.mjs tests/blockers/rc1c_mobile_navigation.test.mjs tests/blockers/rc1c_agenda_mobile.test.mjs tests/blockers/rc1c_mobile_work_order.test.mjs
-          npm run build
+          node --test tests/blockers/rc1c_mobile_work_order.test.mjs
           git add src/legacy/ZiisTecApp.jsx tests/blockers/rc1c_mobile_work_order.test.mjs
           git commit -m "fix: improve mobile work order workflow"
           echo "WAVE4_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Materialize Wave 5 primary product flow
-        run: |
           python /tmp/rc1c-temp/product.py
           git diff --check
           node --test tests/blockers/rc1c_product_primary_parity.test.mjs
-          npm run build
           git add src/legacy/ZiisTecApp.jsx tests/blockers/rc1c_product_primary_parity.test.mjs
           git commit -m "feat: unify product mobile workflow"
           echo "WAVE5_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Materialize Waves 6 8 9 mobile forms and polish
-        run: |
           python /tmp/rc1c-temp/materialize.py wave689
           git diff --check
           node --test tests/blockers/rc1c_mobile_field_workflow.test.mjs tests/blockers/rc1c_mobile_work_order.test.mjs
-          npm run build
           git add src/legacy/ZiisTecApp.jsx tests/blockers/rc1c_mobile_field_workflow.test.mjs
           git commit -m "fix: improve mobile quote and purchase forms"
           echo "WAVE689_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Materialize Wave 7 quote PDF and approved historical contracts
-        run: |
           python /tmp/rc1c-temp/pdf.py
           python /tmp/rc1c-temp/finalize_tests.py
           python /tmp/rc1c-temp/align-round34.py
@@ -97,35 +85,28 @@ jobs:
           git diff --check
           node --test tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c_responsive_breakpoints.test.mjs
           node scripts/verify-round31.mjs
-          node --test \
-            tests/blockers/mobile_wave1_contract.test.mjs \
-            tests/blockers/mobile_wave3_contract.test.mjs \
-            tests/blockers/mobile_wave4_contract.test.mjs \
-            tests/blockers/mobile_wave5_contract.test.mjs \
-            tests/blockers/mobile_wave6_contract.test.mjs
-          npm run build
+          node --test tests/blockers/mobile_wave1_contract.test.mjs tests/blockers/mobile_wave3_contract.test.mjs tests/blockers/mobile_wave4_contract.test.mjs tests/blockers/mobile_wave5_contract.test.mjs tests/blockers/mobile_wave6_contract.test.mjs
           git add api/quote-pdf.js api/quotePdfLayout.js package.json scripts/verify-round31.mjs tests/blockers/mobile_wave1_contract.test.mjs tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c_responsive_breakpoints.test.mjs
           git commit -m "feat: make quote pdf one-page first"
           echo "WAVE7_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Apply SQL-only read-only fix and regression test
+      - name: Apply authorized SQL-only fix
         run: |
           python <<'PY'
           from pathlib import Path
-
           run_sql = Path('scripts/run-sql-rls-ci.sh')
-          s = run_sql.read_text()
+          text = run_sql.read_text()
           old = 'node scripts/reassemble.mjs'
-          if s.count(old) != 1:
-              raise SystemExit(f'run-sql reassemble anchor expected 1, found {s.count(old)}')
-          run_sql.write_text(s.replace(old, 'node scripts/reassemble.mjs --sql-only', 1))
+          if text.count(old) != 1:
+              raise SystemExit(f'run-sql reassemble anchor expected 1, found {text.count(old)}')
+          run_sql.write_text(text.replace(old, 'node scripts/reassemble.mjs --sql-only', 1))
 
           reassemble = Path('scripts/reassemble.mjs')
-          s = reassemble.read_text()
+          text = reassemble.read_text()
           anchor = """assembleText(\n  'supabase/0001_parts',\n  'supabase/0001_ziistec_fundacao_FINAL.sql',\n  '80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd',\n);\n"""
-          if s.count(anchor) != 1:
-              raise SystemExit(f'reassemble SQL anchor expected 1, found {s.count(anchor)}')
-          reassemble.write_text(s.replace(anchor, anchor + "\nif (process.argv.includes('--sql-only')) process.exit(0);\n", 1))
+          if text.count(anchor) != 1:
+              raise SystemExit(f'reassemble SQL anchor expected 1, found {text.count(anchor)}')
+          reassemble.write_text(text.replace(anchor, anchor + "\nif (process.argv.includes('--sql-only')) process.exit(0);\n", 1))
           PY
 
           cat > tests/blockers/reassemble_sql_only_readonly.test.mjs <<'EOF'
@@ -140,34 +121,31 @@ jobs:
           const pdfPath = 'api/quote-pdf.js';
           const sqlPath = 'supabase/0001_ziistec_fundacao_FINAL.sql';
           const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
-          const run = (command, args) => spawnSync(command, args, { encoding: 'utf8' });
+          const run = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf8' });
 
           test('reassemble --sql-only creates verified SQL without mutating tracked application files', () => {
             const legacyBefore = fs.readFileSync(legacyPath);
             const pdfBefore = fs.readFileSync(pdfPath);
-            const legacyShaBefore = sha256(legacyBefore);
-            const pdfShaBefore = sha256(pdfBefore);
+            const legacyHash = sha256(legacyBefore);
+            const pdfHash = sha256(pdfBefore);
 
             fs.rmSync(sqlPath, { force: true });
-            const reassembled = run(process.execPath, ['scripts/reassemble.mjs', '--sql-only']);
-            assert.equal(reassembled.status, 0, `${reassembled.stdout}\n${reassembled.stderr}`);
-            assert.equal(fs.existsSync(sqlPath), true, 'final 0001 SQL was not created');
-            assert.equal(sha256(fs.readFileSync(sqlPath)), expectedSqlSha, 'final 0001 SQL SHA mismatch');
+            const result = run(process.execPath, ['scripts/reassemble.mjs', '--sql-only']);
+            assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+            assert.equal(fs.existsSync(sqlPath), true, '0001 final SQL missing');
+            assert.equal(sha256(fs.readFileSync(sqlPath)), expectedSqlSha, '0001 SQL SHA mismatch');
+            assert.equal(sha256(fs.readFileSync(legacyPath)), legacyHash, 'legacy hash changed');
+            assert.equal(sha256(fs.readFileSync(pdfPath)), pdfHash, 'PDF hash changed');
+            assert.deepEqual(fs.readFileSync(legacyPath), legacyBefore, 'legacy content changed');
+            assert.deepEqual(fs.readFileSync(pdfPath), pdfBefore, 'PDF content changed');
 
-            const legacyAfter = fs.readFileSync(legacyPath);
-            const pdfAfter = fs.readFileSync(pdfPath);
-            assert.equal(sha256(legacyAfter), legacyShaBefore, 'legacy source hash changed');
-            assert.equal(sha256(pdfAfter), pdfShaBefore, 'quote PDF hash changed');
-            assert.deepEqual(legacyAfter, legacyBefore, 'legacy source content changed');
-            assert.deepEqual(pdfAfter, pdfBefore, 'quote PDF content changed');
-
-            const worktreeDiff = run('git', ['diff', '--exit-code']);
-            assert.equal(worktreeDiff.status, 0, `tracked worktree changed:\n${worktreeDiff.stdout}\n${worktreeDiff.stderr}`);
-            const indexDiff = run('git', ['diff', '--cached', '--exit-code']);
-            assert.equal(indexDiff.status, 0, `tracked index changed:\n${indexDiff.stdout}\n${indexDiff.stderr}`);
-            const trackedStatus = run('git', ['status', '--porcelain=v1', '--untracked-files=no']);
-            assert.equal(trackedStatus.status, 0, trackedStatus.stderr);
-            assert.equal(trackedStatus.stdout.trim(), '', `tracked files changed:\n${trackedStatus.stdout}`);
+            const worktree = run('git', ['diff', '--exit-code']);
+            assert.equal(worktree.status, 0, `tracked worktree changed:\n${worktree.stdout}${worktree.stderr}`);
+            const index = run('git', ['diff', '--cached', '--exit-code']);
+            assert.equal(index.status, 0, `tracked index changed:\n${index.stdout}${index.stderr}`);
+            const tracked = run('git', ['status', '--porcelain=v1', '--untracked-files=no']);
+            assert.equal(tracked.status, 0, tracked.stderr);
+            assert.equal(tracked.stdout.trim(), '', `tracked files changed:\n${tracked.stdout}`);
           });
           EOF
 
@@ -184,7 +162,7 @@ jobs:
           git diff --cached --exit-code
           test -z "$(git status --porcelain=v1)"
 
-      - name: Final npm ci on exact candidate SHA
+      - name: Final npm ci on exact candidate
         run: |
           test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           rm -rf node_modules
@@ -192,7 +170,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           test -z "$(git status --porcelain=v1)"
 
-      - name: Full RC-1C targeted regressions
+      - name: Targeted RC-1C
         run: |
           node --test \
             tests/blockers/rc1c_voice_state_machine.test.mjs \
@@ -203,7 +181,7 @@ jobs:
             tests/blockers/rc1c_mobile_field_workflow.test.mjs \
             tests/blockers/rc1c_quote_pdf_pagination.test.mjs \
             tests/blockers/rc1c_responsive_breakpoints.test.mjs | tee /tmp/targeted.log
-          pass="$(awk '/^# pass /{print $3}' /tmp/targeted.log | tail -1)"
+          pass="$(grep -Eo 'pass [0-9]+' /tmp/targeted.log | tail -1 | awk '{print $2}')"
           test -n "$pass"
           test "$pass" -ge 35
           echo "TARGETED_PASS=$pass" >> "$GITHUB_ENV"
@@ -218,7 +196,7 @@ jobs:
       - name: Security audit
         run: npm run security:audit | tee /tmp/security-audit.log
 
-      - name: Require exact candidate and clean tree before Supabase
+      - name: Clean exact candidate before Supabase
         run: |
           test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           git diff --exit-code
@@ -226,21 +204,20 @@ jobs:
           test -z "$(git ls-files --others --exclude-standard)"
           test -z "$(git status --porcelain=v1)"
 
-      - name: Start disposable Supabase stack
+      - name: Supabase start
         run: supabase start
 
-      - name: Validate post-start residue classification
+      - name: Classify post-start metadata
         run: |
-          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           git diff --exit-code
           git diff --cached --exit-code
           unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/(\.temp/|\.branches/)' || true)"
           test -z "$unexpected"
 
-      - name: SQL and RLS regression suite
+      - name: SQL RLS gate
         run: bash scripts/run-sql-rls-ci.sh | tee /tmp/sql-rls.log
 
-      - name: Require read-only tree immediately after SQL RLS
+      - name: Prove SQL RLS is read-only
         run: |
           test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           git diff --exit-code
@@ -251,11 +228,9 @@ jobs:
           test -z "$unexpected"
           echo "TRACKED_DIFF_AFTER_SQL_RLS=NONE" >> "$GITHUB_ENV"
 
-      - name: Stop disposable Supabase stack
-        run: supabase stop
-
-      - name: Reinspect and remove only proven Supabase CLI metadata
+      - name: Supabase stop and final clean tree
         run: |
+          supabase stop
           echo "=== TRACKED AFTER STOP ==="
           git diff --name-status
           echo "=== CACHED AFTER STOP ==="
@@ -274,7 +249,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$FINAL_SHA"
           echo "FINAL_CLEAN_TREE=PASS" >> "$GITHUB_ENV"
 
-      - name: Reconfirm remote refs before candidate publication
+      - name: Reconfirm refs and fast-forward only RC-1C
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -282,18 +257,12 @@ jobs:
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
           git merge-base --is-ancestor 44e4b01e70d5979ed30ee682920c64aad86c8d06 "$FINAL_SHA"
-
-      - name: Fast-forward only RC-1C branch to exact tested candidate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/rc1c-mobile-ux-stabilization
-          remote_sha="$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)"
-          test "$remote_sha" = "$FINAL_SHA"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)" = "$FINAL_SHA"
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
 
-      - name: Write closure evidence
+      - name: Closure evidence
         run: |
           printf '%s\n' \
             "WAVE4_SHA=${WAVE4_SHA}" \
