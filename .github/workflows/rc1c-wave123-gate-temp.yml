@@ -1,0 +1,38 @@
+name: RC1C Wave123 Gate Temp
+
+on:
+  push:
+    branches: [rc1c-wave123-gate-temp]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+      - name: Checkout exact candidate head without temp workflow
+        run: |
+          git checkout --detach 44e4b01e70d5979ed30ee682920c64aad86c8d06
+          test "$(git rev-parse HEAD)" = "44e4b01e70d5979ed30ee682920c64aad86c8d06"
+          test -z "$(git status --porcelain)"
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-fund
+      - name: Confirm clean after install
+        run: test -z "$(git status --porcelain)"
+      - name: Targeted waves 1 2 3
+        run: node --test tests/blockers/rc1c_voice_state_machine.test.mjs tests/blockers/rc1c_mobile_navigation.test.mjs tests/blockers/rc1c_agenda_mobile.test.mjs
+      - name: Verify V2
+        run: npm run verify:v2
+      - name: Reproducible build
+        run: npm run verify:reproducible-build
+      - name: Confirm clean after gates
+        run: test -z "$(git status --porcelain)"
