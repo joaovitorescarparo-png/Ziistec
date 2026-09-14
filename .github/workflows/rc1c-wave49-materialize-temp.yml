@@ -183,7 +183,7 @@ jobs:
           git ls-files --others --exclude-standard
           git diff --exit-code
           git diff --cached --exit-code
-          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/\.temp/' || true)"
+          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/(\.temp/|\.branches/)' || true)"
           test -z "$unexpected"
 
       - name: SQL and RLS regression suite
@@ -201,7 +201,7 @@ jobs:
           git ls-files --others --exclude-standard
           git diff --exit-code
           git diff --cached --exit-code
-          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/\.temp/' || true)"
+          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/(\.temp/|\.branches/)' || true)"
           test -z "$unexpected"
 
       - name: Stop disposable Supabase stack
@@ -219,17 +219,18 @@ jobs:
           git ls-files --others --exclude-standard
           git diff --exit-code
           git diff --cached --exit-code
-          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/\.temp/' || true)"
+          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/(\.temp/|\.branches/)' || true)"
           test -z "$unexpected"
-          if test -n "$(git ls-files --others --exclude-standard)"; then
-            test -d supabase/.temp
-            echo "RC1C_DIRTY_ROOT_CAUSE=supabase/.temp/ created by Supabase CLI lifecycle; untracked only"
-            echo "RC1C_CLEANUP=supabase/.temp/"
+          if test -d supabase/.temp; then
+            echo "RC1C_EPHEMERAL_PATH=supabase/.temp/"
             rm -rf supabase/.temp
-          else
-            echo "RC1C_DIRTY_ROOT_CAUSE=NONE"
-            echo "RC1C_CLEANUP=NONE"
           fi
+          if test -d supabase/.branches; then
+            echo "RC1C_EPHEMERAL_PATH=supabase/.branches/"
+            rm -rf supabase/.branches
+          fi
+          echo "RC1C_DIRTY_ROOT_CAUSE=Supabase CLI lifecycle metadata under supabase/.temp/ and supabase/.branches/; untracked only"
+          echo "RC1C_CLEANUP=only proven supabase/.temp/ and supabase/.branches/"
           git diff --exit-code
           git diff --cached --exit-code
           test -z "$(git ls-files --others --exclude-standard)"
