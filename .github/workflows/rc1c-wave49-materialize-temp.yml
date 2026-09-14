@@ -40,14 +40,29 @@ jobs:
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
 
-      - name: Checkout exact RC-1C checkpoint cleanly
+      - name: Checkout exact RC-1C checkpoint and classify runner residue
         run: |
           git checkout --detach 44e4b01e70d5979ed30ee682920c64aad86c8d06
-          echo "RC1C_RUNNER_STATUS_BEFORE_CLEAN"
+          echo "=== INITIAL RUNNER GIT STATUS ==="
           git status --porcelain=v1
-          git reset --hard 44e4b01e70d5979ed30ee682920c64aad86c8d06
-          git clean -fdx
-          test -z "$(git status --porcelain)"
+          echo "=== INITIAL RUNNER TRACKED DIFF ==="
+          git diff --name-status
+          echo "=== INITIAL RUNNER CACHED DIFF ==="
+          git diff --cached --name-status
+          echo "=== INITIAL RUNNER UNTRACKED ==="
+          git ls-files --others --exclude-standard
+          test -z "$(git diff --name-only)"
+          test -z "$(git diff --cached --name-only)"
+          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/\.temp/' || true)"
+          test -z "$unexpected"
+          if test -d supabase/.temp; then
+            echo "RC1C_INITIAL_EPHEMERAL_PATH=supabase/.temp/"
+            rm -rf supabase/.temp
+          fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          test -z "$(git status --porcelain=v1)"
           git config user.name rc1c-implementation-runner
           git config user.email rc1c-implementation-runner@users.noreply.github.com
 
@@ -138,18 +153,89 @@ jobs:
       - name: Security audit
         run: npm run security:audit
 
+      - name: Snapshot A immediately before Supabase start
+        run: |
+          echo "=== A BEFORE SUPABASE START: GIT STATUS ==="
+          git status --porcelain=v1
+          echo "=== A BEFORE SUPABASE START: TRACKED DIFF ==="
+          git diff --name-status
+          echo "=== A BEFORE SUPABASE START: CACHED DIFF ==="
+          git diff --cached --name-status
+          echo "=== A BEFORE SUPABASE START: UNTRACKED ==="
+          git ls-files --others --exclude-standard
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          test -z "$(git status --porcelain=v1)"
+
       - name: Start disposable Supabase stack
         run: supabase start
+
+      - name: Snapshot B immediately after Supabase start
+        run: |
+          echo "=== B AFTER SUPABASE START: GIT STATUS ==="
+          git status --porcelain=v1
+          echo "=== B AFTER SUPABASE START: TRACKED DIFF ==="
+          git diff --name-status
+          echo "=== B AFTER SUPABASE START: CACHED DIFF ==="
+          git diff --cached --name-status
+          echo "=== B AFTER SUPABASE START: UNTRACKED ==="
+          git ls-files --others --exclude-standard
+          git diff --exit-code
+          git diff --cached --exit-code
+          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/\.temp/' || true)"
+          test -z "$unexpected"
 
       - name: SQL and RLS regression suite
         run: bash scripts/run-sql-rls-ci.sh
 
+      - name: Snapshot C immediately after SQL RLS
+        run: |
+          echo "=== C AFTER SQL RLS: GIT STATUS ==="
+          git status --porcelain=v1
+          echo "=== C AFTER SQL RLS: TRACKED DIFF ==="
+          git diff --name-status
+          echo "=== C AFTER SQL RLS: CACHED DIFF ==="
+          git diff --cached --name-status
+          echo "=== C AFTER SQL RLS: UNTRACKED ==="
+          git ls-files --others --exclude-standard
+          git diff --exit-code
+          git diff --cached --exit-code
+          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/\.temp/' || true)"
+          test -z "$unexpected"
+
       - name: Stop disposable Supabase stack
-        if: always()
         run: supabase stop --no-backup
 
-      - name: Confirm final tree clean
-        run: test -z "$(git status --porcelain)"
+      - name: Snapshot D after stop classify and clean only proven Supabase residue
+        run: |
+          echo "=== D AFTER SUPABASE STOP: GIT STATUS ==="
+          git status --porcelain=v1
+          echo "=== D AFTER SUPABASE STOP: TRACKED DIFF ==="
+          git diff --name-status
+          echo "=== D AFTER SUPABASE STOP: CACHED DIFF ==="
+          git diff --cached --name-status
+          echo "=== D AFTER SUPABASE STOP: UNTRACKED ==="
+          git ls-files --others --exclude-standard
+          git diff --exit-code
+          git diff --cached --exit-code
+          unexpected="$(git ls-files --others --exclude-standard | grep -Ev '^supabase/\.temp/' || true)"
+          test -z "$unexpected"
+          if test -n "$(git ls-files --others --exclude-standard)"; then
+            test -d supabase/.temp
+            echo "RC1C_DIRTY_ROOT_CAUSE=supabase/.temp/ created by Supabase CLI lifecycle; untracked only"
+            echo "RC1C_CLEANUP=supabase/.temp/"
+            rm -rf supabase/.temp
+          else
+            echo "RC1C_DIRTY_ROOT_CAUSE=NONE"
+            echo "RC1C_CLEANUP=NONE"
+          fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          test -z "$(git status --porcelain=v1)"
+          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
+          echo "RC1C_FINAL_CLEAN_TREE=PASS"
 
       - name: Reconfirm protected refs before publishing functional chain
         env:
