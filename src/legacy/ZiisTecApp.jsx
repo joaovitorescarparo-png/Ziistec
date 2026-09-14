@@ -279,7 +279,7 @@ function Btn({ children, onClick, variant = "primary", size = "md", icon: Icon, 
     danger: "text-rose-700 hover:bg-rose-50",
     dangerSolid: "bg-rose-600 text-white hover:bg-rose-700",
   };
-  const sizes = { sm: "text-sm px-3 py-2", md: "text-sm px-4 py-3", lg: "text-base px-5 py-3.5" };
+  const sizes = { sm: "min-h-11 text-sm px-3 py-2", md: "min-h-11 text-sm px-4 py-3", lg: "min-h-12 text-base px-5 py-3.5" };
   return (
     <button type={type} onClick={onClick} disabled={disabled} title={title} aria-label={ariaLabel || title}
       className={cx(base, variants[variant], sizes[size], className)}>
@@ -379,9 +379,9 @@ const Select = ({ children, ...p }) => <select {...p} className={cx(inputCls, "a
 function Modal({ open, onClose, title, sub, children, footer, wide }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6 pt-[env(safe-area-inset-top)]" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
-      <div className={cx("relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[92dvh] sm:max-h-[88dvh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
+      <div className={cx("relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[calc(100dvh-env(safe-area-inset-top))] sm:max-h-[88dvh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
         <div className="flex items-start justify-between gap-4 px-5 sm:px-7 pt-6 pb-4">
           <div>
             <h3 className="text-lg font-semibold text-slate-900 tracking-tight">{title}</h3>
@@ -389,8 +389,8 @@ function Modal({ open, onClose, title, sub, children, footer, wide }) {
           </div>
           <button onClick={onClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
         </div>
-        <div className="overflow-y-auto px-5 sm:px-7 pb-6 space-y-5">{children}</div>
-        {footer && <div className="px-5 sm:px-7 py-4 border-t border-slate-100 flex gap-3 justify-end">{footer}</div>}
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-7 pb-6 space-y-5">{children}</div>
+        {footer && <div className="shrink-0 sticky bottom-0 bg-white px-5 sm:px-7 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 flex flex-wrap gap-3 justify-end">{footer}</div>}
       </div>
     </div>
   );
@@ -3387,6 +3387,8 @@ function OSDetalhe(p) {
     if (podeAdministrarOS) acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
   }
   if (os.status === "andamento") acoes.push({ label: "Finalizar atendimento", icon: Check, fn: () => setFinalizando(true), principal: true });
+  const acaoPrincipal = acoes.find((acao) => acao.principal);
+  const acoesSecundarias = acoes.filter((acao) => !acao.principal);
 
   return (
     <>
@@ -3399,17 +3401,29 @@ function OSDetalhe(p) {
           <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{os.numero}</h1>
           <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {acoes.map((a) => <Btn key={a.label} size="sm" icon={a.icon} variant={a.principal ? "primary" : "soft"} onClick={a.fn}>{a.label}</Btn>)}
-          {papel === "proprietario" && <Btn size="sm" variant="danger" icon={Trash2} onClick={() => excluirRegistro("os", os.id, os.numero, () => setOsAberta(null))}>Excluir OS</Btn>}
-          {podeAdministrarOS && os.status !== "concluida" && os.status !== "cancelada" && (
-            <Btn size="sm" variant="danger" onClick={() => pedirConfirmacao({
-              titulo: `Cancelar a ${os.numero}?`, texto: "A ordem sai da agenda e da lista de trabalhos em aberto. O histórico continua disponível.",
-              confirmar: "Cancelar ordem", acao: () => mudarStatusOS(os, "cancelada"),
-            })}>Cancelar OS</Btn>
+        <div className="flex items-center gap-2">
+          {acaoPrincipal && <Btn icon={acaoPrincipal.icon} onClick={acaoPrincipal.fn}>{acaoPrincipal.label}</Btn>}
+          {(acoesSecundarias.length > 0 || papel === "proprietario" || (podeAdministrarOS && os.status !== "concluida" && os.status !== "cancelada")) && (
+            <details className="relative group" data-no-edge-swipe>
+              <summary className={cx("list-none min-h-11 cursor-pointer inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-medium bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50", ring)}>Mais<ChevronDown className="w-4 h-4" /></summary>
+              <div className="absolute right-0 z-20 mt-2 w-56 rounded-2xl bg-white p-2 shadow-xl ring-1 ring-slate-200">
+                {acoesSecundarias.map((acao) => <button key={acao.label} type="button" onClick={acao.fn} className={cx("w-full min-h-11 rounded-xl px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50", ring)}>{acao.label}</button>)}
+                {papel === "proprietario" && <button type="button" onClick={() => excluirRegistro("os", os.id, os.numero, () => setOsAberta(null))} className={cx("w-full min-h-11 rounded-xl px-3 py-2.5 text-left text-sm text-rose-700 hover:bg-rose-50", ring)}>Excluir OS</button>}
+                {podeAdministrarOS && os.status !== "concluida" && os.status !== "cancelada" && <button type="button" onClick={() => pedirConfirmacao({ titulo: `Cancelar a ${os.numero}?`, texto: "A ordem sai da agenda e da lista de trabalhos em aberto. O histórico continua disponível.", confirmar: "Cancelar ordem", acao: () => mudarStatusOS(os, "cancelada") })} className={cx("w-full min-h-11 rounded-xl px-3 py-2.5 text-left text-sm text-rose-700 hover:bg-rose-50", ring)}>Cancelar OS</button>}
+              </div>
+            </details>
           )}
         </div>
       </div>
+
+      <Panel className="p-4 sm:p-5 mb-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Cliente</p><p className="mt-1 font-medium text-slate-900 truncate">{c?.fantasia || c?.nome || nomeCliente(os.clienteId)}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Data e horário</p><p className="mt-1 text-sm text-slate-700">{os.data ? `${dataBR(os.data)}${os.hora ? ` · ${os.hora}` : ""}` : "Sem agendamento"}</p></div>
+          <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Endereço</p><div className="mt-1"><Endereco valor={os.local} local={os.localServico} compacto /></div></div>
+          <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Serviço</p><p className="mt-1 text-sm text-slate-700 line-clamp-2">{resumoOS(os)}</p></div>
+        </div>
+      </Panel>
 
       <Panel className="px-5 py-4 mb-6">
         <Trilha etapas={[
