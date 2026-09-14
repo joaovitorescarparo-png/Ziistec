@@ -1,0 +1,73 @@
+name: RC1C Final Exact SHA CodeQL Temp
+
+on:
+  push:
+    branches: [rc1c-codeql-final-temp]
+
+permissions:
+  contents: read
+  security-events: write
+  packages: read
+
+jobs:
+  analyze-exact-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5f38784bc9e0754fad0365a1a9f857089af07891
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Prove exact candidate checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "5f38784bc9e0754fad0365a1a9f857089af07891"
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain=v1)"
+          echo "CODEQL_EXACT_SHA=$(git rev-parse HEAD)"
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-fund
+
+      - name: Build exact candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "5f38784bc9e0754fad0365a1a9f857089af07891"
+          npm run build
+
+      - name: Analyze exact candidate
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:javascript-typescript/rc1c-final-exact
+          output: codeql-results
+
+      - name: Summarize findings
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "5f38784bc9e0754fad0365a1a9f857089af07891"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const dir = path.resolve('codeql-results');
+          if (!fs.existsSync(dir)) {
+            console.log('RC1C_CODEQL_SUMMARY: no SARIF directory found');
+            process.exit(0);
+          }
+          const files = fs.readdirSync(dir).filter((name) => name.endsWith('.sarif'));
+          let count = 0;
+          for (const file of files) {
+            const sarif = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+            for (const run of sarif.runs || []) count += (run.results || []).length;
+          }
+          console.log(`RC1C_CODEQL_SUMMARY: ${count} findings in SARIF`);
+          NODE
