@@ -1,0 +1,30 @@
+name: RC1C Source Snapshot Temp
+
+on:
+  push:
+    branches: [rc1c-source-snapshot-temp]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify exact candidate snapshot
+        run: |
+          test "$(git rev-parse HEAD^)" = "8483ffd84c1a7f513b8a54873251ce77d8e3a441" || true
+          git diff --check
+      - name: Package source
+        run: tar --exclude=.git -czf rc1c-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc1c-source-snapshot
+          path: rc1c-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
