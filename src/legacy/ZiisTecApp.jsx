@@ -12,6 +12,7 @@ import {
   TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building,
 } from "lucide-react";
 import GlobalSearchModal from "../components/GlobalSearchModal";
+import BarcodeScanner from "../components/BarcodeScanner";
 import { mensagemErro } from "../lib/supabase";
 import {
   recarregarSeguro, salvarClienteDB, salvarServicoDB, salvarProdutoDB, salvarOrcamentoDB,
@@ -29,7 +30,7 @@ import {
 } from "../lib/runtimeApi";
 import { cancelarAssinaturaDB, reativarAssinaturaDB } from "../lib/subscriptionApi";
 import { chamarIAReal } from "../lib/aiApi";
-import { resolverLogoEmpresaDB, persistirFotosOSDB } from "../lib/storageExtras";
+import { resolverLogoEmpresaDB, persistirFotosOSDB, resolverImagemProdutoDB, salvarImagemProdutoDB, removerImagemProdutoDB } from "../lib/storageExtras";
 import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
@@ -893,8 +894,11 @@ export default function ZiisTec({ contexto }) {
       try { const salvo = await salvarProdutoDB(p, empresaId); setProdutos((l) => p.id ? l.map((x)=>x.id===salvo.id?salvo:x) : [salvo,...l]); aviso(p.id ? "Produto atualizado" : "Produto cadastrado"); return salvo.id; }
       catch (e) { aviso(mensagemErro(e)); return null; }
     }
-    setProdutos((l) => (p.id ? l.map((x) => (x.id === p.id ? p : x)) : [...l, { ...p, id: uid(), empresaId }]));
+    let id = p.id;
+    if (p.id) setProdutos((l) => l.map((x) => (x.id === p.id ? p : x)));
+    else { id = uid(); setProdutos((l) => [...l, { ...p, id, empresaId }]); }
     aviso(p.id ? "Produto atualizado" : "Produto cadastrado");
+    return id;
   };
 
   /* --------- orçamento --------- */
@@ -1118,7 +1122,7 @@ export default function ZiisTec({ contexto }) {
     clienteAberto, setClienteAberto, orcamentoAberto, setOrcamentoAberto, osAberta, setOsAberta,
     compraAberta, setCompraAberta, setTela, abrirOS, abrirOrc, abrirCliente, abrirCompra,
     garantiaAberta, setGarantiaAberta, abrirGarantia, real,
-    pedirConfirmacao: setConfirmar, excluirRegistro,
+    pedirConfirmacao: setConfirmar, excluirRegistro, contexto,
   };
 
   const NAV = [
@@ -2039,15 +2043,67 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
 }
 
 /* ==================================================== Catálogo (serviços + produtos) */
-function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirRegistro, papel }) {
+function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirRegistro, papel, contexto, real, empresaId, aviso }) {
   const [aba, setAba] = useState("servicos");
   const [busca, setBusca] = useState("");
   const [formS, setFormS] = useState(null);
   const [formP, setFormP] = useState(null);
   const [verInativos, setVerInativos] = useState(false);
+  const [scannerProduto, setScannerProduto] = useState(false);
+  const [imagemArquivo, setImagemArquivo] = useState(null);
+  const [imagemPreview, setImagemPreview] = useState(null);
+  const [removerImagem, setRemoverImagem] = useState(false);
+  const [salvandoProduto, setSalvandoProduto] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = null;
+    if (imagemArquivo) {
+      objectUrl = URL.createObjectURL(imagemArquivo);
+      setImagemPreview(objectUrl);
+    } else if (formP?.imagemPath && !removerImagem) {
+      resolverImagemProdutoDB(formP.imagemPath).then((url) => { if (active) setImagemPreview(url); }).catch(() => { if (active) setImagemPreview(null); });
+    } else setImagemPreview(null);
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [imagemArquivo, formP?.imagemPath, removerImagem]);
+
+  const abrirFormProduto = (produto) => {
+    setImagemArquivo(null); setImagemPreview(null); setRemoverImagem(false); setScannerProduto(false);
+    setFormP(produto ? { ...produto, margemPct: produto.custo > 0 ? acrescimoSobreCusto(produto.custo, produto.preco) : "" } : { unidade: "unidade", ativo: true, preco: 0, custo: 0, margemPct: "", garantiaMeses: 0, sku: "", codigoBarras: "", descricao: "", imagemPath: null, vendaHabilitada: true, controlaEstoque: false, estoque: 0, estoqueMinimo: 0 });
+  };
+
+  const escolherImagemProduto = (file) => {
+    if (!file) return;
+    const nome = String(file.name || "").toLowerCase();
+    const tipo = String(file.type || "").toLowerCase();
+    if (tipo.includes("heic") || tipo.includes("heif") || /\.hei[cf]$/.test(nome)) { aviso("HEIC/HEIF ainda não é processado com segurança. No iPhone, escolha ou exporte a foto em JPG, PNG ou WEBP."); return; }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(tipo)) { aviso("Use uma foto JPG, PNG ou WEBP."); return; }
+    if (file.size > 2 * 1024 * 1024) { aviso("A foto do produto deve ter no máximo 2 MB."); return; }
+    setImagemArquivo(file); setRemoverImagem(false);
+  };
+
+  const salvarProdutoCompleto = async () => {
+    if (!formP?.nome || salvandoProduto) return;
+    const codigoBarras = String(formP.codigoBarras || "").replace(/\D/g, "");
+    if (codigoBarras && !/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(codigoBarras)) { aviso("Código de barras deve ter 8, 12, 13 ou 14 dígitos."); return; }
+    setSalvandoProduto(true);
+    try {
+      const payload = { ...formP, codigoBarras, imagemPath: removerImagem && !imagemArquivo ? null : formP.imagemPath };
+      const id = await salvarProduto(payload);
+      if (!id) return;
+      if (real && imagemArquivo) {
+        const uploaded = await salvarImagemProdutoDB(id, imagemArquivo, empresaId, formP.imagemPath || null);
+        await salvarProduto({ ...payload, id, imagemPath: uploaded.path });
+      } else if (real && removerImagem && formP.imagemPath) {
+        await removerImagemProdutoDB(id, empresaId, formP.imagemPath);
+      }
+      setFormP(null); setImagemArquivo(null); setImagemPreview(null); setRemoverImagem(false);
+    } catch (error) { aviso(mensagemErro(error)); }
+    finally { setSalvandoProduto(false); }
+  };
 
   const fs = servicos.filter((s) => semAcento(s.nome + s.categoria).includes(semAcento(busca)));
-  const fp = produtos.filter((p) => semAcento(`${p.nome} ${p.marca} ${p.modelo}`).includes(semAcento(busca)));
+  const fp = produtos.filter((p) => semAcento(`${p.nome} ${p.marca} ${p.modelo} ${p.sku || ""} ${p.codigoBarras || ""}`).includes(semAcento(busca)));
   const ativosS = fs.filter((s) => s.ativo), inativosS = fs.filter((s) => !s.ativo);
   const ativosP = fp.filter((p) => p.ativo), inativosP = fp.filter((p) => !p.ativo);
   const categorias = [...new Set(ativosS.map((s) => s.categoria))];
@@ -2073,12 +2129,12 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
     </Linha>
   );
   const LinhaProduto = ({ p, apagado }) => (
-    <Linha onClick={() => setFormP({ ...p, margemPct: p.custo > 0 ? acrescimoSobreCusto(p.custo, p.preco) : "" })} className={apagado ? "opacity-55" : ""}>
+    <Linha onClick={() => abrirFormProduto(p)} className={apagado ? "opacity-55" : ""}>
       <div className="flex items-center gap-4">
         <div className="min-w-0 flex-1">
           <p className="font-medium text-slate-900 truncate">{p.nome}</p>
           <p className="text-[13px] text-slate-500 truncate">
-            {[p.marca, p.modelo].filter(Boolean).join(" ")}{p.garantiaMeses > 0 ? ` · garantia de fábrica ${p.garantiaMeses} meses` : ""}
+            {[p.marca, p.modelo].filter(Boolean).join(" ")}{p.sku ? ` · SKU ${p.sku}` : ""}{p.garantiaMeses > 0 ? ` · garantia ${p.garantiaMeses} meses` : ""}
           </p>
         </div>
         <div className="text-right shrink-0">
@@ -2098,10 +2154,10 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
       <PageHead title="Serviços e produtos" sub="O que você vende, quanto cobra e como cobra."
         action={aba === "servicos"
           ? <Btn icon={Plus} onClick={() => setFormS({ unidade: "unidade", ativo: true, preco: 0, custo: 0, categoria: "", garantiaDias: 0, retornoDias: 0 })}>Novo serviço</Btn>
-          : <Btn icon={Plus} onClick={() => setFormP({ unidade: "unidade", ativo: true, preco: 0, custo: 0, margemPct: "", garantiaMeses: 0 })}>Novo produto</Btn>} />
+          : <Btn icon={Plus} onClick={() => abrirFormProduto(null)}>Novo produto</Btn>} />
 
       <Tabs valor={aba} onChange={setAba} opcoes={[{ id: "servicos", label: `Serviços · ${ativosS.length}` }, { id: "produtos", label: `Produtos e materiais · ${ativosP.length}` }]} className="mb-5" />
-      <div className="mb-6 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder={aba === "servicos" ? "Buscar serviço" : "Buscar produto, marca ou modelo"} /></div>
+      <div className="mb-6 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder={aba === "servicos" ? "Buscar serviço" : "Buscar produto, marca, modelo, SKU ou código"} /></div>
 
       {aba === "servicos" ? (
         <div className="space-y-7">
@@ -2210,11 +2266,33 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
       {formP && (
         <Modal open onClose={() => setFormP(null)} title={formP.id ? "Editar produto" : "Novo produto ou material"} wide
           footer={<>{formP.id && papel === "proprietario" && <Btn variant="danger" icon={Trash2} onClick={() => excluirRegistro("produto", formP.id, formP.nome, () => setFormP(null))}>Excluir</Btn>}<span className="flex-1" /><Btn variant="ghost" onClick={() => setFormP(null)}>Cancelar</Btn>
-            <Btn onClick={() => { salvarProduto(formP); setFormP(null); }} disabled={!formP.nome}>Salvar produto</Btn></>}>
+            <Btn onClick={salvarProdutoCompleto} disabled={!formP.nome || salvandoProduto}>{salvandoProduto ? "Salvando…" : "Salvar produto"}</Btn></>}>
+          <div className="rounded-2xl ring-1 ring-slate-200 p-4">
+            <div className="flex flex-col min-[430px]:flex-row gap-4">
+              <div className="w-full min-[430px]:w-32 h-32 rounded-2xl bg-slate-50 ring-1 ring-slate-200 overflow-hidden flex items-center justify-center shrink-0">
+                {imagemPreview && !removerImagem ? <img src={imagemPreview} alt="Foto do produto" className="w-full h-full object-cover" /> : <div className="text-center text-slate-400"><Camera className="w-7 h-7 mx-auto" /><p className="text-[11px] mt-2">Sem foto</p></div>}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-900">Foto do produto</p>
+                <p className="text-[12.5px] text-slate-500 mt-1">JPG, PNG ou WEBP · até 2 MB. HEIC/HEIF precisa ser convertido para um formato compatível.</p>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <label className={cx("min-h-11 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3.5 py-2.5 text-sm font-medium text-white cursor-pointer", ring)}><Camera className="w-4 h-4" />Tirar foto<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="hidden" onChange={(e) => { escolherImagemProduto(e.target.files?.[0]); e.target.value = ""; }} /></label>
+                  <label className={cx("min-h-11 inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200 cursor-pointer", ring)}>Galeria<input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { escolherImagemProduto(e.target.files?.[0]); e.target.value = ""; }} /></label>
+                  {(imagemPreview || formP.imagemPath) && <button type="button" onClick={() => { setImagemArquivo(null); setImagemPreview(null); setRemoverImagem(true); }} className={cx("min-h-11 px-3.5 py-2.5 rounded-xl text-sm font-medium text-rose-700 hover:bg-rose-50", ring)}>Remover foto</button>}
+                </div>
+              </div>
+            </div>
+          </div>
           <Field label="Nome do produto"><Input value={formP.nome || ""} onChange={(e) => setFormP({ ...formP, nome: e.target.value })} placeholder="Ex.: Fechadura digital biométrica" /></Field>
           <div className="grid sm:grid-cols-2 gap-5">
             <Field label="Marca"><Input value={formP.marca || ""} onChange={(e) => setFormP({ ...formP, marca: e.target.value })} placeholder="Ex.: Intelbras" /></Field>
             <Field label="Modelo ou referência"><Input value={formP.modelo || ""} onChange={(e) => setFormP({ ...formP, modelo: e.target.value })} placeholder="Ex.: FR 320" /></Field>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="SKU" hint="Código interno opcional."><Input value={formP.sku || ""} onChange={(e) => setFormP({ ...formP, sku: e.target.value })} placeholder="Ex.: INT-FR320" /></Field>
+            <Field label="Código de barras" hint="EAN, UPC ou GTIN. Pode digitar manualmente.">
+              <div className="flex gap-2"><Input inputMode="numeric" value={formP.codigoBarras || ""} onChange={(e) => setFormP({ ...formP, codigoBarras: e.target.value.replace(/\D/g, "") })} placeholder="789…" /><button type="button" onClick={() => setScannerProduto(true)} className={cx("min-h-11 shrink-0 rounded-xl px-3.5 ring-1 ring-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50", ring)}>Escanear</button></div>
+            </Field>
           </div>
           {/* CALCULADORA DE MARGEM SOBRE CUSTO — ferramenta local; só custo e preço são persistidos. */}
           <div className="grid sm:grid-cols-3 gap-5">
@@ -2256,6 +2334,14 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
               </Select>
             </Field>
           </div>
+          <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="flex items-center gap-3 min-h-11"><input type="checkbox" checked={Boolean(formP.controlaEstoque)} onChange={(e) => setFormP({ ...formP, controlaEstoque: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" /><span className="text-[14px] text-slate-700">Controlar estoque deste produto</span></label>
+              {formP.id && contexto?.abrirRecursoV2 && <Btn size="sm" variant="soft" onClick={() => contexto.abrirRecursoV2("produtos")}>Estoque e movimentações</Btn>}
+            </div>
+            {formP.controlaEstoque && <div className="grid min-[430px]:grid-cols-2 gap-4"><Field label="Estoque atual"><Input type="number" value={formP.estoque || 0} disabled className="bg-slate-50" /></Field><Field label="Estoque mínimo"><Input type="number" inputMode="numeric" min="0" value={formP.estoqueMinimo || 0} onChange={(e) => setFormP({ ...formP, estoqueMinimo: Math.max(0, Number(e.target.value)) })} /></Field></div>}
+            <label className="flex items-center gap-3 min-h-11"><input type="checkbox" checked={formP.vendaHabilitada !== false} onChange={(e) => setFormP({ ...formP, vendaHabilitada: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" /><span className="text-[14px] text-slate-700">Liberado para venda em campo</span></label>
+          </div>
           <Field label="Fornecedor" hint="Opcional."><Input value={formP.fornecedor || ""} onChange={(e) => setFormP({ ...formP, fornecedor: e.target.value })} /></Field>
           <Field label="Descrição" hint="Opcional."><Textarea rows={2} value={formP.descricao || ""} onChange={(e) => setFormP({ ...formP, descricao: e.target.value })} /></Field>
           <label className="flex items-center gap-3 py-1">
@@ -2264,6 +2350,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
           </label>
         </Modal>
       )}
+      {scannerProduto && <BarcodeScanner mode="barcode" onDetected={(codigo) => { setFormP((atual) => atual ? { ...atual, codigoBarras: codigo } : atual); setScannerProduto(false); }} onClose={() => setScannerProduto(false)} />}
     </>
   );
 }
