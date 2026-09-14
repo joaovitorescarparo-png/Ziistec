@@ -43,7 +43,7 @@ export function quoteScenarioPageCounts() {
   };
 }
 '''
-test='''import test from 'node:test';
+test=r'''import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { quoteScenarioPageCounts, shouldBreakPdfBlock } from '../../api/quotePdfLayout.js';
