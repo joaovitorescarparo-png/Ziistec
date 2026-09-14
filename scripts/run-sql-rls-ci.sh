@@ -4,7 +4,7 @@ set -euo pipefail
 DB_URL="${DB_URL:-postgresql://postgres:postgres@127.0.0.1:54322/postgres}"
 BASELINE_MANIFEST="supabase/staging/production_baseline_manifest.csv"
 
-node scripts/reassemble.mjs
+node scripts/reassemble.mjs --sql-only
 
 apply_sql() {
   local sql="$1"

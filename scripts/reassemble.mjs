@@ -113,6 +113,8 @@ assembleText(
   '80b322ffc38a2d2d444ab418acce353d88f5ff921428b8ac3bf50c9989e1bacd',
 );
 
+if (process.argv.includes('--sql-only')) process.exit(0);
+
 // Base que já havia passado pela CI antes da Rodada 3.
 assembleGzipBase64({
   dir: 'src/legacy/ZiisTecApp.gz.parts',
