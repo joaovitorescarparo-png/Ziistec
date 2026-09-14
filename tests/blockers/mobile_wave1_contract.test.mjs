@@ -21,9 +21,12 @@ test('auth and onboarding use the mobile visual viewport without shrinking contr
 test('legacy shell mobile contract survives reassembly and readable codemods',()=>{
   const src=read('src/legacy/ZiisTecApp.jsx');
   assert.match(src,/MOBILE HOMOLOGATION · shell\/nav\/dashboard · wave 1/);
-  assert.match(src,/max-h-\[92dvh\]/);
+  assert.match(src,/max-h-\[calc\(100dvh-env\(safe-area-inset-top\)\)\]/);
+  assert.match(src,/pt-\[env\(safe-area-inset-top\)\]/);
+  assert.match(src,/min-h-0 overflow-y-auto overscroll-contain/);
+  assert.match(src,/sticky bottom-0/);
+  assert.match(src,/pb-\[max\(1rem,env\(safe-area-inset-bottom\)\)\]/);
   assert.doesNotMatch(src,/max-h-\[92vh\]/);
-  assert.match(src,/pb-\[env\(safe-area-inset-bottom\)\]/);
   assert.match(src,/min-h-14 flex flex-col items-center justify-center/);
   assert.match(src,/min-h-11 min-w-11/);
   assert.match(src,/min-h-\[100dvh\] overflow-x-hidden bg-slate-50/);

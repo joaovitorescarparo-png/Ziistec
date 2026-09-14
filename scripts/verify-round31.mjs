@@ -82,6 +82,9 @@ for (const marker of [
 if (failures.length === storageFailureCount) ok('Logos antigas são migradas para PNG limpa de forma idempotente');
 
 const pdf = read('api/quote-pdf.js');
+const pdfLayout = read('api/quotePdfLayout.js');
+if (!pdfLayout.includes('export function shouldBreakPdfBlock') || !pdfLayout.includes('export function canKeepClosingTogether')) fail('PDF perdeu helpers determinísticos de paginação calculada');
+else ok('PDF mantém helpers determinísticos de paginação calculada');
 for (const marker of [
   'logo_path',
   'zt-branding',
@@ -96,7 +99,9 @@ for (const marker of [
   'unitRight',
   'totalRight',
   'SAFE_BOTTOM',
-  'const minVisibleRows = 6',
+  'shouldBreakPdfBlock(y,rowH,SAFE_BOTTOM,12)',
+  'shouldBreakPdfBlock(y,signatureH,SAFE_BOTTOM)',
+  'ensure(infoCardH+closingGapH+signatureH)',
   'Card inferior com altura dinâmica e sem cruzar a área de assinatura.',
   "Marca-d'água ampla e suave por trás do conteúdo.",
   'drawPageWatermark();',
@@ -110,10 +115,12 @@ if (!/company\.owner_name\s*\|\|\s*['"]Responsável['"]/.test(pdf) && !pdf.inclu
 else ok('PDF mantém responsável na área de assinatura');
 if (pdf.includes('const watermarkBandH =')) fail('PDF voltou a limitar a marca-d’água apenas às linhas vazias');
 else ok('PDF usa marca-d’água ampla por trás do conteúdo, desenhada antes dos textos');
-if (!pdf.includes('while (fillerRows > 0 && y - 32 > 300)')) fail('PDF perdeu o preenchimento estrutural seguro para orçamentos com poucos itens');
-else ok('PDF usa linhas vazias estruturadas para reduzir espaço solto sem inventar itens');
-if (!pdf.includes('if (y - signatureH < SAFE_BOTTOM) newPage(true);')) fail('PDF perdeu a proteção das assinaturas contra o rodapé');
-else ok('Assinaturas respeitam zona segura e não podem invadir o rodapé');
+if (pdf.includes('const minVisibleRows =') || pdf.includes('while (fillerRows > 0')) fail('PDF reintroduziu linhas artificiais que antecipam a paginação');
+else ok('PDF one-page-first não inventa linhas para ocupar espaço');
+if (pdf.includes('SAFE_BOTTOM + 205')) fail('PDF reintroduziu reserva fixa excessiva de fechamento');
+else ok('PDF usa altura medida em vez de reserva fixa de 205px');
+if (!pdf.includes('shouldBreakPdfBlock(y,signatureH,SAFE_BOTTOM)')) fail('PDF perdeu a proteção medida das assinaturas contra o rodapé');
+else ok('Assinaturas respeitam zona segura por cálculo de altura');
 if ((pdf.match(/page\.drawLine\(\{ start:/g) || []).length < 2) fail('PDF premium perdeu as linhas de assinatura/estrutura visual');
 else ok('PDF premium mantém áreas de assinatura para responsável e cliente');
 const quoteItemsLine = pdf.split('\n').find((line) => line.includes('/rest/v1/quote_items?')) || '';

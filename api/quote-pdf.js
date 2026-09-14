@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { supabaseServidor } from './_supabaseServerConfig.js';
+import { shouldBreakPdfBlock, canKeepClosingTogether } from './quotePdfLayout.js';
 
 const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -148,7 +149,7 @@ export default async function handler(req, res) {
       if(product&&Number(product.warranty_months||0)>0)return [`${item.name}: ${Number(product.warranty_months)} mes(es) de garantia de produto`];
       if(service&&Number(service.warranty_days||0)>0)return [`${item.name}: ${Number(service.warranty_days)} dia(s) de garantia de serviço`];
       return [];
-    }).slice(0,8);
+    });
     const nomeCliente = client.trade_name || client.name || 'Cliente não informado';
     const companyName = company.trade_name || company.name || 'Empresa';
 
@@ -261,13 +262,20 @@ export default async function handler(req, res) {
     y -= clientBlockH + 18;
 
     if(quote.customer_message){
-      const proposalLines=wrapText(quote.customer_message,normal,9.2,contentW-24).slice(0,18);
-      const proposalH=34+proposalLines.length*12;
-      ensure(proposalH+14);
-      page.drawRectangle({x:margin,y:y-proposalH,width:contentW,height:proposalH,color:soft,borderColor:line,borderWidth:0.6});
-      txt('SOBRE ESTA PROPOSTA',margin+12,y-18,8.5,bold,teal);
-      let proposalY=y-38;for(const l of proposalLines){txt(l,margin+12,proposalY,9.2,normal,ink);proposalY-=12;}
-      y-=proposalH+14;
+      const proposalLines=wrapText(quote.customer_message,normal,9.2,contentW-24);
+      let remaining=[...proposalLines];
+      let continuation=false;
+      while(remaining.length){
+        const availableLines=Math.floor((y-SAFE_BOTTOM-48)/12);
+        if(availableLines<1){newPage(true);continuation=true;continue;}
+        const chunk=remaining.splice(0,Math.max(1,availableLines));
+        const proposalH=34+chunk.length*12;
+        page.drawRectangle({x:margin,y:y-proposalH,width:contentW,height:proposalH,color:soft,borderColor:line,borderWidth:0.6});
+        txt(continuation?'SOBRE ESTA PROPOSTA · CONTINUAÇÃO':'SOBRE ESTA PROPOSTA',margin+12,y-18,8.5,bold,teal);
+        let proposalY=y-38;for(const l of chunk){txt(l,margin+12,proposalY,9.2,normal,ink);proposalY-=12;}
+        y-=proposalH+14;
+        if(remaining.length){newPage(true);continuation=true;}
+      }
     }
     if(quote.execution_forecast_date){
       ensure(46);
@@ -305,7 +313,7 @@ export default async function handler(req, res) {
       const desc = wrapText(item.name || 'Item', normal, 9.2, textW);
       const notes = item.notes ? wrapText(item.notes, normal, 7.5, textW) : [];
       const rowH = Math.max(productImage?58:40, desc.length * 12 + notes.length * 9 + 15);
-      if (y - rowH < SAFE_BOTTOM + 205) {
+      if (shouldBreakPdfBlock(y,rowH,SAFE_BOTTOM,12)) {
         newPage(true);
         drawTableHeader();
       }
@@ -324,28 +332,22 @@ export default async function handler(req, res) {
       rowIndex += 1;
     }
 
-    // Grade vazia estruturada; a marca-d'água só ocupa essa área sem texto.
-    const minVisibleRows = 6;
-    let fillerRows = Math.max(0, minVisibleRows - (items || []).length);
-    while (fillerRows > 0 && y - 32 > 300) {
-      if (rowIndex % 2 === 1) page.drawRectangle({ x: margin, y: y - 25, width: contentW, height: 32, color: soft });
-      y -= 32;
-      page.drawLine({ start: { x: margin, y: y + 7 }, end: { x: tableRight, y: y + 7 }, thickness: 0.45, color: line });
-      rowIndex += 1;
-      fillerRows -= 1;
-    }
     // Calcula o bloco inferior antes de desenhar: total, informações e assinaturas ficam juntos.
     const payment = quote.payment_terms || 'A combinar com o cliente.';
     const paymentLines = wrapText(payment, normal, 8.4, 285);
     const noteLines = quote.notes ? wrapText(quote.notes, normal, 8.3, contentW - 24) : [];
-    const leftInfoH = 35 + Math.max(1, paymentLines.length) * 11;
-    const rightInfoH = 72;
-    const notesH = noteLines.length ? 26 + noteLines.length * 11 : 0;
-    const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 20;
-    const warrantyH=warrantyLines.length?30+warrantyLines.length*11:0;
-    const lowerBlockH = 50 + warrantyH + infoCardH + 28 + 66;
-    y -= 6;
-    if (y - lowerBlockH < SAFE_BOTTOM) newPage(true);
+    const leftInfoH = 31 + Math.max(1, paymentLines.length) * 11;
+    const rightInfoH = 68;
+    const notesH = noteLines.length ? 24 + noteLines.length * 11 : 0;
+    const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 12;
+    const totalBlockH = 44;
+    const warrantyH=warrantyLines.length?26+warrantyLines.length*11:0;
+    const signatureH = 58;
+    const closingGapH = 20;
+    const lowerBlockH = totalBlockH + warrantyH + infoCardH + closingGapH + signatureH;
+    y -= 4;
+    if (shouldBreakPdfBlock(y,lowerBlockH,SAFE_BOTTOM) && canKeepClosingTogether(lowerBlockH,A4[1]-88,SAFE_BOTTOM)) newPage(true);
+    else if (shouldBreakPdfBlock(y,totalBlockH,SAFE_BOTTOM)) newPage(true);
 
     const discount = Number(quote.discount || 0);
     const surcharge = Number(quote.surcharge || 0);
@@ -359,14 +361,19 @@ export default async function handler(req, res) {
     page.drawRectangle({ x: totalX - 10, y: y - 17, width: A4[0] - margin - totalX + 10, height: 38, color: navy });
     txt('TOTAL', totalX + 3, y - 2, 11, bold, white);
     txtRight(money(grand), A4[0] - margin - 14, y - 4, 15, bold, white);
-    y -= 50;
+    y -= totalBlockH;
 
     if(warrantyLines.length){
+      ensure(30);
       txt('GARANTIA',margin,y,8.5,bold,teal);y-=16;
-      for(const lineText of warrantyLines){txt(fitText(lineText,normal,8.2,contentW),margin,y,8.2,normal,muted);y-=11;}
-      y-=8;
+      for(const lineText of warrantyLines){
+        ensure(15);
+        for(const warrantyLine of wrapText(lineText,normal,8.2,contentW)){ensure(15);txt(warrantyLine,margin,y,8.2,normal,muted);y-=11;}
+      }
+      y-=6;
     }
 
+    ensure(infoCardH+closingGapH+signatureH);
     // Card inferior com altura dinâmica e sem cruzar a área de assinatura.
     const cardTop = y;
     const cardBottom = cardTop - infoCardH;
@@ -392,11 +399,10 @@ export default async function handler(req, res) {
       let noteY = dividerY - 34;
       for (const l of noteLines) { txt(l, margin + 12, noteY, 8.3, normal, muted); noteY -= 11; }
     }
-    y = cardBottom - 28;
+    y = cardBottom - closingGapH;
 
     // Assinaturas com rótulo e nome em área própria; nunca invadem rodapé ou card.
-    const signatureH = 66;
-    if (y - signatureH < SAFE_BOTTOM) newPage(true);
+    if (shouldBreakPdfBlock(y,signatureH,SAFE_BOTTOM)) newPage(true);
     const sigW = 190;
     const sigY = y - 8;
     page.drawLine({ start: { x: margin + 8, y: sigY }, end: { x: margin + 8 + sigW, y: sigY }, thickness: 0.8, color: ink });
