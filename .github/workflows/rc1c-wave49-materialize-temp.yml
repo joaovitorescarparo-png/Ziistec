@@ -43,6 +43,10 @@ jobs:
       - name: Checkout exact RC-1C checkpoint cleanly
         run: |
           git checkout --detach 44e4b01e70d5979ed30ee682920c64aad86c8d06
+          echo "RC1C_RUNNER_STATUS_BEFORE_CLEAN"
+          git status --porcelain=v1
+          git reset --hard 44e4b01e70d5979ed30ee682920c64aad86c8d06
+          git clean -fdx
           test -z "$(git status --porcelain)"
           git config user.name rc1c-implementation-runner
           git config user.email rc1c-implementation-runner@users.noreply.github.com
