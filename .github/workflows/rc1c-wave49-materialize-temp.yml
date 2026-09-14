@@ -87,16 +87,23 @@ jobs:
           git commit -m "fix: improve mobile quote and purchase forms"
           echo "WAVE689_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Materialize Wave 7 quote PDF one-page-first
+      - name: Materialize Wave 7 quote PDF and align historical contracts
         run: |
           python /tmp/rc1c-temp/pdf.py
           python /tmp/rc1c-temp/finalize_tests.py
           python /tmp/rc1c-temp/align-round34.py
+          python /tmp/rc1c-temp/align-mobile-wave1.py
           git diff --check
           node --test tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c_responsive_breakpoints.test.mjs
           node scripts/verify-round31.mjs
+          node --test \
+            tests/blockers/mobile_wave1_contract.test.mjs \
+            tests/blockers/mobile_wave3_contract.test.mjs \
+            tests/blockers/mobile_wave4_contract.test.mjs \
+            tests/blockers/mobile_wave5_contract.test.mjs \
+            tests/blockers/mobile_wave6_contract.test.mjs
           npm run build
-          git add api/quote-pdf.js api/quotePdfLayout.js package.json scripts/verify-round31.mjs tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c_responsive_breakpoints.test.mjs
+          git add api/quote-pdf.js api/quotePdfLayout.js package.json scripts/verify-round31.mjs tests/blockers/mobile_wave1_contract.test.mjs tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c_responsive_breakpoints.test.mjs
           git commit -m "feat: make quote pdf one-page first"
           echo "WAVE7_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "FINAL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
