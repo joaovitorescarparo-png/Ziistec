@@ -9,6 +9,7 @@ export const STAGING_SUPABASE_HOSTS = Object.freeze([
   "ziistec-git-ui-v1-v2-merge-js-connect.vercel.app",
   "ziistec-git-hardening-v2-staging-js-connect.vercel.app",
   "ziistec-git-field-workflow-v1-js-connect.vercel.app",
+  "ziistec-git-rc1c-mobile-ux-stabilization-js-connect.vercel.app",
 ]);
 
 export function resolverConfigSupabase({
