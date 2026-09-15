@@ -1,0 +1,162 @@
+name: RC1C Staging Hotfix Temp
+
+on:
+  push:
+    branches: [rc1c-staging-hotfix-temp]
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-publish-hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Freeze mandatory refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)" = "5f38784bc9e0754fad0365a1a9f857089af07891"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
+
+      - name: Checkout exact RC-1C base
+        run: |
+          git checkout --detach 5f38784bc9e0754fad0365a1a9f857089af07891
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain=v1)"
+          git config user.name rc1c-hotfix-runner
+          git config user.email rc1c-hotfix-runner@users.noreply.github.com
+
+      - name: Install locked dependencies
+        run: |
+          npm ci --ignore-scripts --no-fund
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Apply only RC-1C staging allowlist hotfix
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          frontend = Path('src/lib/supabaseConfig.js')
+          text = frontend.read_text()
+          anchor = '  "ziistec-git-field-workflow-v1-js-connect.vercel.app",\n]);'
+          replacement = '  "ziistec-git-field-workflow-v1-js-connect.vercel.app",\n  "ziistec-git-rc1c-mobile-ux-stabilization-js-connect.vercel.app",\n]);'
+          if text.count(anchor) != 1:
+              raise SystemExit(f'frontend allowlist anchor expected once, found {text.count(anchor)}')
+          frontend.write_text(text.replace(anchor, replacement, 1))
+
+          backend = Path('api/_supabaseServerConfig.js')
+          text = backend.read_text()
+          anchor = "  'field-workflow-v1',\n]);"
+          replacement = "  'field-workflow-v1',\n  'rc1c-mobile-ux-stabilization',\n]);"
+          if text.count(anchor) != 1:
+              raise SystemExit(f'backend allowlist anchor expected once, found {text.count(anchor)}')
+          backend.write_text(text.replace(anchor, replacement, 1))
+
+          test_file = Path('tests/blockers/f08_environment_project_matrix.test.mjs')
+          text = test_file.read_text()
+          const_anchor = "const FIELD_WORKFLOW_HOST = 'ziistec-git-field-workflow-v1-js-connect.vercel.app';\n"
+          const_replacement = const_anchor + "const RC1C_BRANCH = 'rc1c-mobile-ux-stabilization';\nconst RC1C_HOST = 'ziistec-git-rc1c-mobile-ux-stabilization-js-connect.vercel.app';\n"
+          if text.count(const_anchor) != 1:
+              raise SystemExit(f'F08 constants anchor expected once, found {text.count(const_anchor)}')
+          text = text.replace(const_anchor, const_replacement, 1)
+
+          insert_anchor = "test('F08 server: development aceita staging explícito e nunca produção/terceiro', () => {"
+          block = """test('F08 RC-1C: branch e host autorizam somente Staging e preservam fail-closed', () => {\n  mustConfigure(\n    server({ vercelEnv: 'preview', branch: RC1C_BRANCH, url: STAGING_SUPABASE_URL, key: STAGING_KEY }),\n    STAGING_SUPABASE_URL,\n    'rc1c server staging',\n  );\n  mustFailClosed(\n    server({ vercelEnv: 'preview', branch: RC1C_BRANCH, url: PROD_SUPABASE_URL, key: PROD_KEY }),\n    'rc1c server production',\n  );\n  mustFailClosed(\n    server({ vercelEnv: 'preview', branch: RC1C_BRANCH, url: STAGING_SUPABASE_URL, key: INVALID_KEY }),\n    'rc1c server key staging inválida',\n  );\n\n  mustConfigure(\n    client({ deploymentEnv: 'preview', host: RC1C_HOST, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }),\n    STAGING_SUPABASE_URL,\n    'rc1c client staging',\n  );\n  mustFailClosed(\n    client({ deploymentEnv: 'preview', host: RC1C_HOST, envUrl: PROD_SUPABASE_URL, envKey: PROD_KEY }),\n    'rc1c client production',\n  );\n  mustFailClosed(\n    client({ deploymentEnv: 'preview', host: RC1C_HOST, envUrl: INVALID_URL, envKey: INVALID_KEY }),\n    'rc1c client terceiro',\n  );\n\n  mustFailClosed(\n    server({ vercelEnv: 'preview', branch: 'rc1c-preview-desconhecido', url: STAGING_SUPABASE_URL, key: STAGING_KEY }),\n    'preview server realmente desconhecido',\n  );\n  mustFailClosed(\n    client({ deploymentEnv: 'preview', host: 'rc1c-preview-desconhecido.vercel.app', envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }),\n    'preview client realmente desconhecido',\n  );\n});\n\n"""
+          if text.count(insert_anchor) != 1:
+              raise SystemExit(f'F08 insertion anchor expected once, found {text.count(insert_anchor)}')
+          test_file.write_text(text.replace(insert_anchor, block + insert_anchor, 1))
+          PY
+
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' api/_supabaseServerConfig.js src/lib/supabaseConfig.js tests/blockers/f08_environment_project_matrix.test.mjs | sort)"
+          test "$changed" = "$expected"
+
+      - name: Create exact hotfix candidate commit
+        run: |
+          git add api/_supabaseServerConfig.js src/lib/supabaseConfig.js tests/blockers/f08_environment_project_matrix.test.mjs
+          git commit -m "fix: authorize rc1c staging preview"
+          echo "HOTFIX_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD^)" = "5f38784bc9e0754fad0365a1a9f857089af07891"
+          changed="$(git diff --name-only HEAD^ HEAD | sort)"
+          expected="$(printf '%s\n' api/_supabaseServerConfig.js src/lib/supabaseConfig.js tests/blockers/f08_environment_project_matrix.test.mjs | sort)"
+          test "$changed" = "$expected"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: F08 environment-project matrix
+        run: |
+          test "$(git rev-parse HEAD)" = "$HOTFIX_SHA"
+          node --test tests/blockers/f08_environment_project_matrix.test.mjs | tee /tmp/f08.log
+
+      - name: Verify V2
+        run: |
+          test "$(git rev-parse HEAD)" = "$HOTFIX_SHA"
+          npm run verify:v2 | tee /tmp/verify-v2.log
+
+      - name: Reproducible build
+        run: |
+          test "$(git rev-parse HEAD)" = "$HOTFIX_SHA"
+          npm run verify:reproducible-build | tee /tmp/reproducible.log
+
+      - name: Security audit
+        run: |
+          test "$(git rev-parse HEAD)" = "$HOTFIX_SHA"
+          npm run security:audit | tee /tmp/security-audit.log
+
+      - name: Require exact clean candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "$HOTFIX_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Reconfirm refs and fast-forward only RC-1C
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)" = "5f38784bc9e0754fad0365a1a9f857089af07891"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
+          git merge-base --is-ancestor 5f38784bc9e0754fad0365a1a9f857089af07891 "$HOTFIX_SHA"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/rc1c-mobile-ux-stabilization
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)" = "$HOTFIX_SHA"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "01bb1259b2081ec87f4508c1b8e4cea1c1d92023"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "3345e4d1c67b4c876e6bf8e5620e4f4b84493847"
+
+      - name: Write evidence
+        run: |
+          printf '%s\n' \
+            "BASE_SHA=5f38784bc9e0754fad0365a1a9f857089af07891" \
+            "HOTFIX_SHA=${HOTFIX_SHA}" \
+            "COMMIT=fix: authorize rc1c staging preview" \
+            "F08=PASS" \
+            "VERIFY_V2=PASS" \
+            "REPRODUCIBLE=PASS" \
+            "SECURITY_AUDIT=PASS" \
+            "FIELD_WORKFLOW_UNCHANGED=PASS" \
+            "MAIN_UNCHANGED=PASS" \
+            "PRODUCTION_CODEPATH_UNCHANGED=PASS" > /tmp/rc1c-staging-hotfix-evidence.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc1c-staging-hotfix-evidence
+          path: |
+            /tmp/rc1c-staging-hotfix-evidence.txt
+            /tmp/f08.log
+            /tmp/verify-v2.log
+            /tmp/reproducible.log
+            /tmp/security-audit.log
+          retention-days: 3
