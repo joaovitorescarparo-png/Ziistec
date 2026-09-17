@@ -1,72 +1,134 @@
-name: RC1C1 Flow Fix Runner
+name: RC1C1 Final Technical Gates
 
 on:
   push:
     branches: [rc1c-wave1-fix-temp]
 
 permissions:
-  contents: write
+  contents: read
+  security-events: write
 
 concurrency:
-  group: rc1c1-flow-fix-runner
+  group: rc1c1-final-technical-gates
   cancel-in-progress: false
 
+env:
+  CANDIDATE_SHA: 93f98955e6f1f0104b4eca69cc2eecdc2fd5d1db
+  STABILIZATION_SHA: 6fc4839127f1805bfedcd5238f1a9d33f7d51b50
+  MAIN_SHA: 3345e4d1c67b4c876e6bf8e5620e4f4b84493847
+  FIELD_SHA: 01bb1259b2081ec87f4508c1b8e4cea1c1d92023
+
 jobs:
-  post-review-fix:
+  validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
-      - name: Checkout RC-1C.1 target
+      - name: Checkout candidate
         uses: actions/checkout@v4
         with:
           ref: rc1c1-mobile-flow-fixes
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
-      - name: Guard reviewed candidate
+      - name: Guard candidate and frozen refs
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(git rev-parse HEAD)" = "c1c9f584e0047de6acd87a9e8b275bc55b26f4aa"
-          test "$(git rev-parse origin/rc1c-mobile-ux-stabilization)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
-      - name: Apply post-review fixes
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          p=Path('src/lib/dataApi.js')
-          s=p.read_text()
-          old="""  const { itemCosts, materialCosts, extraCosts } = await carregarCustosPrivados(companyId,response.data.id);\n  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,extraCosts)[0]);"""
-          new="""  const { itemCosts, materialCosts, workOrderCosts } = await carregarCustosPrivados(companyId,response.data.id);\n  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,workOrderCosts)[0]);"""
-          if s.count(old)!=1: raise SystemExit('dataApi targeted-loader anchor mismatch')
-          p.write_text(s.replace(old,new,1))
-
-          p=Path('src/legacy/ZiisTecApp.jsx')
-          s=p.read_text()
-          old="""  const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];\n  const pronto = f.clienteId && (f.descricaoLivre.trim() || f.itens.length > 0);"""
-          new="""  const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];\n  const orcamentoSelecionado = orcamentosCliente.find((o) => o.id === f.orcamentoId);\n  const pronto = f.clienteId && (orcamentoSelecionado?.osId || f.descricaoLivre.trim() || f.itens.length > 0);"""
-          if s.count(old)!=1: raise SystemExit('NovaOS ready-state anchor mismatch')
-          p.write_text(s.replace(old,new,1))
-
-          p=Path('tests/blockers/rc1c1_mobile_flow_fixes.test.mjs')
-          s=p.read_text()
-          anchor="""  assert.match(data,/export async function carregarOSPorOrcamentoDB/);\n});"""
-          replacement="""  assert.match(data,/export async function carregarOSPorOrcamentoDB/);\n  assert.match(data,/const \\{ itemCosts, materialCosts, workOrderCosts \\} = await carregarCustosPrivados\\(companyId,response\\.data\\.id\\)/);\n  assert.match(legacy,/const pronto = f\\.clienteId && \\(orcamentoSelecionado\\?\\.osId \\|\\| f\\.descricaoLivre\\.trim\\(\\) \\|\\| f\\.itens\\.length > 0\\)/);\n});"""
-          if s.count(anchor)!=1: raise SystemExit('targeted-test anchor mismatch')
-          p.write_text(s.replace(anchor,replacement,1))
-          PY
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)" = "$STABILIZATION_SHA"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "$MAIN_SHA"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "$FIELD_SHA"
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund
-      - name: Targeted RC-1C.1 tests
-        run: node --test tests/blockers/rc1c1_mobile_flow_fixes.test.mjs tests/blockers/rc1c_mobile_work_order.test.mjs tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c1_quote_product_images.test.mjs tests/blockers/rc1c_product_primary_parity.test.mjs
-      - name: Build smoke gate
-        run: npm run build
-      - name: Commit reviewed fixes
+      - name: Clean tree after install
+        run: test -z "$(git status --porcelain)"
+      - name: Canonical governance guards
         run: |
-          git config user.name rc1c1-runner
-          git config user.email rc1c1-runner@users.noreply.github.com
+          node scripts/verify-project-governance.mjs
+          node scripts/verify-foundation-integrity.mjs
+      - name: verify:v2
+        run: npm run verify:v2
+      - name: Clean tree after verify
+        run: test -z "$(git status --porcelain)"
+      - name: Security audit
+        run: npm run security:audit
+      - name: Reproducible build
+        run: npm run verify:reproducible-build
+      - name: Clean tree after reproducible build
+        run: test -z "$(git status --porcelain)"
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - name: Start disposable Supabase stack
+        run: supabase start
+      - name: SQL/RLS regressions
+        run: bash scripts/run-sql-rls-ci.sh
+      - name: Final clean tree
+        run: |
           git diff --check
-          git add src/lib/dataApi.js src/legacy/ZiisTecApp.jsx tests/blockers/rc1c1_mobile_flow_fixes.test.mjs
-          git commit -m "fix: harden RC-1C.1 linked work order retry"
           test -z "$(git status --porcelain)"
-      - name: Publish target branch without force
-        run: git push origin HEAD:rc1c1-mobile-flow-fixes
+      - name: Record validation summary
+        run: |
+          printf 'candidate=%s\nverify_v2=PASS\nsecurity_audit=PASS\nreproducible_build=PASS\nsql_rls=PASS\nclean_tree=PASS\n' "$CANDIDATE_SHA" > /tmp/rc1c1-validation.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc1c1-validation-summary
+          path: /tmp/rc1c1-validation.txt
+          retention-days: 3
+      - name: Stop disposable Supabase stack
+        if: always()
+        run: supabase stop --no-backup
+
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          ref: rc1c1-mobile-flow-fixes
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Guard candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-fund
+      - name: Build
+        run: npm run build
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          output: codeql-results
+      - name: Summarize CodeQL findings
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs'); const path=require('node:path');
+          const dir=path.resolve('codeql-results'); let count=0; const lines=[];
+          if(fs.existsSync(dir)) for(const file of fs.readdirSync(dir).filter(n=>n.endsWith('.sarif'))){
+            const sarif=JSON.parse(fs.readFileSync(path.join(dir,file),'utf8'));
+            for(const run of sarif.runs||[]) for(const result of run.results||[]){
+              const loc=result.locations?.[0]?.physicalLocation;
+              const uri=loc?.artifactLocation?.uri||'unknown'; const line=loc?.region?.startLine||0;
+              lines.push(`rule=${result.ruleId||'unknown'} level=${result.level||'warning'} file=${uri} line=${line}`); count++;
+            }
+          }
+          fs.writeFileSync('/tmp/rc1c1-codeql.txt',`candidate=${process.env.CANDIDATE_SHA}\nfindings=${count}\n${lines.join('\n')}\n`);
+          console.log(`CODEQL_SUMMARY: ${count} findings in SARIF`);
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc1c1-codeql-summary
+          path: /tmp/rc1c1-codeql.txt
+          if-no-files-found: warn
+          retention-days: 3
