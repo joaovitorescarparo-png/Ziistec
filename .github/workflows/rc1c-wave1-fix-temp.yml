@@ -38,7 +38,17 @@ jobs:
           test "$(git rev-parse origin/rc1c-mobile-ux-stabilization)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
       - name: Apply deterministic RC-1C.1 patch
         working-directory: target
-        run: python ../runner/scripts/rc1c1-mobile-flow-fixes.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python ../runner/scripts/rc1c1-mobile-flow-fixes.py 2>&1 | tee /tmp/rc1c1-patch.log
+      - name: Upload patch diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc1c1-patch-diagnostics
+          path: /tmp/rc1c1-patch.log
+          retention-days: 1
       - name: Install locked dependencies
         working-directory: target
         run: npm ci --ignore-scripts --no-fund
