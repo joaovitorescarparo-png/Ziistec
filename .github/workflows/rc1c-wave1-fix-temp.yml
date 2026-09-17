@@ -59,7 +59,7 @@ jobs:
           git status --porcelain=v1 > /tmp/rc1c1-runtime-residue.txt
           cat /tmp/rc1c1-runtime-residue.txt
       - name: Remove only Supabase CLI runtime metadata
-        run: rm -rf supabase/.temp
+        run: rm -rf supabase/.temp supabase/.branches
       - name: Prove source tree clean
         run: |
           git diff --check
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: rc1c1-sql-clean-tree-proof
+          name: rc1c1-sql-clean-tree-proof-final
           path: |
             /tmp/rc1c1-runtime-residue.txt
             /tmp/rc1c1-sql-clean-proof.txt
