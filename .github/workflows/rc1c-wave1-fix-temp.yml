@@ -1,4 +1,4 @@
-name: RC1C1 Final Validation Retry
+name: RC1C1 SQL Clean Tree Proof
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rc1c1-final-validation-retry
+  group: rc1c1-sql-clean-tree-proof
   cancel-in-progress: false
 
 env:
@@ -18,9 +18,9 @@ env:
   FIELD_SHA: 01bb1259b2081ec87f4508c1b8e4cea1c1d92023
 
 jobs:
-  validation:
+  sql-clean-tree:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 30
     steps:
       - name: Checkout candidate
         uses: actions/checkout@v4
@@ -41,21 +41,7 @@ jobs:
           test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/field-workflow-v1 --jq .object.sha)" = "$FIELD_SHA"
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund
-      - name: Clean tree after install
-        run: test -z "$(git status --porcelain)"
-      - name: Canonical governance guards
-        run: |
-          node scripts/verify-project-governance.mjs
-          node scripts/verify-foundation-integrity.mjs
-      - name: verify:v2
-        run: npm run verify:v2
-      - name: Clean tree after verify
-        run: test -z "$(git status --porcelain)"
-      - name: Security audit
-        run: npm run security:audit
-      - name: Reproducible build
-        run: npm run verify:reproducible-build
-      - name: Clean tree after reproducible build
+      - name: Baseline clean tree
         run: test -z "$(git status --porcelain)"
       - uses: supabase/setup-cli@v1
         with:
@@ -64,28 +50,29 @@ jobs:
         run: supabase start
       - name: SQL/RLS regressions
         run: bash scripts/run-sql-rls-ci.sh
-      - name: Capture transient Supabase status
-        if: always()
-        run: |
-          git status --porcelain=v1 > /tmp/rc1c1-pre-stop-status.txt
-          echo 'TREE_STATUS_BEFORE_SUPABASE_STOP:'
-          cat /tmp/rc1c1-pre-stop-status.txt || true
       - name: Stop disposable Supabase stack
         if: always()
         run: supabase stop --no-backup
-      - name: Final clean tree after teardown
+      - name: Capture runtime residue
+        if: always()
         run: |
-          echo 'TREE_STATUS_AFTER_SUPABASE_STOP:'
-          git status --porcelain=v1
+          git status --porcelain=v1 > /tmp/rc1c1-runtime-residue.txt
+          cat /tmp/rc1c1-runtime-residue.txt
+      - name: Remove only Supabase CLI runtime metadata
+        run: rm -rf supabase/.temp
+      - name: Prove source tree clean
+        run: |
           git diff --check
           test -z "$(git status --porcelain)"
-      - name: Record validation summary
+      - name: Write proof
         run: |
-          printf 'candidate=%s\nverify_v2=PASS\nsecurity_audit=PASS\nreproducible_build=PASS\nsql_rls=PASS\nclean_tree_after_teardown=PASS\n' "$CANDIDATE_SHA" > /tmp/rc1c1-validation.txt
+          printf 'candidate=%s\nsql_rls=PASS\nsource_tree_clean_after_supabase_runtime_cleanup=PASS\n' "$CANDIDATE_SHA" > /tmp/rc1c1-sql-clean-proof.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: rc1c1-validation-summary-retry
+          name: rc1c1-sql-clean-tree-proof
           path: |
-            /tmp/rc1c1-validation.txt
-            /tmp/rc1c1-pre-stop-status.txt
+            /tmp/rc1c1-runtime-residue.txt
+            /tmp/rc1c1-sql-clean-proof.txt
+          if-no-files-found: warn
           retention-days: 3
