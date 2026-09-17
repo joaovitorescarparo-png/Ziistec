@@ -121,8 +121,8 @@ export async function carregarOSPorOrcamentoDB(quoteId, companyId) {
     .order('created_at',{ascending:true}).limit(1).maybeSingle();
   if (response.error) throw response.error;
   if (!response.data) return null;
-  const { itemCosts, materialCosts, extraCosts } = await carregarCustosPrivados(companyId,response.data.id);
-  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,extraCosts)[0]);
+  const { itemCosts, materialCosts, workOrderCosts } = await carregarCustosPrivados(companyId,response.data.id);
+  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,workOrderCosts)[0]);
 }
 
 export async function carregarDadosEmpresa(companyId) {

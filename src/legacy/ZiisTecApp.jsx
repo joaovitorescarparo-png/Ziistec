@@ -3353,7 +3353,8 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
     setF((s) => ({ ...s, clienteId: id, orcamentoId: orcamentos.some((o) => o.id === s.orcamentoId && o.clienteId === id) ? s.orcamentoId : "", local: cl?.endereco || s.local }));
   };
   const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];
-  const pronto = f.clienteId && (f.descricaoLivre.trim() || f.itens.length > 0);
+  const orcamentoSelecionado = orcamentosCliente.find((o) => o.id === f.orcamentoId);
+  const pronto = f.clienteId && (orcamentoSelecionado?.osId || f.descricaoLivre.trim() || f.itens.length > 0);
 
   const [criando, setCriando] = useState(false);
   const criar = async () => {
