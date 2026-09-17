@@ -36,6 +36,17 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
           test "$(git rev-parse origin/rc1c-mobile-ux-stabilization)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
+      - name: Correct runner-local loader replacement order
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('runner/scripts/rc1c1-mobile-flow-fixes.py')
+          s=p.read_text()
+          old="""s=s[:loader_match.start()]+helpers+s[loader_match.end():]\ncount=s.count('return fromWorkOrder(await carregarOSCompletaDB(id));')\nif count != 2:\n    raise SystemExit(f'expected 2 individual reload callsites, got {count}')\ns=s.replace('return fromWorkOrder(await carregarOSCompletaDB(id));','return carregarOSPorIdDB(id);')"""
+          new="""count=s.count('return fromWorkOrder(await carregarOSCompletaDB(id));')\nif count != 2:\n    raise SystemExit(f'expected 2 individual reload callsites, got {count}')\ns=s.replace('return fromWorkOrder(await carregarOSCompletaDB(id));','return carregarOSPorIdDB(id);')\nloader_match=re.search(r\"async function carregarOSCompletaDB\\(id\\) \\{\\n.*?\\n\\}\", s, re.S)\nif not loader_match:\n    raise SystemExit('missing carregarOSCompletaDB after callsite replacement')\nloader=loader_match.group(0)\nhelpers=loader+\"\"\"\n\nexport async function carregarOSPorIdDB(id) {\n  return fromWorkOrder(await carregarOSCompletaDB(id));\n}\n\nexport async function carregarOSPorOrcamentoDB(quoteId, companyId) {\n  if (!quoteId || !companyId) return null;\n  const response = await supabase.from('work_orders').select(WO_SELECT)\n    .eq('company_id',companyId).eq('quote_id',quoteId).is('deleted_at',null)\n    .order('created_at',{ascending:true}).limit(1).maybeSingle();\n  if (response.error) throw response.error;\n  if (!response.data) return null;\n  const { itemCosts, materialCosts, extraCosts } = await carregarCustosPrivados(companyId,response.data.id);\n  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,extraCosts)[0]);\n}\"\"\"\ns=s[:loader_match.start()]+helpers+s[loader_match.end():]"""
+          if old not in s: raise SystemExit('runner loader patch anchor missing')
+          p.write_text(s.replace(old,new,1))
+          PY
       - name: Apply deterministic RC-1C.1 patch
         working-directory: target
         shell: bash
