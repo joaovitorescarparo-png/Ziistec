@@ -12,83 +12,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  patch-test-publish:
+  post-review-fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
-      - name: Checkout runner branch
-        uses: actions/checkout@v4
-        with:
-          ref: rc1c-wave1-fix-temp
-          path: runner
-          fetch-depth: 1
       - name: Checkout RC-1C.1 target
         uses: actions/checkout@v4
         with:
           ref: rc1c1-mobile-flow-fixes
-          path: target
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
-      - name: Guard exact checkpoint
-        working-directory: target
+      - name: Guard reviewed candidate
         run: |
-          test "$(git rev-parse HEAD)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
+          test "$(git rev-parse HEAD)" = "c1c9f584e0047de6acd87a9e8b275bc55b26f4aa"
           test "$(git rev-parse origin/rc1c-mobile-ux-stabilization)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
-      - name: Correct runner-local loader replacement order
+      - name: Apply post-review fixes
         run: |
           python - <<'PY'
           from pathlib import Path
-          p=Path('runner/scripts/rc1c1-mobile-flow-fixes.py')
+
+          p=Path('src/lib/dataApi.js')
           s=p.read_text()
-          old="""s=s[:loader_match.start()]+helpers+s[loader_match.end():]\ncount=s.count('return fromWorkOrder(await carregarOSCompletaDB(id));')\nif count != 2:\n    raise SystemExit(f'expected 2 individual reload callsites, got {count}')\ns=s.replace('return fromWorkOrder(await carregarOSCompletaDB(id));','return carregarOSPorIdDB(id);')"""
-          new="""count=s.count('return fromWorkOrder(await carregarOSCompletaDB(id));')\nif count != 2:\n    raise SystemExit(f'expected 2 individual reload callsites, got {count}')\ns=s.replace('return fromWorkOrder(await carregarOSCompletaDB(id));','return carregarOSPorIdDB(id);')\nloader_match=re.search(r\"async function carregarOSCompletaDB\\(id\\) \\{\\n.*?\\n\\}\", s, re.S)\nif not loader_match:\n    raise SystemExit('missing carregarOSCompletaDB after callsite replacement')\nloader=loader_match.group(0)\nhelpers=loader+\"\"\"\n\nexport async function carregarOSPorIdDB(id) {\n  return fromWorkOrder(await carregarOSCompletaDB(id));\n}\n\nexport async function carregarOSPorOrcamentoDB(quoteId, companyId) {\n  if (!quoteId || !companyId) return null;\n  const response = await supabase.from('work_orders').select(WO_SELECT)\n    .eq('company_id',companyId).eq('quote_id',quoteId).is('deleted_at',null)\n    .order('created_at',{ascending:true}).limit(1).maybeSingle();\n  if (response.error) throw response.error;\n  if (!response.data) return null;\n  const { itemCosts, materialCosts, extraCosts } = await carregarCustosPrivados(companyId,response.data.id);\n  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,extraCosts)[0]);\n}\"\"\"\ns=s[:loader_match.start()]+helpers+s[loader_match.end():]"""
-          if old not in s: raise SystemExit('runner loader patch anchor missing')
+          old="""  const { itemCosts, materialCosts, extraCosts } = await carregarCustosPrivados(companyId,response.data.id);\n  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,extraCosts)[0]);"""
+          new="""  const { itemCosts, materialCosts, workOrderCosts } = await carregarCustosPrivados(companyId,response.data.id);\n  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,workOrderCosts)[0]);"""
+          if s.count(old)!=1: raise SystemExit('dataApi targeted-loader anchor mismatch')
           p.write_text(s.replace(old,new,1))
+
+          p=Path('src/legacy/ZiisTecApp.jsx')
+          s=p.read_text()
+          old="""  const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];\n  const pronto = f.clienteId && (f.descricaoLivre.trim() || f.itens.length > 0);"""
+          new="""  const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];\n  const orcamentoSelecionado = orcamentosCliente.find((o) => o.id === f.orcamentoId);\n  const pronto = f.clienteId && (orcamentoSelecionado?.osId || f.descricaoLivre.trim() || f.itens.length > 0);"""
+          if s.count(old)!=1: raise SystemExit('NovaOS ready-state anchor mismatch')
+          p.write_text(s.replace(old,new,1))
+
+          p=Path('tests/blockers/rc1c1_mobile_flow_fixes.test.mjs')
+          s=p.read_text()
+          anchor="""  assert.match(data,/export async function carregarOSPorOrcamentoDB/);\n});"""
+          replacement="""  assert.match(data,/export async function carregarOSPorOrcamentoDB/);\n  assert.match(data,/const \\{ itemCosts, materialCosts, workOrderCosts \\} = await carregarCustosPrivados\\(companyId,response\\.data\\.id\\)/);\n  assert.match(legacy,/const pronto = f\\.clienteId && \\(orcamentoSelecionado\\?\\.osId \\|\\| f\\.descricaoLivre\\.trim\\(\\) \\|\\| f\\.itens\\.length > 0\\)/);\n});"""
+          if s.count(anchor)!=1: raise SystemExit('targeted-test anchor mismatch')
+          p.write_text(s.replace(anchor,replacement,1))
           PY
-      - name: Apply deterministic RC-1C.1 patch
-        working-directory: target
-        shell: bash
-        run: |
-          set -o pipefail
-          python ../runner/scripts/rc1c1-mobile-flow-fixes.py 2>&1 | tee /tmp/rc1c1-patch.log
-      - name: Upload patch diagnostics on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rc1c1-patch-diagnostics
-          path: /tmp/rc1c1-patch.log
-          retention-days: 1
       - name: Install locked dependencies
-        working-directory: target
         run: npm ci --ignore-scripts --no-fund
-      - name: Targeted work-order tests
-        working-directory: target
-        run: node --test tests/blockers/rc1c1_mobile_flow_fixes.test.mjs tests/blockers/rc1c_mobile_work_order.test.mjs
-      - name: Commit work-order flow fixes
-        working-directory: target
+      - name: Targeted RC-1C.1 tests
+        run: node --test tests/blockers/rc1c1_mobile_flow_fixes.test.mjs tests/blockers/rc1c_mobile_work_order.test.mjs tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c1_quote_product_images.test.mjs tests/blockers/rc1c_product_primary_parity.test.mjs
+      - name: Build smoke gate
+        run: npm run build
+      - name: Commit reviewed fixes
         run: |
           git config user.name rc1c1-runner
           git config user.email rc1c1-runner@users.noreply.github.com
-          git add src/lib/dataApi.js src/lib/dataApiExtras.js src/legacy/ZiisTecApp.jsx tests/blockers/rc1c1_mobile_flow_fixes.test.mjs
-          git commit -m "fix: stabilize RC-1C.1 work order creation"
-      - name: Targeted PDF H-K tests
-        working-directory: target
-        run: node --test tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c1_quote_product_images.test.mjs tests/blockers/rc1c_product_primary_parity.test.mjs
-      - name: Commit quote product image fixes
-        working-directory: target
-        run: |
-          git add src/lib/quoteV2Api.js src/screens/v2/QuoteAIBaseV2.jsx api/quote-pdf.js api/quotePdfLayout.js tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c1_quote_product_images.test.mjs
-          git commit -m "fix: close RC-1C.1 quote product image PDF flow"
-      - name: Build smoke gate before publishing
-        working-directory: target
-        run: npm run build
-      - name: Ensure only intended commits changed the tree
-        working-directory: target
-        run: |
+          git diff --check
+          git add src/lib/dataApi.js src/legacy/ZiisTecApp.jsx tests/blockers/rc1c1_mobile_flow_fixes.test.mjs
+          git commit -m "fix: harden RC-1C.1 linked work order retry"
           test -z "$(git status --porcelain)"
-          git diff --exit-code 6fc4839127f1805bfedcd5238f1a9d33f7d51b50..HEAD -- . ':!src/lib/dataApi.js' ':!src/lib/dataApiExtras.js' ':!src/legacy/ZiisTecApp.jsx' ':!tests/blockers/rc1c1_mobile_flow_fixes.test.mjs' ':!src/lib/quoteV2Api.js' ':!src/screens/v2/QuoteAIBaseV2.jsx' ':!api/quote-pdf.js' ':!api/quotePdfLayout.js' ':!tests/blockers/rc1c_quote_pdf_pagination.test.mjs' ':!tests/blockers/rc1c1_quote_product_images.test.mjs'
       - name: Publish target branch without force
-        working-directory: target
         run: git push origin HEAD:rc1c1-mobile-flow-fixes
