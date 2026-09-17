@@ -110,6 +110,21 @@ async function carregarOSCompletaDB(id) {
   return aplicarCustosPrivados([wo.data],itemCosts,materialCosts,workOrderCosts)[0];
 }
 
+export async function carregarOSPorIdDB(id) {
+  return fromWorkOrder(await carregarOSCompletaDB(id));
+}
+
+export async function carregarOSPorOrcamentoDB(quoteId, companyId) {
+  if (!quoteId || !companyId) return null;
+  const response = await supabase.from('work_orders').select(WO_SELECT)
+    .eq('company_id',companyId).eq('quote_id',quoteId).is('deleted_at',null)
+    .order('created_at',{ascending:true}).limit(1).maybeSingle();
+  if (response.error) throw response.error;
+  if (!response.data) return null;
+  const { itemCosts, materialCosts, extraCosts } = await carregarCustosPrivados(companyId,response.data.id);
+  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,extraCosts)[0]);
+}
+
 export async function carregarDadosEmpresa(companyId) {
   const reqs = await Promise.all([
     supabase.from('clients').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
@@ -148,13 +163,13 @@ export async function salvarOSDB(x, companyId, userId){
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_work_order_idempotent',{p_company:companyId,p_wo:x.id||null,p_request:req,p_row:row,p_items:items}));
   const id=check(response);
-  return fromWorkOrder(await carregarOSCompletaDB(id));
+  return carregarOSPorIdDB(id);
 }
 
 export async function atualizarOSDB(id, patch){
   const r=await supabase.from('work_orders').update(patch).eq('id',id).select('id').single();
   check(r);
-  return fromWorkOrder(await carregarOSCompletaDB(id));
+  return carregarOSPorIdDB(id);
 }
 export async function finalizarOSDB(id, extras={}){
   const r=await supabase.rpc('zt_finalize_work_order_with_warranty_overrides',{

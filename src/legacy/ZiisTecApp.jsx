@@ -16,7 +16,7 @@ import BarcodeScanner from "../components/BarcodeScanner";
 import { mensagemErro } from "../lib/supabase";
 import {
   recarregarSeguro, salvarClienteDB, salvarServicoDB, salvarProdutoDB, salvarOrcamentoDB,
-  salvarOSDB, atualizarOSDB, finalizarOSDB, resolverPrecificacaoOSDB, baixarLancamentoDB, salvarLancamentoDB, atualizarStatusOrcamentoDB,
+  salvarOSDB, carregarOSPorOrcamentoDB, atualizarOSDB, finalizarOSDB, resolverPrecificacaoOSDB, baixarLancamentoDB, salvarLancamentoDB, atualizarStatusOrcamentoDB,
   excluirRegistroDB,
 } from "../lib/dataApi";
 import {
@@ -945,14 +945,62 @@ export default function ZiisTec({ contexto }) {
   };
 
   /* --------- ordem de serviço --------- */
+  const abrirOSVinculada = (existente, orcamentoId) => {
+    setOrdens((lista) => lista.some((x) => x.id === existente.id)
+      ? lista.map((x) => x.id === existente.id ? existente : x)
+      : [existente, ...lista]);
+    setOrcamentos((lista) => lista.map((o) => o.id === orcamentoId ? { ...o, osId: existente.id } : o));
+    setOsAberta(existente.id);
+    aviso(`${existente.numero || "A OS"} já está vinculada a este orçamento.`);
+    return existente.id;
+  };
   const salvarOS = async (os) => {
-    if (real) {
-      try { const salvo = await salvarOSDB(os,empresaId,usuarioAtual?.id); setOrdens((l)=>os.id?l.map((x)=>x.id===salvo.id?salvo:x):[salvo,...l]); setOsAberta(salvo.id); aviso("Ordem de serviço salva"); return salvo.id; }
-      catch(e){ aviso(mensagemErro(e)); return null; }
+    const orcamentoId = os.orcamentoId || null;
+    if (!os.id && orcamentoId) {
+      const local = ordens.find((x) => x.orcamentoId === orcamentoId);
+      if (local) return abrirOSVinculada(local, orcamentoId);
+      if (real) {
+        try {
+          const existente = await carregarOSPorOrcamentoDB(orcamentoId, empresaId);
+          if (existente) return abrirOSVinculada(existente, orcamentoId);
+        } catch (e) {
+          aviso(mensagemErro(e));
+          return null;
+        }
+      }
     }
+    if (real) {
+      try {
+        const salvo = await salvarOSDB(os,empresaId,usuarioAtual?.id);
+        setOrdens((lista) => lista.some((x) => x.id === salvo.id)
+          ? lista.map((x) => x.id === salvo.id ? salvo : x)
+          : [salvo, ...lista]);
+        if (salvo.orcamentoId) setOrcamentos((lista) => lista.map((o) => o.id === salvo.orcamentoId ? { ...o, osId: salvo.id } : o));
+        setOsAberta(salvo.id);
+        aviso("Ordem de serviço salva");
+        return salvo.id;
+      } catch(e) {
+        if (!os.id && orcamentoId) {
+          try {
+            const existente = await carregarOSPorOrcamentoDB(orcamentoId, empresaId);
+            if (existente) return abrirOSVinculada(existente, orcamentoId);
+          } catch {}
+        }
+        aviso(mensagemErro(e));
+        return null;
+      }
+    }
+    let salvoId = os.id || null;
     if (os.id) setOrdens((l) => l.map((x) => (x.id === os.id ? os : x)));
-    else { const nova = { ...osBase, ...os, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: os.responsavelId || usuarioAtual?.id, historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] }; setOrdens((l) => [nova, ...l]); setOsAberta(nova.id); }
+    else {
+      const nova = { ...osBase, ...os, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: os.responsavelId || usuarioAtual?.id, historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] };
+      salvoId = nova.id;
+      setOrdens((l) => [nova, ...l]);
+      if (nova.orcamentoId) setOrcamentos((l) => l.map((o) => o.id === nova.orcamentoId ? { ...o, osId: nova.id } : o));
+      setOsAberta(nova.id);
+    }
     aviso("Ordem de serviço salva");
+    return salvoId;
   };
   const agendarOS = async (osId, { data, hora, responsavel, responsavelId }) => {
     if (!data) return;
@@ -1547,7 +1595,7 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
 }
 
 /* =================================================================== Agenda */
-function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao }) {
+function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, orcamentos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao }) {
   const tecnico = papel === "tecnico";
   const [dia, setDia] = useState(HOJE);
   const [visao, setVisao] = useState(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "lista" : "semana"));
@@ -1700,7 +1748,7 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
       </>}
 
       {!tecnico && <AgendarModal os={agendando} onClose={() => setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />}
-      {!tecnico && novaOS && <NovaOS onClose={() => setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} />}
+      {!tecnico && novaOS && <NovaOS onClose={() => setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} orcamentos={orcamentos} />}
     </>
   );
 }
@@ -3289,31 +3337,45 @@ function OrdensServico(p) {
 
 /* Abertura de OS pensada para o campo: descrever o problema já basta.
    O catálogo é atalho, não obrigação. */
-function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual, dataInicial = "" }) {
+function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual, dataInicial = "" }) {
   const [novoCliente, setNovoCliente] = useState(false);
   const [f, setF] = useState({
-    clienteId: "", descricaoLivre: "", local: "", localServico: "",
+    clienteId: "", orcamentoId: "", descricaoLivre: "", local: "", localServico: "",
     itens: [], data: dataInicial || "", hora: "09:00", responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null, obs: "",
   });
   const [catalogo, setCatalogo] = useState(false);
   const [abaCat, setAbaCat] = useState("servicos");
+  const [erroCriacao, setErroCriacao] = useState("");
+  const requestIdRef = useRef(null);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const escolherCliente = (id) => {
     const cl = clientes.find((x) => x.id === id);
-    setF((s) => ({ ...s, clienteId: id, local: cl?.endereco || s.local }));
+    setF((s) => ({ ...s, clienteId: id, orcamentoId: orcamentos.some((o) => o.id === s.orcamentoId && o.clienteId === id) ? s.orcamentoId : "", local: cl?.endereco || s.local }));
   };
+  const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];
   const pronto = f.clienteId && (f.descricaoLivre.trim() || f.itens.length > 0);
 
   const [criando, setCriando] = useState(false);
   const criar = async () => {
     if (criando) return;
     setCriando(true);
+    setErroCriacao("");
     try {
-      await salvarOS({
-        ...f, status: f.data ? "agendada" : "aguardando", checklist: [],
+      if (!requestIdRef.current) {
+        if (!globalThis.crypto?.randomUUID) throw new Error("Seu navegador precisa ser atualizado para salvar esta OS com segurança.");
+        requestIdRef.current = globalThis.crypto.randomUUID();
+      }
+      const salvoId = await salvarOS({
+        ...f, requestId: requestIdRef.current, status: f.data ? "agendada" : "aguardando", checklist: [],
         responsavel: f.responsavel || empresa.responsavel,
       });
+      if (!salvoId) {
+        setErroCriacao("Não foi possível salvar a ordem. Os dados preenchidos foram mantidos; tente novamente.");
+        return;
+      }
       onClose();
+    } catch (e) {
+      setErroCriacao(mensagemErro(e) || "Não foi possível salvar a ordem. Tente novamente.");
     } finally {
       setCriando(false);
     }
@@ -3325,6 +3387,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
         footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
           <Btn disabled={!pronto || criando} onClick={criar}>{criando ? "Criando…" : "Abrir ordem de serviço"}</Btn></>}>
 
+        {erroCriacao && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">{erroCriacao}</div>}
         <Field label="Cliente">
           <div className="flex gap-2 flex-wrap sm:flex-nowrap">
             <Select value={f.clienteId} onChange={(e) => escolherCliente(e.target.value)} className="flex-1">
@@ -3334,6 +3397,14 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
             <Btn variant="soft" icon={Plus} onClick={() => setNovoCliente(true)} className="shrink-0">Cadastrar novo cliente</Btn>
           </div>
         </Field>
+
+        {f.clienteId && <Field label="Orçamento vinculado (opcional)">
+          <Select value={f.orcamentoId || ""} onChange={(e) => set("orcamentoId", e.target.value)}>
+            <option value="">Sem orçamento vinculado</option>
+            {orcamentosCliente.map((o) => <option key={o.id} value={o.id}>{o.numero}{o.osId ? " · OS já criada" : ""}</option>)}
+          </Select>
+          <p className="mt-1.5 text-[12px] text-slate-500">Mostra somente orçamentos deste cliente. Se já houver uma OS vinculada, ela será aberta em vez de criar outra.</p>
+        </Field>}
 
         <Field label="O que precisa ser feito?" hint="Fale ou escreva com suas palavras. Isso já é suficiente para abrir a ordem.">
           <CampoVoz rows={4} valor={f.descricaoLivre} onChange={(v) => set("descricaoLivre", v)}

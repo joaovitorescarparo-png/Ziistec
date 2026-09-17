@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { carregarDadosEmpresa, salvarOSDB, salvarOrcamentoDB } from './dataApi';
+import { carregarOSPorIdDB, salvarOSDB, salvarOrcamentoDB } from './dataApi';
 import { ensureRequestId, idempotentWrite } from './reliability';
 import { redirectAuthAtual } from './authRedirect';
 
@@ -32,8 +32,7 @@ export async function criarOSDeOrcamentoDB(orc,companyId,userId,defaults={}){
     p_scheduled_time:null,
   }));
   const id=check(response);
-  const dados=await carregarDadosEmpresa(companyId);
-  const nova=(dados?.ordens||[]).find((o)=>o.id===id);
+  const nova=await carregarOSPorIdDB(id);
   if(!nova) throw new Error('A OS foi criada, mas não pôde ser recarregada.');
   return nova;
 }
