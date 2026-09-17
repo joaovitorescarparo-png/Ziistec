@@ -1,4 +1,4 @@
-name: RC1C Wave1 Fix Temp
+name: RC1C1 Flow Fix Runner
 
 on:
   push:
@@ -7,63 +7,67 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: rc1c1-flow-fix-runner
+  cancel-in-progress: false
+
 jobs:
-  validate-and-publish-object:
+  patch-test-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout runner branch
+        uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          ref: rc1c-wave1-fix-temp
+          path: runner
+          fetch-depth: 1
+      - name: Checkout RC-1C.1 target
+        uses: actions/checkout@v4
+        with:
+          ref: rc1c1-mobile-flow-fixes
+          path: target
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
-      - name: Confirm candidate has not moved unexpectedly
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/rc1c-mobile-ux-stabilization --jq .object.sha)" = "8483ffd84c1a7f513b8a54873251ce77d8e3a441"
-      - name: Apply syntax fix and remove harness
+      - name: Guard exact checkpoint
+        working-directory: target
         run: |
-          git apply rc1c-wave1-fix.patch
-          rm rc1c-wave1-fix.patch .github/workflows/rc1c-wave1-fix-temp.yml
+          test "$(git rev-parse HEAD)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
+          test "$(git rev-parse origin/rc1c-mobile-ux-stabilization)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
+      - name: Apply deterministic RC-1C.1 patch
+        working-directory: target
+        run: python ../runner/scripts/rc1c1-mobile-flow-fixes.py
       - name: Install locked dependencies
+        working-directory: target
         run: npm ci --ignore-scripts --no-fund
-      - name: Targeted voice regression
-        run: node --test tests/blockers/rc1c_voice_state_machine.test.mjs
-      - name: Canonical verify
-        run: npm run verify:v2
-      - name: Materialize clean disposable test tree
+      - name: Targeted work-order tests
+        working-directory: target
+        run: node --test tests/blockers/rc1c1_mobile_flow_fixes.test.mjs tests/blockers/rc1c_mobile_work_order.test.mjs
+      - name: Commit work-order flow fixes
+        working-directory: target
         run: |
-          git config user.name rc1c-test-runner
-          git config user.email rc1c-test-runner@users.noreply.github.com
-          git add -A
-          git commit -m "test: materialize RC-1C syntax fix"
+          git config user.name rc1c1-runner
+          git config user.email rc1c1-runner@users.noreply.github.com
+          git add src/lib/dataApi.js src/lib/dataApiExtras.js src/legacy/ZiisTecApp.jsx tests/blockers/rc1c1_mobile_flow_fixes.test.mjs
+          git commit -m "fix: stabilize RC-1C.1 work order creation"
+      - name: Targeted PDF H-K tests
+        working-directory: target
+        run: node --test tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c1_quote_product_images.test.mjs tests/blockers/rc1c_product_primary_parity.test.mjs
+      - name: Commit quote product image fixes
+        working-directory: target
+        run: |
+          git add src/lib/quoteV2Api.js src/screens/v2/QuoteAIBaseV2.jsx api/quote-pdf.js api/quotePdfLayout.js tests/blockers/rc1c_quote_pdf_pagination.test.mjs tests/blockers/rc1c1_quote_product_images.test.mjs
+          git commit -m "fix: close RC-1C.1 quote product image PDF flow"
+      - name: Build smoke gate before publishing
+        working-directory: target
+        run: npm run build
+      - name: Ensure only intended commits changed the tree
+        working-directory: target
+        run: |
           test -z "$(git status --porcelain)"
-      - name: Reproducible build
-        run: npm run verify:reproducible-build
-      - name: Create immutable tested commit object
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python - <<'PY'
-          import base64,json,os,subprocess,urllib.request
-          repo=os.environ['GITHUB_REPOSITORY']; token=os.environ['GH_TOKEN']
-          parent='8483ffd84c1a7f513b8a54873251ce77d8e3a441'; path='src/legacy/ZiisTecApp.jsx'
-          api='https://api.github.com/repos/'+repo
-          def post(endpoint,payload):
-            req=urllib.request.Request(api+endpoint,data=json.dumps(payload).encode(),headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},method='POST')
-            with urllib.request.urlopen(req) as r:return json.load(r)
-          raw=open(path,'rb').read(); blob=post('/git/blobs',{'content':base64.b64encode(raw).decode(),'encoding':'base64'})
-          base_tree=subprocess.check_output(['git','rev-parse',parent+'^{tree}'],text=True).strip()
-          tree=post('/git/trees',{'base_tree':base_tree,'tree':[{'path':path,'mode':'100644','type':'blob','sha':blob['sha']}]})
-          commit=post('/git/commits',{'message':'fix: repair mobile voice integration syntax','tree':tree['sha'],'parents':[parent]})
-          print('RC1C_WAVE1_FIX_COMMIT='+commit['sha'])
-          print('RC1C_WAVE1_FIX_TREE='+tree['sha'])
-          open('/tmp/rc1c-wave1-fix-sha.txt','w').write(commit['sha']+'\n'+tree['sha']+'\n')
-          PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rc1c-wave1-fix-sha
-          path: /tmp/rc1c-wave1-fix-sha.txt
-          retention-days: 1
+          git diff --exit-code 6fc4839127f1805bfedcd5238f1a9d33f7d51b50..HEAD -- . ':!src/lib/dataApi.js' ':!src/lib/dataApiExtras.js' ':!src/legacy/ZiisTecApp.jsx' ':!tests/blockers/rc1c1_mobile_flow_fixes.test.mjs' ':!src/lib/quoteV2Api.js' ':!src/screens/v2/QuoteAIBaseV2.jsx' ':!api/quote-pdf.js' ':!api/quotePdfLayout.js' ':!tests/blockers/rc1c_quote_pdf_pagination.test.mjs' ':!tests/blockers/rc1c1_quote_product_images.test.mjs'
+      - name: Publish target branch without force
+        working-directory: target
+        run: git push origin HEAD:rc1c1-mobile-flow-fixes
