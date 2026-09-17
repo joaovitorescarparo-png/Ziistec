@@ -1,0 +1,57 @@
+name: RC1C1 Inspect Temp
+on:
+  push:
+    branches: [rc1c1-inspect-temp]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rc1c1-mobile-flow-fixes
+          fetch-depth: 1
+      - name: Prove working base
+        run: |
+          test "$(git rev-parse HEAD)" = "6fc4839127f1805bfedcd5238f1a9d33f7d51b50"
+          git status --porcelain
+      - name: Inspect RC1C1 surfaces
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          targets = [
+            ('src/legacy/ZiisTecApp.jsx', ['salvarOS', 'NovaOS', 'criarOSDeOrcamento', 'Criar OS', 'mostrarImagensProdutos', 'show_product_images', 'BarcodeDetector', 'codigoBarras', 'setOsAberta', 'setTela']),
+            ('src/App.jsx', ['Carregando sua empresa', 'Suspense', 'loading', 'visibilitychange', 'location']),
+            ('src/lib/useSessao.js', ['visibilitychange', 'focus', 'loading', 'revalid', 'tenant', 'company']),
+            ('src/lib/dataApi.js', ['carregarOSCompletaDB', 'salvarOSDB', 'carregarDadosEmpresa']),
+            ('src/lib/dataApiExtras.js', ['criarOSDeOrcamentoDB', 'carregarDadosEmpresa']),
+            ('api/quote-pdf.js', ['carregarImagemProduto', 'show_product_images', 'image_path', 'embedJpg', 'embedPng', 'WEBP', 'webp']),
+          ]
+          for file, pats in targets:
+            p=Path(file)
+            print(f'\n===== {file} =====')
+            if not p.exists():
+              print('MISSING')
+              continue
+            lines=p.read_text(encoding='utf-8').splitlines()
+            seen=set()
+            for pat in pats:
+              hits=[i for i,l in enumerate(lines,1) if pat.lower() in l.lower()]
+              print(f'-- pattern {pat!r}: {hits}')
+              for hit in hits:
+                start=max(1,hit-18); end=min(len(lines),hit+36)
+                key=(start,end)
+                if key in seen: continue
+                seen.add(key)
+                print(f'--- lines {start}-{end} around {hit} ---')
+                for n in range(start,end+1): print(f'{n:05d}: {lines[n-1]}')
+          print('\n===== candidate tests mentioning RC1C/OS/PDF/barcode =====')
+          for p in sorted(Path('tests').rglob('*')):
+            if p.is_file() and p.suffix in {'.js','.mjs','.jsx','.ts','.tsx'}:
+              t=p.read_text(encoding='utf-8',errors='ignore').lower()
+              if any(x in t for x in ['rc1c','work order','ordem de serviço','quote-pdf','barcode','nova os','criar os']): print(p)
+          print('\n===== package scripts =====')
+          print(Path('package.json').read_text(encoding='utf-8'))
+          PY
