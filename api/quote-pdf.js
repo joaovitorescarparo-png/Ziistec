@@ -59,7 +59,7 @@ function fitText(text, font, size, maxWidth) {
 }
 
 async function carregarImagemProduto(path,auth,pdf){
-  if(!path)return null;
+  if(!path)return {image:null,note:''};
   const encoded=String(path).split('/').map(encodeURIComponent).join('/');
   for(const bucket of ['zt-product-images','zt-branding']){
     try{
@@ -67,12 +67,12 @@ async function carregarImagemProduto(path,auth,pdf){
       const bytes=new Uint8Array(await r.arrayBuffer());
       if(bytes.byteLength>2*1024*1024)continue;
       const ct=String(r.headers.get('content-type')||'').toLowerCase();
-      if(ct.includes('png')) return await pdf.embedPng(bytes);
-      if(ct.includes('jpeg')||ct.includes('jpg')) return await pdf.embedJpg(bytes);
-      // WEBP permanece suportado no cadastro, mas é omitido no PDF até existir conversão segura.
+      if(ct.includes('png')) return {image:await pdf.embedPng(bytes),note:''};
+      if(ct.includes('jpeg')||ct.includes('jpg')) return {image:await pdf.embedJpg(bytes),note:''};
+      if(ct.includes('webp')) return {image:null,note:'Imagem do produto em WEBP não pode ser incorporada diretamente; use JPG ou PNG para exibi-la no PDF.'};
     }catch{}
   }
-  return null;
+  return {image:null,note:''};
 }
 
 async function carregarLogo(company, auth, pdf) {
@@ -308,10 +308,14 @@ export default async function handler(req, res) {
       const total = qty * unit;
       subtotal += total;
       const productMeta=item.product_id?productById.get(item.product_id):null;
-      const productImage=quote.show_product_images&&productMeta?.image_path ? await carregarImagemProduto(productMeta.image_path,auth,pdf) : null;
+      const productImageResult=quote.show_product_images&&productMeta?.image_path ? await carregarImagemProduto(productMeta.image_path,auth,pdf) : {image:null,note:''};
+      const productImage=productImageResult.image;
       const textW=productImage?218:270;
       const desc = wrapText(item.name || 'Item', normal, 9.2, textW);
-      const notes = item.notes ? wrapText(item.notes, normal, 7.5, textW) : [];
+      const notes = [
+        ...(item.notes ? wrapText(item.notes, normal, 7.5, textW) : []),
+        ...(productImageResult.note ? wrapText(productImageResult.note, normal, 7.5, textW) : []),
+      ];
       const rowH = Math.max(productImage?58:40, desc.length * 12 + notes.length * 9 + 15);
       if (shouldBreakPdfBlock(y,rowH,SAFE_BOTTOM,12)) {
         newPage(true);

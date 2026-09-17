@@ -37,5 +37,9 @@ export function quoteScenarioPageCounts() {
     E: simulateQuotePages({ rowHeights:Array(6).fill(40), closingHeight:206 }),
     F: simulateQuotePages({ preItemBlockHeights:[300], rowHeights:[40,40,40], closingHeight:206 }),
     G: simulateQuotePages({ rowHeights:[40,40,40], closingHeight:340 }),
+    H: simulateQuotePages({ rowHeights:[58], closingHeight:206 }),
+    I: simulateQuotePages({ rowHeights:[40], closingHeight:206 }),
+    J: simulateQuotePages({ rowHeights:Array(8).fill(58), closingHeight:206 }),
+    K: simulateQuotePages({ rowHeights:[40], closingHeight:206 }),
   };
 }

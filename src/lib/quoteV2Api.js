@@ -16,7 +16,7 @@ const tokensOf = (v='') => [...new Set(strip(v).split(/[^a-z0-9]+/).filter(t=>t.
 
 const mapClient = (x) => ({ id:x.id, nome:x.name, fantasia:x.trade_name || '', telefone:x.phone || '', whatsapp:x.whatsapp || '', endereco:x.address || '' });
 const mapService = (x) => ({ id:x.id, tipo:'servico', nome:x.name, categoria:x.category || '', unidade:x.unit || 'unidade', preco:n(x.price), custo:n(x.cost), ativo:x.active !== false });
-const mapProduct = (x) => ({ id:x.id, tipo:'produto', nome:x.name, marca:x.brand || '', modelo:x.model || '', unidade:x.unit || 'unidade', preco:n(x.price), custo:n(x.cost), ativo:x.active !== false });
+const mapProduct = (x) => ({ id:x.id, tipo:'produto', nome:x.name, marca:x.brand || '', modelo:x.model || '', unidade:x.unit || 'unidade', preco:n(x.price), custo:n(x.cost), ativo:x.active !== false, imagemPath:x.image_path || null });
 
 export async function carregarBaseOrcamentoV2DB(companyId) {
   // Não depende de image_path/0050: o orçamento V2 também precisa abrir no preview
@@ -24,7 +24,7 @@ export async function carregarBaseOrcamentoV2DB(companyId) {
   const [clients, services, products, company] = await Promise.all([
     supabase.from('clients').select('id,name,trade_name,phone,whatsapp,address').eq('company_id',companyId).is('deleted_at',null).order('name'),
     supabase.from('services').select('id,name,category,unit,price,cost,active').eq('company_id',companyId).is('deleted_at',null).order('name'),
-    supabase.from('products').select('id,name,brand,model,unit,price,cost,active').eq('company_id',companyId).is('deleted_at',null).order('name'),
+    supabase.from('products').select('id,name,brand,model,unit,price,cost,active,image_path').eq('company_id',companyId).is('deleted_at',null).order('name'),
     supabase.from('companies').select('default_validity_days,default_payment_terms,default_notes').eq('id',companyId).single(),
   ]);
   const firstError = [clients,services,products,company].find(r=>r.error)?.error;
