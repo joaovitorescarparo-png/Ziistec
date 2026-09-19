@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { supabaseServidor } from './_supabaseServerConfig.js';
-import { shouldBreakPdfBlock, canKeepClosingTogether } from './quotePdfLayout.js';
+import { shouldBreakPdfBlock, canKeepClosingTogether, quoteTotalsLayout } from './quotePdfLayout.js';
 
 const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -344,7 +344,10 @@ export default async function handler(req, res) {
     const rightInfoH = 68;
     const notesH = noteLines.length ? 24 + noteLines.length * 11 : 0;
     const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 12;
-    const totalBlockH = 44;
+    const discount = Number(quote.discount || 0);
+    const surcharge = Number(quote.surcharge || 0);
+    const totalsLayout = quoteTotalsLayout({ discount, surcharge });
+    const totalBlockH = totalsLayout.height;
     const warrantyH=warrantyLines.length?26+warrantyLines.length*11:0;
     const signatureH = 58;
     const closingGapH = 20;
@@ -353,18 +356,22 @@ export default async function handler(req, res) {
     if (shouldBreakPdfBlock(y,lowerBlockH,SAFE_BOTTOM) && canKeepClosingTogether(lowerBlockH,A4[1]-88,SAFE_BOTTOM)) newPage(true);
     else if (shouldBreakPdfBlock(y,totalBlockH,SAFE_BOTTOM)) newPage(true);
 
-    const discount = Number(quote.discount || 0);
-    const surcharge = Number(quote.surcharge || 0);
     const grand = Math.max(0, subtotal - discount + surcharge);
     const totalX = A4[0] - margin - 230;
-    if (discount > 0 || surcharge > 0) {
-      txt('Subtotal', totalX, y, 8.5, normal, muted); txtRight(money(subtotal), A4[0] - margin, y, 8.5, normal, ink); y -= 14;
-      if (discount > 0) { txt('Desconto', totalX, y, 8.5, normal, muted); txtRight(`- ${money(discount)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 14; }
-      if (surcharge > 0) { txt('Acréscimo', totalX, y, 8.5, normal, muted); txtRight(`+ ${money(surcharge)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 18; }
+    const totalRows = {
+      subtotal: ['Subtotal', money(subtotal)],
+      discount: ['Desconto', `- ${money(discount)}`],
+      surcharge: ['Acréscimo', `+ ${money(surcharge)}`],
+    };
+    for (const row of totalsLayout.rows) {
+      const [label, value] = totalRows[row.key];
+      const rowY = y - row.baselineOffset;
+      txt(label, totalX, rowY, 8.5, normal, muted);
+      txtRight(value, A4[0] - margin, rowY, 8.5, normal, ink);
     }
-    page.drawRectangle({ x: totalX - 10, y: y - 17, width: A4[0] - margin - totalX + 10, height: 38, color: navy });
-    txt('TOTAL', totalX + 3, y - 2, 11, bold, white);
-    txtRight(money(grand), A4[0] - margin - 14, y - 4, 15, bold, white);
+    page.drawRectangle({ x: totalX - 10, y: y - totalsLayout.bandBottomOffset, width: A4[0] - margin - totalX + 10, height: totalsLayout.bandHeight, color: navy });
+    txt('TOTAL', totalX + 3, y - totalsLayout.labelBaselineOffset, 11, bold, white);
+    txtRight(money(grand), A4[0] - margin - 14, y - totalsLayout.amountBaselineOffset, 15, bold, white);
     y -= totalBlockH;
 
     if(warrantyLines.length){
