@@ -32,8 +32,10 @@ if (beforeStatus) {
 
 const paths = tracked();
 const beforeMtimes = snapshotMtimes(paths);
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const build = spawnSync(npm, ['run', 'build'], { stdio: 'inherit' });
+const build = process.platform === 'win32'
+  ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm run build'], { stdio: 'inherit' })
+  : spawnSync('npm', ['run', 'build'], { stdio: 'inherit' });
+if (build.error) console.error(build.error);
 if (build.status !== 0) process.exit(build.status || 1);
 
 const afterStatus = status();
