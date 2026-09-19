@@ -1,3 +1,29 @@
+export function quoteTotalsLayout({ discount = 0, surcharge = 0 } = {}) {
+  const rowHeight = 14;
+  const adjustmentDescent = 3;
+  const adjustmentGap = 8;
+  const bandHeight = 38;
+  const afterBandGap = 27;
+  const keys = [];
+  if (discount > 0 || surcharge > 0) keys.push('subtotal');
+  if (discount > 0) keys.push('discount');
+  if (surcharge > 0) keys.push('surcharge');
+  const rows = keys.map((key, index) => ({ key, baselineOffset: index * rowHeight }));
+  // Offsets grow down from the existing totals cursor. Preserve the compact
+  // no-adjustment band; otherwise clear the last baseline and its descenders.
+  const bandTopOffset = rows.length
+    ? rows.at(-1).baselineOffset + adjustmentDescent + adjustmentGap
+    : -21;
+  const bandBottomOffset = bandTopOffset + bandHeight;
+  return {
+    rows, adjustmentDescent, adjustmentGap, bandHeight,
+    bandTopOffset, bandBottomOffset,
+    labelBaselineOffset: bandTopOffset + 23,
+    amountBaselineOffset: bandTopOffset + 25,
+    height: bandBottomOffset + afterBandGap,
+  };
+}
+
 export function shouldBreakPdfBlock(y, height, safeBottom = 72, reserve = 0) {
   return Number(y) - Number(height) < Number(safeBottom) + Number(reserve);
 }

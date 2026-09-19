@@ -1044,12 +1044,13 @@ export default function ZiisTec({ contexto }) {
     return salvoId;
   };
   const agendarOS = async (osId, { data, hora, responsavel, responsavelId }) => {
-    if (!data) return;
+    if (!data) return false;
     if (real) {
       try { const salvo=await atualizarOSDB(osId,{scheduled_date:data,scheduled_time:hora||null,assigned_to:responsavelId||null,status:'scheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?{...salvo,responsavel}:x)); }
-      catch(e){ aviso(mensagemErro(e)); return; }
+      catch(e){ aviso(mensagemErro(e)); return false; }
     } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data, hora, responsavel, responsavelId: responsavelId || x.responsavelId, status: x.status === "aguardando" || x.status === "agendada" ? "agendada" : x.status, historico: [...x.historico, { id: uid(), quando: HOJE, texto: `Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""} · ${responsavel}` }] } : x));
     aviso(`Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""}`);
+    return true;
   };
   const desagendarOS = async (osId) => {
     if (real) {
@@ -1796,20 +1797,35 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
 
 function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = [] }) {
   const [f, setF] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const salvandoRef = useRef(false);
   useEffect(() => { if (os) setF({ data: os.data || diaSugerido || HOJE, hora: os.hora || "09:00",
     responsavel: os.responsavel || empresa.responsavel, responsavelId: os.responsavelId || null }); }, [os]);
+  const fechar = () => { if (!salvandoRef.current) onClose(); };
+  const confirmar = async () => {
+    if (!f?.data || salvandoRef.current) return;
+    salvandoRef.current = true;
+    setSalvando(true);
+    try {
+      const salvo = await onSalvar(os.id, f);
+      if (salvo === true) onClose();
+    } finally {
+      salvandoRef.current = false;
+      setSalvando(false);
+    }
+  };
   if (!os || !f) return null;
   return (
-    <Modal open onClose={onClose} title="Agendar atendimento" sub={os.numero}
-      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn disabled={!f.data} onClick={() => { onSalvar(os.id, f); onClose(); }}>Confirmar agendamento</Btn></>}>
+    <Modal open onClose={fechar} title="Agendar atendimento" sub={os.numero}
+      footer={<><Btn variant="ghost" disabled={salvando} onClick={fechar}>Cancelar</Btn>
+        <Btn disabled={!f.data || salvando} onClick={confirmar}>{salvando ? "Agendando..." : "Confirmar agendamento"}</Btn></>}>
       <div className="grid sm:grid-cols-2 gap-5">
-        <Field label="Data do atendimento"><Input type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></Field>
-        <Field label="Horário"><Input type="time" value={f.hora} onChange={(e) => setF({ ...f, hora: e.target.value })} /></Field>
+        <Field label="Data do atendimento"><Input disabled={salvando} type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></Field>
+        <Field label="Horário"><Input disabled={salvando} type="time" value={f.hora} onChange={(e) => setF({ ...f, hora: e.target.value })} /></Field>
       </div>
       {empresa.temEquipe && (
         <Field label="Responsável" hint="A ordem aparece em 'Minhas OS' de quem for atribuído.">
-          <Select value={f.responsavelId || ""} onChange={(e) => {
+          <Select disabled={salvando} value={f.responsavelId || ""} onChange={(e) => {
             const m = equipe.find((x) => x.usuarioId === e.target.value);
             setF({ ...f, responsavelId: e.target.value || null, responsavel: m?.usuario?.nome || f.responsavel });
           }}>
