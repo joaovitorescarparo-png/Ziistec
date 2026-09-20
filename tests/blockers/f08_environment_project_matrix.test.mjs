@@ -17,6 +17,8 @@ const FIELD_WORKFLOW_BRANCH = 'field-workflow-v1';
 const FIELD_WORKFLOW_HOST = 'ziistec-git-field-workflow-v1-js-connect.vercel.app';
 const RC1C_BRANCH = 'rc1c-mobile-ux-stabilization';
 const RC1C_HOST = 'ziistec-git-rc1c-mobile-ux-stabilization-js-connect.vercel.app';
+const RC1C2_BRANCH = 'codex/rc1c2-clean-validation';
+const RC1C2_HOST = 'ziistec-git-codex-rc1c2-clean-validation-js-connect.vercel.app';
 
 const client = ({ deploymentEnv, host, envUrl = '', envKey = '' }) => resolverConfigSupabase({
   deploymentEnv,
@@ -130,6 +132,36 @@ test('F08 RC-1C: branch e host autorizam somente Staging e preservam fail-closed
     client({ deploymentEnv: 'preview', host: 'rc1c-preview-desconhecido.vercel.app', envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }),
     'preview client realmente desconhecido',
   );
+});
+
+test('F08 RC-1C.2 server: Preview autorizado aceita somente Staging', () => {
+  mustConfigure(
+    server({ vercelEnv: 'preview', branch: RC1C2_BRANCH, url: STAGING_SUPABASE_URL, key: STAGING_KEY }),
+    STAGING_SUPABASE_URL,
+    'rc1c2 server staging explícito',
+  );
+  mustConfigure(server({ vercelEnv: 'preview', branch: RC1C2_BRANCH }), STAGING_SUPABASE_URL, 'rc1c2 server fallback staging');
+  for (const [url, key] of [[PROD_SUPABASE_URL, PROD_KEY], [STAGING_SUPABASE_URL, INVALID_KEY], [INVALID_URL, INVALID_KEY]]) {
+    mustFailClosed(server({ vercelEnv: 'preview', branch: RC1C2_BRANCH, url, key }), 'rc1c2 server par não autorizado');
+  }
+  mustFailClosed(server({ vercelEnv: 'preview', branch: RC1C2_BRANCH, url: STAGING_SUPABASE_URL }), 'rc1c2 server env parcial');
+  mustFailClosed(server({ vercelEnv: 'preview', branch: 'codex/rc1c2-preview-desconhecido' }), 'rc1c2 server branch desconhecida sem fallback');
+  mustFailClosed(server({ vercelEnv: 'production', branch: RC1C2_BRANCH, url: STAGING_SUPABASE_URL, key: STAGING_KEY }), 'rc1c2 server não autoriza staging em production');
+});
+
+test('F08 RC-1C.2 client: somente o alias estável de Preview aceita Staging', () => {
+  mustConfigure(
+    client({ deploymentEnv: 'preview', host: RC1C2_HOST, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }),
+    STAGING_SUPABASE_URL,
+    'rc1c2 client staging explícito',
+  );
+  mustConfigure(client({ deploymentEnv: 'preview', host: RC1C2_HOST }), STAGING_SUPABASE_URL, 'rc1c2 client fallback staging');
+  for (const [envUrl, envKey] of [[PROD_SUPABASE_URL, PROD_KEY], [STAGING_SUPABASE_URL, INVALID_KEY], [INVALID_URL, INVALID_KEY]]) {
+    mustFailClosed(client({ deploymentEnv: 'preview', host: RC1C2_HOST, envUrl, envKey }), 'rc1c2 client par não autorizado');
+  }
+  mustFailClosed(client({ deploymentEnv: 'preview', host: RC1C2_HOST, envUrl: STAGING_SUPABASE_URL }), 'rc1c2 client env parcial');
+  mustFailClosed(client({ deploymentEnv: 'preview', host: 'ziistec-5rdt2wuys-js-connect.vercel.app', envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), 'rc1c2 client URL imutável não autorizada');
+  mustFailClosed(client({ deploymentEnv: 'production', host: RC1C2_HOST, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), 'rc1c2 client não autoriza staging em production');
 });
 
 test('F08 server: development aceita staging explícito e nunca produção/terceiro', () => {
