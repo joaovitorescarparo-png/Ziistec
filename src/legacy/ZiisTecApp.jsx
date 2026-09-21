@@ -9,7 +9,7 @@ import {
   CircleCheck, Building2, User, CheckCircle2, Circle, AlertTriangle,
   Printer, MoreHorizontal, CalendarClock, Receipt, Banknote, Mic, MicOff,
   Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles, Navigation,
-  TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building,
+  TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building, ChevronDown,
 } from "lucide-react";
 import GlobalSearchModal from "../components/GlobalSearchModal";
 import BarcodeScanner from "../components/BarcodeScanner";
@@ -318,6 +318,38 @@ const ST_OS = {
 const statusLanc = (l) => (l.pago ? { label: l.tipo === "receita" ? "Recebido" : "Pago", tone: "sucesso" } : l.vencimento < HOJE ? { label: "Vencido", tone: "erro" } : { label: l.tipo === "receita" ? "A receber" : "A pagar", tone: "atencao" });
 
 const Panel = ({ children, className }) => <div className={cx("bg-white rounded-2xl ring-1 ring-slate-200/70", className)}>{children}</div>;
+
+class TelaErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("[ZiisTec] erro inesperado de tela", error, info);
+  }
+  tentarNovamente = () => this.setState({ error: null });
+  voltar = () => {
+    this.setState({ error: null });
+    this.props.onBack?.();
+  };
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" className="rounded-2xl bg-white ring-1 ring-rose-200 p-5 sm:p-6">
+        <AlertTriangle className="w-6 h-6 text-rose-700 mb-3" aria-hidden="true" />
+        <h1 className="text-xl font-semibold text-slate-900">Algo deu errado ao abrir esta tela</h1>
+        <p className="mt-2 text-sm text-slate-600">O erro foi mantido visível para não deixar o aplicativo em branco.</p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Btn onClick={this.tentarNovamente}>Tentar novamente</Btn>
+          <Btn variant="soft" onClick={this.voltar}>Voltar</Btn>
+        </div>
+      </div>
+    );
+  }
+}
 
 const Rotulo = ({ children, acao }) => (
   <div className="flex items-end justify-between gap-4 mb-3">
@@ -954,7 +986,7 @@ export default function ZiisTec({ contexto }) {
     aviso(`${existente.numero || "A OS"} já está vinculada a este orçamento.`);
     return existente.id;
   };
-  const salvarOS = async (os) => {
+  const salvarOS = async (os, opcoes = {}) => {
     const orcamentoId = os.orcamentoId || null;
     if (!os.id && orcamentoId) {
       const local = ordens.find((x) => x.orcamentoId === orcamentoId);
@@ -964,6 +996,7 @@ export default function ZiisTec({ contexto }) {
           const existente = await carregarOSPorOrcamentoDB(orcamentoId, empresaId);
           if (existente) return abrirOSVinculada(existente, orcamentoId);
         } catch (e) {
+          if (opcoes.propagarErro) throw e;
           aviso(mensagemErro(e));
           return null;
         }
@@ -986,6 +1019,7 @@ export default function ZiisTec({ contexto }) {
             if (existente) return abrirOSVinculada(existente, orcamentoId);
           } catch {}
         }
+        if (opcoes.propagarErro) throw e;
         aviso(mensagemErro(e));
         return null;
       }
@@ -1333,7 +1367,7 @@ export default function ZiisTec({ contexto }) {
           {tela === "clientes" && <Clientes {...props} />}
           {tela === "catalogo" && <Catalogo {...props} />}
           {tela === "orcamentos" && <Orcamentos {...props} />}
-          {tela === "ordens" && <OrdensServico {...props} />}
+          {tela === "ordens" && <TelaErrorBoundary key={osAberta || "ordens-lista"} onBack={() => setOsAberta(null)}><OrdensServico {...props} /></TelaErrorBoundary>}
           {tela === "garantias" && <Garantias {...props} />}
           {tela === "compras" && <Compras {...props} />}
           {tela === "financeiro" && <Financeiro {...props} />}
@@ -3369,7 +3403,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
       const salvoId = await salvarOS({
         ...f, requestId: requestIdRef.current, status: f.data ? "agendada" : "aguardando", checklist: [],
         responsavel: f.responsavel || empresa.responsavel,
-      });
+      }, { propagarErro: true });
       if (!salvoId) {
         setErroCriacao("Não foi possível salvar a ordem. Os dados preenchidos foram mantidos; tente novamente.");
         return;
@@ -6242,3 +6276,5 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
 /* FIELD WORKFLOW V1 · wave 3b · checklist templates and return flow */
 
 /* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
+
+export { OSDetalhe, NovaOS, OrcamentoEditor, TelaErrorBoundary };
