@@ -142,7 +142,7 @@ const PRODUTOS_SEED = [
 ];
 
 const itemServico = (s, qtd, preco) => ({ id: uid(), tipo: "servico", catalogoId: s.id, nome: s.nome, unidade: s.unidade, qtd, preco: preco ?? s.preco, custo: s.custo });
-const itemProduto = (p, qtd, preco) => ({ id: uid(), tipo: "produto", catalogoId: p.id, nome: `${p.nome}${p.marca ? " · " + p.marca : ""}${p.modelo ? " " + p.modelo : ""}`, unidade: p.unidade, qtd, preco: preco ?? p.preco, custo: p.custo });
+const itemProduto = (p, qtd, preco) => ({ id: uid(), tipo: "produto", catalogoId: p.id, nome: `${p.nome}${p.marca ? " · " + p.marca : ""}${p.modelo ? " " + p.modelo : ""}`, unidade: p.unidade, qtd, preco: preco ?? p.preco, custo: p.custo, imagemPath: p.imagemPath || null });
 const itemLivre = ({ nome = "", qtd = 1, unidade = "unidade", preco = 0, obs = "" } = {}) =>
   ({ id: uid(), tipo: "livre", catalogoId: null, nome, unidade, qtd, preco, custo: 0, obs });
 const S = (id) => SERVICOS_SEED.find((s) => s.id === id);
@@ -2742,6 +2742,28 @@ function OrcamentoDoc(p) {
 }
 
 /* -------------------------------------------------------------- editor de orçamento */
+function MiniaturaProdutoOrcamento({ imagemPath, nome }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let ativo = true;
+    setSrc(null);
+    if (!imagemPath) return () => { ativo = false; };
+    resolverImagemProdutoDB(imagemPath)
+      .then((url) => { if (ativo) setSrc(url || null); })
+      .catch(() => { if (ativo) setSrc(null); });
+    return () => { ativo = false; };
+  }, [imagemPath]);
+  if (!imagemPath) return null;
+  return (
+    <div className="mb-2 flex items-center gap-2">
+      <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-100 ring-1 ring-slate-200 shrink-0 flex items-center justify-center">
+        {src ? <img src={src} alt={nome || "Produto"} className="w-full h-full object-cover" /> : <Camera className="w-4 h-4 text-slate-400" aria-hidden="true" />}
+      </div>
+      <span className="text-[12px] text-slate-500">Foto do produto vinculada</span>
+    </div>
+  );
+}
+
 function OrcamentoEditor(p) {
   const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente,
     salvarServico, salvarProduto, inicial, onFechar, cliente, aviso } = p;
@@ -2764,6 +2786,7 @@ function OrcamentoEditor(p) {
     desconto: inicial?.desconto || 0, acrescimo: inicial?.acrescimo || 0,
     condicao: inicial?.condicao || empresa.condicaoPadrao, obs: inicial?.obs ?? empresa.observacaoPadrao,
     local: inicial?.local || "", localServico: inicial?.localServico || "", osId: inicial?.osId || null,
+    mostrarImagensProdutos: inicial?.id ? Boolean(inicial.mostrarImagensProdutos) : true,
   }));
   const [buscaCat, setBuscaCat] = useState("");
   const [abaCat, setAbaCat] = useState("servicos");
@@ -2786,6 +2809,7 @@ function OrcamentoEditor(p) {
   const addLivre = (dados) => setD((st) => ({ ...st, itens: [...st.itens, itemLivre(dados)] }));
   const upItem = (id, k, v) => setD((s) => ({ ...s, itens: s.itens.map((i) => (i.id === id ? { ...i, [k]: v } : i)) }));
   const rmItem = (id) => setD((s) => ({ ...s, itens: s.itens.filter((i) => i.id !== id) }));
+  const imagemProdutoItem = (i) => i.tipo === "produto" ? (i.imagemPath || produtos.find((p) => p.id === i.catalogoId)?.imagemPath || null) : null;
 
   /* Preenche o formulário aberto a partir do que foi falado/digitado.
      Acrescenta itens em vez de descartar o que já existe, e só sobrescreve
@@ -2974,6 +2998,7 @@ function OrcamentoEditor(p) {
                     <div key={i.id} className="p-4 sm:p-5">
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="min-w-0">
+                          {imagemProdutoItem(i) && <MiniaturaProdutoOrcamento imagemPath={imagemProdutoItem(i)} nome={i.nome} />}
                           {i.tipo === "livre" ? (
                             <Input value={i.nome} onChange={(e) => upItem(i.id, "nome", e.target.value)} aria-label="Descrição do item" className="font-medium" />
                           ) : <p className="font-medium text-slate-900">{i.nome}</p>}
@@ -3044,6 +3069,15 @@ function OrcamentoEditor(p) {
               <Field label="Desconto"><InputMoeda valor={d.desconto} onChange={(v) => setD({ ...d, desconto: v })} aria-label="Desconto" /></Field>
               <Field label="Acréscimo"><InputMoeda valor={d.acrescimo} onChange={(v) => setD({ ...d, acrescimo: v })} aria-label="Acréscimo" /></Field>
             </div>
+            <label className="mt-5 flex items-start gap-3 rounded-xl bg-slate-50 ring-1 ring-slate-200 px-3.5 py-3 cursor-pointer">
+              <input type="checkbox" checked={Boolean(d.mostrarImagensProdutos)}
+                onChange={(e) => setD({ ...d, mostrarImagensProdutos: e.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-teal-700" />
+              <span>
+                <span className="block text-[13px] font-medium text-slate-800">Mostrar fotos dos produtos no PDF</span>
+                <span className="block text-[12px] text-slate-500 mt-0.5">Itens sem foto continuam normalmente, sem espaço vazio.</span>
+              </span>
+            </label>
             <div className="flex justify-between items-baseline pt-4 mt-4 border-t border-slate-200">
               <span className="text-[14px] font-medium text-slate-600">Total</span>
               <span className="text-[26px] font-semibold text-slate-900 tracking-tight tabular-nums">{brl(totalDoc(d))}</span>
