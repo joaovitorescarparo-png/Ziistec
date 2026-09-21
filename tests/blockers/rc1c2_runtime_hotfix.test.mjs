@@ -167,17 +167,17 @@ test('RC-1C.2 real legacy surfaces render without runtime ReferenceError', async
       const onHtml = renderToStaticMarkup(React.createElement(OrcamentoEditor, { ...common, inicial: inicialOn }));
       assert.match(onHtml, /Mostrar fotos dos produtos no PDF/);
       assert.match(onHtml, /Foto do produto vinculada/);
-      assert.match(onHtml, /type="checkbox" checked=""/);
+      assert.match(onHtml, /<input[^>]*type="checkbox"[^>]*checked=""|<input[^>]*checked=""[^>]*type="checkbox"/);
 
       const offHtml = renderToStaticMarkup(React.createElement(OrcamentoEditor, {
         ...common,
         inicial: { ...inicialOn, mostrarImagensProdutos: false },
       }));
       assert.match(offHtml, /Mostrar fotos dos produtos no PDF/);
-      assert.doesNotMatch(offHtml, /type="checkbox" checked=""/);
+      assert.doesNotMatch(offHtml, /<input[^>]*type="checkbox"[^>]*checked=""|<input[^>]*checked=""[^>]*type="checkbox"/);
 
       const novoHtml = renderToStaticMarkup(React.createElement(OrcamentoEditor, { ...common, inicial: null }));
-      assert.match(novoHtml, /type="checkbox" checked=""/);
+      assert.match(novoHtml, /<input[^>]*type="checkbox"[^>]*checked=""|<input[^>]*checked=""[^>]*type="checkbox"/);
     });
   } finally {
     await vite.close();
