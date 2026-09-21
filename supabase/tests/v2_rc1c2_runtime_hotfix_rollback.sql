@@ -161,7 +161,7 @@ set quote_off=not (select q.show_product_images from public.quotes q where q.id=
 
 reset role;
 
-do $
+do $$
 declare t zt_rc1c2_runtime_test%rowtype;
 begin
   select * into t from zt_rc1c2_runtime_test;
@@ -198,7 +198,7 @@ begin
   ) then
     raise exception 'RC1C2_QUOTE_PRODUCT_IMAGE_FLAG_FAILED';
   end if;
-end $;
+end $$;
 
 select
   'RC1C2_MANUAL_OS_WRITE_READBACK' as test,
