@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - rc1c2-gates-runner-temp
+  pull_request:
+    branches:
+      - rc1c2-runtime-os-photo-hotfix-temp
 
 permissions:
   contents: read
