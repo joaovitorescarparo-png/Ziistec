@@ -19,11 +19,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 179e5f19526539a9892d8689ea96f390a415e61a
+          ref: 0ab57d8e18ef3ded56156ef47bbfa896574d628b
           fetch-depth: 0
       - name: Guard exact candidate
         run: |
-          test "$(git rev-parse HEAD)" = "179e5f19526539a9892d8689ea96f390a415e61a"
+          test "$(git rev-parse HEAD)" = "0ab57d8e18ef3ded56156ef47bbfa896574d628b"
           git diff --check
           test -z "$(git status --porcelain)"
       - uses: actions/setup-node@v4
@@ -71,10 +71,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 179e5f19526539a9892d8689ea96f390a415e61a
+          ref: 0ab57d8e18ef3ded56156ef47bbfa896574d628b
           fetch-depth: 0
       - name: Guard exact candidate
-        run: test "$(git rev-parse HEAD)" = "179e5f19526539a9892d8689ea96f390a415e61a"
+        run: test "$(git rev-parse HEAD)" = "0ab57d8e18ef3ded56156ef47bbfa896574d628b"
       - uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
