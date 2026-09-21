@@ -161,6 +161,45 @@ set quote_off=not (select q.show_product_images from public.quotes q where q.id=
 
 reset role;
 
+do $
+declare t zt_rc1c2_runtime_test%rowtype;
+begin
+  select * into t from zt_rc1c2_runtime_test;
+
+  if not (
+    t.first_wo is not null
+    and t.retry_wo=t.first_wo
+    and exists(
+      select 1 from public.work_orders w
+      where w.id=t.first_wo
+        and w.company_id=t.company_id
+        and w.client_id=t.client_id
+        and w.assigned_to=t.owner_id
+        and w.status='unscheduled'::public.zt_wo_status
+        and w.scheduled_date is null
+        and w.scheduled_time='09:00'::time
+        and w.request='Nova OS manual RC1C2'
+        and w.client_request_id=t.request_id
+    )
+    and (select count(*) from public.work_orders w where w.company_id=t.company_id and w.client_request_id=t.request_id)=1
+  ) then
+    raise exception 'RC1C2_MANUAL_OS_WRITE_READBACK_FAILED';
+  end if;
+
+  if not (
+    t.quote_on
+    and t.quote_off
+    and exists(
+      select 1
+      from public.quote_items qi
+      join public.products p on p.id=qi.product_id and p.company_id=qi.company_id
+      where qi.quote_id=t.quote_id and p.image_path is not null
+    )
+  ) then
+    raise exception 'RC1C2_QUOTE_PRODUCT_IMAGE_FLAG_FAILED';
+  end if;
+end $;
+
 select
   'RC1C2_MANUAL_OS_WRITE_READBACK' as test,
   t.first_wo is not null as write_created,
