@@ -269,6 +269,17 @@ const RESPONSAVEIS = { "Jonas Ribeiro": "u1", "Diego Farias": "u2" };
 const cx = (...c) => c.filter(Boolean).join(" ");
 const ring = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50";
 
+function aplicarOSSalvaNoEstado(salvo, { setOrdens, setOrcamentos, setOsAberta }) {
+  setOrdens((lista) => lista.some((x) => x.id === salvo.id)
+    ? lista.map((x) => x.id === salvo.id ? salvo : x)
+    : [salvo, ...lista]);
+  if (salvo.orcamentoId) {
+    setOrcamentos((lista) => lista.map((o) => o.id === salvo.orcamentoId ? { ...o, osId: salvo.id } : o));
+  }
+  setOsAberta(salvo.id);
+  return salvo.id;
+}
+
 function Btn({ children, onClick, variant = "primary", size = "md", icon: Icon, className, type = "button", disabled, title, ariaLabel }) {
   const base = `inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors duration-150 active:scale-[0.99] select-none disabled:opacity-40 disabled:pointer-events-none ${ring}`;
   const variants = {
@@ -1005,13 +1016,9 @@ export default function ZiisTec({ contexto }) {
     if (real) {
       try {
         const salvo = await salvarOSDB(os,empresaId,usuarioAtual?.id);
-        setOrdens((lista) => lista.some((x) => x.id === salvo.id)
-          ? lista.map((x) => x.id === salvo.id ? salvo : x)
-          : [salvo, ...lista]);
-        if (salvo.orcamentoId) setOrcamentos((lista) => lista.map((o) => o.id === salvo.orcamentoId ? { ...o, osId: salvo.id } : o));
-        setOsAberta(salvo.id);
+        const salvoId = aplicarOSSalvaNoEstado(salvo, { setOrdens, setOrcamentos, setOsAberta });
         aviso("Ordem de serviço salva");
-        return salvo.id;
+        return salvoId;
       } catch(e) {
         if (!os.id && orcamentoId) {
           try {
@@ -6311,4 +6318,4 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
 
 /* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
 
-export { OSDetalhe, NovaOS, OrcamentoEditor, TelaErrorBoundary };
+export { OSDetalhe, NovaOS, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado };
