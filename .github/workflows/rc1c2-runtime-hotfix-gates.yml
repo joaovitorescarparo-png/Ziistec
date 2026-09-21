@@ -1,0 +1,113 @@
+name: RC1C2 Runtime Hotfix Gates
+on:
+  push:
+    branches:
+      - rc1c2-gates-runner-temp
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c5e0ed10fbe685a6d8d831c1dcdecfe5f2d7a465
+          fetch-depth: 0
+      - name: Guard exact candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "c5e0ed10fbe685a6d8d831c1dcdecfe5f2d7a465"
+          git diff --check
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Targeted tests + real render smoke
+        run: |
+          node --test \
+            tests/blockers/rc1c2_runtime_hotfix.test.mjs \
+            tests/blockers/rc1c1_mobile_flow_fixes.test.mjs \
+            tests/blockers/rc1c_mobile_work_order.test.mjs \
+            tests/blockers/rc1c_quote_pdf_pagination.test.mjs \
+            tests/blockers/rc1c1_quote_product_images.test.mjs \
+            tests/blockers/rc1c_product_primary_parity.test.mjs
+      - name: Build smoke
+        run: npm run build
+      - name: verify:v2
+        run: npm run verify:v2
+      - name: Reproducible build
+        run: npm run verify:reproducible-build
+      - name: Security audit
+        run: npm run security:audit
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start disposable Supabase
+        run: supabase start
+      - name: SQL and RLS rollback gate
+        run: bash scripts/run-sql-rls-ci.sh
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup || true
+      - name: Final clean tree
+        if: always()
+        run: |
+          rm -rf supabase/.temp supabase/.branches
+          git diff --check
+          test -z "$(git status --porcelain)"
+
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c5e0ed10fbe685a6d8d831c1dcdecfe5f2d7a465
+          fetch-depth: 0
+      - name: Guard exact candidate
+        run: test "$(git rev-parse HEAD)" = "c5e0ed10fbe685a6d8d831c1dcdecfe5f2d7a465"
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript
+          output: sarif-results
+          upload: false
+      - name: Summarize CodeQL findings
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dir='sarif-results';
+          const files=fs.readdirSync(dir).filter(x=>x.endsWith('.sarif'));
+          let findings=[];
+          for(const file of files){
+            const sarif=JSON.parse(fs.readFileSync(path.join(dir,file),'utf8'));
+            for(const run of sarif.runs||[]){
+              for(const r of run.results||[]){
+                const loc=r.locations?.[0]?.physicalLocation;
+                findings.push({
+                  rule:r.ruleId,
+                  level:r.level||'warning',
+                  file:loc?.artifactLocation?.uri||'',
+                  line:loc?.region?.startLine||null,
+                });
+              }
+            }
+          }
+          console.log('RC1C2_CODEQL_FINDINGS='+findings.length);
+          for(const x of findings) console.log(JSON.stringify(x));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc1c2-codeql-sarif
+          path: sarif-results
+          if-no-files-found: error
