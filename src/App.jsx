@@ -5,6 +5,7 @@ import Login from "./screens/Login";
 import NovaSenha from "./screens/NovaSenha";
 import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
+import AssistantPanel from "./components/AssistantPanel";
 
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
@@ -141,6 +142,8 @@ export default function App() {
   const s = useSessao();
   const [workspaceV2, setWorkspaceV2] = useState(workspaceInicial);
   const [quoteSeed, setQuoteSeed] = useState("");
+  const [assistantRevision, setAssistantRevision] = useState(0);
+  const [assistantWorkOrder, setAssistantWorkOrder] = useState(null);
 
   const navegarV2 = (valor) => {
     setWorkspaceV2(valor || null);
@@ -190,6 +193,8 @@ export default function App() {
       sessao: { usuarioId: s.perfil.id, membresiaId: s.membresiaAtual.id },
       sair: s.sair,
       recarregar: s.recarregar,
+      assistantRevision,
+      onAssistantWorkOrder: setAssistantWorkOrder,
       /* ETAPA A — ponto de integração: as telas do shell principal podem
          abrir um recurso V2 pontual sem sair da navegação antiga. As etapas
          C a E usam isto para absorver as funções V2 aba por aba. */
@@ -200,9 +205,28 @@ export default function App() {
         return error ? mensagemErro(error) : null;
       },
     };
-  }, [s.perfil, s.empresa, s.membresiaAtual, s.assinatura, s.membresias, s.empresaId, s.sair, s.recarregar]);
+  }, [s.perfil, s.empresa, s.membresiaAtual, s.assinatura, s.membresias, s.empresaId, s.sair, s.recarregar, assistantRevision]);
 
-  const comConexao = (conteudo) => <><EstadoConexao />{conteudo}</>;
+  const assistantEnabled = configurado && s.sessaoAuth && contexto && !s.carregando && !s.erro &&
+    !s.recuperandoSenha && !s.ehPlataforma && !s.precisaEmpresa && !s.trocandoEmpresa &&
+    s.membresiaAtual?.status === 'active' && ['owner', 'technician'].includes(s.membresiaAtual?.role);
+  const openAssistantRecord = (record) => {
+    const targets = { client: ['clientes-locais', 'client'], product: ['produtos', 'product'],
+      work_order: ['memoria-os', 'wo'], quote: ['orcamentos'], financial_entry: ['financeiro'] };
+    const target = targets[record.entityType];
+    if (!target || !record.id || (record.entityType !== 'work_order' && s.membresiaAtual?.role !== 'owner')) return;
+    const url = new URL(window.location.href);
+    for (const key of ['client', 'product', 'wo']) url.searchParams.delete(key);
+    url.searchParams.set('v2', target[0]);
+    if (target[1]) url.searchParams.set(target[1], record.id);
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    setWorkspaceV2(target[0]);
+  };
+  const comConexao = (conteudo) => <><EstadoConexao />{conteudo}
+    {assistantEnabled && <AssistantPanel key={contexto.chave} companyId={s.empresaId} role={s.membresiaAtual.role}
+      currentWorkOrder={workspaceV2 ? null : assistantWorkOrder}
+      onOpenRecord={openAssistantRecord} onChanged={() => setAssistantRevision(value => value + 1)} />}
+  </>;
 
   if (!configurado) return comConexao(<AmbienteSemBanco motivo={ambienteSupabase} />);
   if (s.carregando) return comConexao(<Carregando texto="Abrindo o ZiisTec" />);

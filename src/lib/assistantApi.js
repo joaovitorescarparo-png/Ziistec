@@ -3,14 +3,14 @@ import { supabase } from './supabase';
 export async function requestAssistant(payload, { signal } = {}) {
   const { data, error } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
-  if (error || !token) throw new Error('Sua sessão expirou. Entre novamente.');
+  if (error || !token) throw Object.assign(new Error('Sua sessão expirou. Entre novamente.'), { kind: 'auth', status: 401 });
   const response = await fetch('/api/assistant', {
     method: 'POST', signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(result?.error || 'Não foi possível concluir. Tente novamente com a mesma solicitação.');
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'Não foi possível concluir. Tente novamente com a mesma solicitação.'), { kind: response.status === 401 ? 'auth' : 'api', status: response.status });
   if (!result || typeof result !== 'object') throw new Error('Resposta inválida. Consulte a solicitação novamente.');
   return result;
 }

@@ -675,6 +675,10 @@ export default function ZiisTec({ contexto }) {
   const [clienteAberto, setClienteAberto] = useState(null);
   const [orcamentoAberto, setOrcamentoAberto] = useState(null);
   const [osAberta, setOsAberta] = useState(null);
+  useEffect(() => {
+    contexto?.onAssistantWorkOrder?.(tela === 'ordens' ? osAberta : null);
+    return () => contexto?.onAssistantWorkOrder?.(null);
+  }, [tela, osAberta, contexto?.onAssistantWorkOrder]);
   const [compraAberta, setCompraAberta] = useState(null);
   const [garantiaAberta, setGarantiaAberta] = useState(null);
 
@@ -752,7 +756,7 @@ export default function ZiisTec({ contexto }) {
       setCompras(data.compras); setGarantias(data.garantias);
     });
     return () => { ativo = false; };
-  }, [real, empresaId, contexto?.chave]);
+  }, [real, empresaId, contexto?.chave, contexto?.assistantRevision]);
 
   const recarregarDados = async () => {
     if (!real || !empresaId) return;
