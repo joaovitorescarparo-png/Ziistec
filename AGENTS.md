@@ -20,7 +20,7 @@ O sistema também possui catálogo, compras, equipe, permissões owner/technicia
 
 ## 3. Ambientes e branches
 
-- Desenvolvimento/homologação ativo: `hardening-v2-staging`.
+- Base de homologação humana: `rc1c-mobile-ux-stabilization` (base autorizada desta onda: `cb97bb3331e4ca87b58e9c6c4fb3e3000eeb7206`). Trabalho experimental em branch própria, sem promover a base.
 - Integração: `ui-v1-v2-merge`.
 - Produção: `main`.
 - Nunca alterar banco, deploy ou branch de produção durante uma tarefa de homologação.

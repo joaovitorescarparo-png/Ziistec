@@ -22,7 +22,7 @@ if (lineCount(agents) > 180) fail(`AGENTS.md has ${lineCount(agents)} lines; kee
 if (lineCount(memory) > 130) fail(`PROJECT_MEMORY.md has ${lineCount(memory)} lines; keep it at or below 130`);
 
 [
-  ['hardening-v2-staging', 'AGENTS.md'],
+  ['rc1c-mobile-ux-stabilization', 'AGENTS.md'],
   ['ui-v1-v2-merge', 'AGENTS.md'],
   ['`main`', 'AGENTS.md'],
   ['RLS/RPC/backend', 'AGENTS.md'],

@@ -4,7 +4,7 @@
 
 ## Pré-requisitos
 
-- Branch/deployment da aplicação: `product-v2-review`.
+- Base de homologação humana da aplicação: `rc1c-mobile-ux-stabilization`; validar mudanças em Preview da branch experimental antes de qualquer promoção.
 - Banco de homologação com migrations 0050→0061 aplicadas na ordem.
 - 1 usuário `owner` ativo da empresa A.
 - 1 usuário `technician` ativo da empresa A.

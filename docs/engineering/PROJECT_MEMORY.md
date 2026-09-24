@@ -19,7 +19,7 @@
 
 ## Ambientes
 
-- Trabalho de homologação ocorre em `hardening-v2-staging`.
+- A base de homologação humana é `rc1c-mobile-ux-stabilization`; mudanças experimentais usam branches próprias antes de aprovação humana.
 - Integração ocorre em `ui-v1-v2-merge`.
 - `main` representa produção e não deve receber mudanças sem homologação/release explícito.
 - Preview autorizado deve usar somente Staging; Production somente o projeto de produção. Configuração errada deve falhar fechada.
