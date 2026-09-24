@@ -16,7 +16,7 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
       const body = req.body;
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Pedido inválido.');
       if (Buffer.byteLength(JSON.stringify(body), 'utf8') > 32768) throw new HttpError(413, 'Pedido muito longo.');
-      const allowed = ['operation', 'companyId', 'requestId', 'text', 'currentWorkOrder', 'action', 'input'];
+      const allowed = ['operation', 'companyId', 'requestId', 'text', 'currentWorkOrder', 'action', 'input', 'previewHash'];
       if (Object.keys(body).some((key) => !allowed.includes(key))) throw new HttpError(400, 'Campo não permitido.');
       if (!uuid.test(body.companyId || '') || !uuid.test(body.requestId || '')) throw new HttpError(400, 'Empresa ou pedido inválido.');
       if (!['plan', 'preview', 'execute'].includes(body.operation)) throw new HttpError(400, 'Operação inválida.');
@@ -43,14 +43,16 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
           const status = response.status === 401 ? 401 : data?.code === '42501' ? 403 : data?.code === 'P0001' ? 429 : response.status === 404 ? 503 : 400;
           throw new HttpError(status, status === 503 ? 'Assistente ainda não habilitado neste ambiente.' : status === 403 ? 'Acesso não permitido.' : status === 429 ? 'Limite de IA atingido. Tente mais tarde.' : 'Não foi possível validar a ação. Verifique os dados e tente novamente.');
         }
-        if (data?.error) throw new HttpError(422, String(data.error).slice(0, 500));
+        if (data?.error) throw new HttpError(data.code === 'ACCESS_DENIED' ? 403 : data.code === 'REQUEST_CONFLICT' ? 409 : 422, String(data.error).slice(0, 500));
         return data;
       };
       if (body.operation === 'execute') {
         if (body.action !== undefined || body.input !== undefined || body.text !== undefined || body.currentWorkOrder !== undefined) throw new HttpError(400, 'Confirme somente o pedido revisado.');
-        const data = await rpc('zt_assistant_execute', { p_company: body.companyId, p_request_id: body.requestId });
+        if (typeof body.previewHash !== 'string' || !/^[0-9a-f]{64}$/.test(body.previewHash)) throw new HttpError(400, 'Confirme a versão da prévia recebida.');
+        const data = await rpc('zt_assistant_execute', { p_company: body.companyId, p_request_id: body.requestId, p_preview_hash: body.previewHash });
         return res.status(200).json(data);
       }
+      if (body.previewHash !== undefined) throw new HttpError(400, 'Confirmação permitida somente na execução.');
       let action = body.action, input = body.input;
       if (body.operation === 'plan') {
         if (body.action !== undefined || body.input !== undefined || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 10000) throw new HttpError(400, 'Descreva o que precisa em até 10.000 caracteres.');

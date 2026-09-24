@@ -1,5 +1,50 @@
 -- Assistente MVP: a model proposes; the database authorizes, previews and executes.
 -- No changes to the existing commercial /api/ai owner-only contract.
+-- Unapplied migration. Retention requires pg_cron to be enabled before application.
+-- Fail before creating objects if the independent cleanup scheduler is unavailable.
+do $$ begin
+  if to_regprocedure('cron.schedule(text,text,text)') is null then
+    raise exception '0092 requires pg_cron for assistant plan retention';
+  end if;
+end $$;
+
+-- Shared serialization point for ALL consumers of zt_consume_ai_quota(uuid).
+-- A row write also causes stale REPEATABLE READ snapshots to fail, not overspend.
+create table zt_private.ai_quota_locks (
+  company_id uuid not null references public.companies(id),
+  user_id uuid not null references auth.users(id),
+  revision bigint not null default 1,
+  primary key(company_id,user_id)
+);
+alter table zt_private.ai_quota_locks enable row level security;
+revoke all on zt_private.ai_quota_locks from public,anon,authenticated;
+
+create or replace function zt_private.zt_consume_ai_quota(p_company uuid)
+returns uuid language plpgsql security definer set search_path='' as $$
+declare v_uid uuid:=auth.uid(); v_status public.zt_sub_status; v_end date; v_count integer;
+begin
+  if v_uid is null then raise exception 'Não autenticado' using errcode='28000'; end if;
+  if p_company is null then raise exception 'Empresa não informada' using errcode='22023'; end if;
+  perform 1 from public.company_members where company_id=p_company and user_id=v_uid and status='active' for share;
+  if not found then raise exception 'Sem acesso a esta empresa' using errcode='42501'; end if;
+  select status,current_period_end into v_status,v_end from public.subscriptions where company_id=p_company;
+  if v_status is null or v_status not in ('trial','active') or (v_end is not null and v_end<current_date) then
+    raise exception 'Assinatura sem acesso à IA' using errcode='42501';
+  end if;
+  insert into zt_private.ai_quota_locks as l(company_id,user_id) values(p_company,v_uid)
+    on conflict(company_id,user_id) do update set revision=l.revision+1;
+  select count(*) into v_count from public.ai_usage_events
+    where user_id=v_uid and company_id=p_company and created_at>now()-interval '1 minute';
+  if v_count>=10 then raise exception 'Limite temporário de IA atingido. Tente novamente em instantes' using errcode='P0001'; end if;
+  select count(*) into v_count from public.ai_usage_events
+    where user_id=v_uid and company_id=p_company and created_at>now()-interval '24 hours';
+  if v_count>=100 then raise exception 'Limite diário de IA atingido' using errcode='P0001'; end if;
+  insert into public.ai_usage_events(user_id,company_id) values(v_uid,p_company);
+  delete from public.ai_usage_events where created_at<now()-interval '30 days';
+  return p_company;
+end $$;
+revoke all on function zt_private.zt_consume_ai_quota(uuid) from public,anon,authenticated;
+
 create table public.assistant_action_audit (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies(id),
@@ -9,8 +54,14 @@ create table public.assistant_action_audit (
   target_id uuid,
   request_id uuid not null,
   success boolean not null,
-  created_at timestamptz not null default now(),
-  unique(company_id,actor_user_id,request_id)
+  input_hash bytea,
+  preview_hash text,
+  preview_version integer,
+  confirmed_at timestamptz,
+  confirmed_by uuid references auth.users(id),
+  status text not null check(status in ('prepared','read','succeeded','failed','denied','expired')),
+  error_code text,
+  created_at timestamptz not null default clock_timestamp()
 );
 alter table public.assistant_action_audit enable row level security;
 revoke all on public.assistant_action_audit from public,anon,authenticated;
@@ -26,6 +77,12 @@ create table zt_private.assistant_plans (
   request_id uuid not null,
   action text not null,
   input_hash bytea not null,
+  -- Private random namespace: never accept a canonical RPC key from the client.
+  operation_id uuid not null default gen_random_uuid() unique,
+  preview_hash text not null,
+  preview_version integer not null default 1 check(preview_version=1),
+  confirmed_at timestamptz,
+  confirmed_by uuid references auth.users(id),
   input jsonb,
   preview jsonb,
   target_id uuid,
@@ -33,11 +90,56 @@ create table zt_private.assistant_plans (
   state text not null default 'pending' check (state in ('pending','succeeded','failed','expired')),
   result jsonb,
   expires_at timestamptz not null default now()+interval '30 minutes',
+  retain_until timestamptz not null default now()+interval '30 minutes',
   created_at timestamptz not null default now(),
   primary key(company_id,actor_user_id,request_id)
 );
 alter table zt_private.assistant_plans enable row level security;
 revoke all on zt_private.assistant_plans from public,anon,authenticated;
+
+create index assistant_plans_retention on zt_private.assistant_plans(retain_until) where input is not null;
+-- Independent transaction, every minute. Expiry blocks execution immediately;
+-- physical scrubbing follows within one scheduler interval while cron is healthy.
+create function zt_private.assistant_purge_plans()
+returns void language sql security definer set search_path='' as $$
+  update zt_private.assistant_plans set input=null,preview=null,
+    state=case when state='pending' then 'expired' else state end
+  where retain_until<=clock_timestamp() and (input is not null or preview is not null);
+$$;
+revoke all on function zt_private.assistant_purge_plans() from public,anon,authenticated,service_role;
+select cron.schedule('ziistec-assistant-plan-retention','* * * * *','select zt_private.assistant_purge_plans()');
+
+-- Never persist SQLERRM, arguments, transcript or arbitrary caller-supplied labels.
+create function zt_private.assistant_error_code(p_state text)
+returns text language sql immutable security invoker set search_path='' as $$
+  select case when p_state in ('28000','42501') then 'ACCESS_DENIED'
+    when p_state='23505' then 'REQUEST_CONFLICT'
+    when left(p_state,2)='22' then 'INVALID_INPUT'
+    when p_state='40001' then 'RETRY_REQUIRED' else 'ACTION_FAILED' end;
+$$;
+create function zt_private.assistant_audit(p_company uuid,p_request uuid,p_status text,p_code text default null,
+  p_action text default null,p_input_hash bytea default null)
+returns void language plpgsql security definer set search_path='' as $$
+declare p zt_private.assistant_plans%rowtype;
+begin
+  -- Denied requests can only be attributed to the caller's own membership.
+  -- Unknown tenants/unauthenticated callers are not materialized in this ledger.
+  if auth.uid() is null or p_request is null or not exists(select 1 from public.company_members
+    where company_id=p_company and user_id=auth.uid()) then return; end if;
+  select * into p from zt_private.assistant_plans
+    where company_id=p_company and actor_user_id=auth.uid() and request_id=p_request;
+  insert into public.assistant_action_audit(company_id,actor_user_id,action,request_id,success,status,error_code,
+    input_hash,preview_hash,preview_version,confirmed_at,confirmed_by,target_type,target_id)
+  values(p_company,auth.uid(),case when p_action=any(array[
+    'owner_today_schedule','owner_find_client','owner_find_quote','owner_find_work_order','create_client','create_quote_draft',
+    'create_work_order','schedule_work_order','create_product','create_financial_entry','technician_today_orders',
+    'technician_open_assigned_order','add_assigned_work_report','mark_assigned_order_pending','mark_assigned_order_return',
+    'finalize_assigned_work_order']) then p_action else coalesce(p.action,'unresolved') end,p_request,p_status in ('read','succeeded'),p_status,p_code,
+    coalesce(p_input_hash,p.input_hash),p.preview_hash,p.preview_version,p.confirmed_at,p.confirmed_by,
+    p.result#>>'{result,entityType}',(p.result#>>'{result,id}')::uuid);
+end $$;
+revoke all on function zt_private.assistant_error_code(text) from public,anon,authenticated;
+revoke all on function zt_private.assistant_audit(uuid,uuid,text,text,text,bytea) from public,anon,authenticated;
 
 create function zt_private.assistant_authorize(p_company uuid,p_action text)
 returns text language plpgsql security definer set search_path='' as $$
@@ -70,7 +172,7 @@ end $$;
 
 -- A compact, closed schema repeated at the authority boundary: API validation is not authorization.
 create function zt_private.assistant_validate(p_action text,p_input jsonb)
-returns jsonb language plpgsql security definer set search_path='' as $$
+returns jsonb language plpgsql security invoker set search_path='' as $$
 declare
   v_allowed text[]; v_required text[]; k text; v jsonb; t text; v_out jsonb:=p_input;
   v_limit integer; v_num numeric;
@@ -102,9 +204,11 @@ begin
       v_num:=(v::text)::numeric;
       if v_num<0 or (k in ('amount','quantity') and v_num=0)
         or v_num>case when k='quantity' then 10000 when k='amount' then 999999999.99 else 999999.99 end
+        or (k='quantity' and v_num<>round(v_num,3))
         or (k<>'quantity' and v_num<>round(v_num,2)) then
         raise exception 'Valor fora dos limites' using errcode='22023';
       end if;
+      if k='quantity' then v_out:=jsonb_set(v_out,array[k],to_jsonb(v_num::numeric(12,3))); end if;
     elsif k='paid' then
       if jsonb_typeof(v)<>'boolean' then raise exception 'Situação de pagamento inválida' using errcode='22023'; end if;
     else
@@ -171,24 +275,31 @@ create function public.zt_assistant_plan(p_company uuid,p_action text,p_input js
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare
   v_role text; v_input jsonb; v_hash bytea; v_plan zt_private.assistant_plans%rowtype;
-  v_target uuid; v_client uuid; v_preview jsonb:='[]'; v_items jsonb; v_result jsonb; k text; t text;
+  v_target uuid; v_client uuid; v_preview jsonb:='[]'; v_items jsonb; v_result jsonb; k text; t text; v_preview_hash text;
   v_today date:=(now() at time zone 'America/Sao_Paulo')::date;
 begin
+  -- Bounded digest for denied attempts too; no raw input is written to audit.
+  if p_input is not null and octet_length(p_input::text)<=24000 then
+    v_hash:=sha256(convert_to(p_input::text,'UTF8'));
+  end if;
   v_role:=zt_private.assistant_authorize(p_company,p_action);
   if p_request_id is null then raise exception 'Identificador da tentativa obrigatório' using errcode='22023'; end if;
   v_input:=zt_private.assistant_validate(p_action,p_input);
   v_hash:=sha256(convert_to(p_action||':'||v_input::text,'UTF8'));
   perform pg_advisory_xact_lock(hashtextextended(p_company::text||':'||auth.uid()::text||':'||p_request_id::text,0));
-  -- Scrub expired operational input; retain identifiers/digests to prevent key reuse.
-  update zt_private.assistant_plans set input=null,preview=null,state='expired'
-    where company_id=p_company and actor_user_id=auth.uid() and state='pending' and expires_at<now();
   select * into v_plan from zt_private.assistant_plans where company_id=p_company and actor_user_id=auth.uid() and request_id=p_request_id for update;
   if found then
     if v_plan.action<>p_action or v_plan.input_hash<>v_hash then raise exception 'Identificador já usado em outra ação' using errcode='23505'; end if;
     perform zt_private.assistant_target(p_company,p_action,v_plan.target_id,true);
-    if v_plan.state='expired' then raise exception 'Prévia expirada. Prepare uma nova ação.' using errcode='22023'; end if;
+    if v_plan.state='expired' or (v_plan.state='pending' and v_plan.expires_at<=clock_timestamp()) then
+      update zt_private.assistant_plans set input=null,preview=null,state='expired'
+        where company_id=p_company and actor_user_id=auth.uid() and request_id=p_request_id;
+      perform zt_private.assistant_audit(p_company,p_request_id,'expired','PLAN_EXPIRED');
+      return jsonb_build_object('error','Prévia expirada. Prepare uma nova ação.','code','PLAN_EXPIRED');
+    end if;
     if v_plan.state<>'pending' then return v_plan.result; end if;
-    return jsonb_build_object('requestId',p_request_id,'action',p_action,'input',v_plan.input,'preview',v_plan.preview,'confirmationRequired',true);
+    return jsonb_build_object('requestId',p_request_id,'action',p_action,'input',v_plan.input,'preview',v_plan.preview,
+      'previewHash',v_plan.preview_hash,'previewVersion',v_plan.preview_version,'confirmationRequired',true);
   end if;
   if p_action in ('owner_today_schedule','technician_today_orders','owner_find_work_order','technician_open_assigned_order') then
     if p_action='technician_open_assigned_order' then v_target:=zt_private.assistant_resolve(p_company,'work_order',v_input->>'workOrder',true); end if;
@@ -218,6 +329,8 @@ begin
     ) q;
   end if;
   if v_items is not null then
+    insert into public.assistant_action_audit(company_id,actor_user_id,action,request_id,success,status,input_hash)
+      values(p_company,auth.uid(),p_action,p_request_id,true,'read',v_hash);
     return jsonb_build_object('requestId',p_request_id,'action',p_action,'confirmationRequired',false,
       'result',jsonb_build_object('items',v_items,'message','Consulta concluída. Até 20 resultados.'));
   end if;
@@ -246,12 +359,22 @@ begin
   if p_action='create_quote_draft' then
     v_preview:=v_preview||jsonb_build_array(jsonb_build_object('label','Total (R$)','value',round((v_input->>'quantity')::numeric*(v_input->>'unitPrice')::numeric,2)::text));
   end if;
-  insert into zt_private.assistant_plans(company_id,actor_user_id,request_id,action,input_hash,input,preview,target_id,client_id)
-  values(p_company,auth.uid(),p_request_id,p_action,v_hash,v_input,v_preview,v_target,v_client);
-  return jsonb_build_object('requestId',p_request_id,'action',p_action,'input',v_input,'preview',v_preview,'confirmationRequired',true);
+  -- Versioned digest binds normalized values AND resolved records/display snapshot.
+  v_preview_hash:=encode(sha256(convert_to(jsonb_build_object('version',1,'company',p_company,'actor',auth.uid(),
+    'request',p_request_id,'action',p_action,'input',v_input,'target',v_target,'client',v_client,'preview',v_preview)::text,'UTF8')),'hex');
+  insert into zt_private.assistant_plans(company_id,actor_user_id,request_id,action,input_hash,input,preview,target_id,client_id,preview_hash)
+  values(p_company,auth.uid(),p_request_id,p_action,v_hash,v_input,v_preview,v_target,v_client,v_preview_hash);
+  perform zt_private.assistant_audit(p_company,p_request_id,'prepared');
+  return jsonb_build_object('requestId',p_request_id,'action',p_action,'input',v_input,'preview',v_preview,
+    'previewHash',v_preview_hash,'previewVersion',1,'confirmationRequired',true);
+exception when others then
+  -- This handler is outside the rolled-back body; denied attempts can persist.
+  perform zt_private.assistant_audit(p_company,p_request_id,'denied',zt_private.assistant_error_code(sqlstate),p_action,v_hash);
+  return jsonb_build_object('error','Não foi possível preparar a ação. Verifique os dados e o acesso.',
+    'code',zt_private.assistant_error_code(sqlstate));
 end $$;
 
-create function public.zt_assistant_execute(p_company uuid,p_request_id uuid)
+create function public.zt_assistant_execute(p_company uuid,p_request_id uuid,p_preview_hash text)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare
   p zt_private.assistant_plans%rowtype; x jsonb; v_id uuid; v_type text; v_number text; v_result jsonb;
@@ -263,11 +386,17 @@ begin
   perform zt_private.assistant_authorize(p_company,p.action);
   perform zt_private.assistant_subscription(p_company);
   perform zt_private.assistant_target(p_company,p.action,p.target_id,true);
-  if p.state in ('succeeded','failed') then return p.result; end if;
-  if p.state='expired' or p.expires_at<now() then
-    update zt_private.assistant_plans set input=null,preview=null,state='expired' where company_id=p_company and actor_user_id=auth.uid() and request_id=p_request_id;
-    return jsonb_build_object('error','Prévia expirada. Prepare uma nova ação.');
+  if p_preview_hash is null or p_preview_hash !~ '^[0-9a-f]{64}$' or p_preview_hash<>p.preview_hash then
+    raise exception 'Confirmação não corresponde à prévia' using errcode='22023';
   end if;
+  if p.state in ('succeeded','failed') then return p.result; end if;
+  if p.state='expired' or p.expires_at<=clock_timestamp() then
+    update zt_private.assistant_plans set input=null,preview=null,state='expired' where company_id=p_company and actor_user_id=auth.uid() and request_id=p_request_id;
+    perform zt_private.assistant_audit(p_company,p_request_id,'expired','PLAN_EXPIRED');
+    return jsonb_build_object('error','Prévia expirada. Prepare uma nova ação.','code','PLAN_EXPIRED');
+  end if;
+  update zt_private.assistant_plans set confirmed_at=clock_timestamp(),confirmed_by=auth.uid()
+    where company_id=p_company and actor_user_id=auth.uid() and request_id=p_request_id;
   -- Catch inside a subtransaction: any partial canonical write rolls back before audit persists.
   begin
     perform zt_private.assistant_target(p_company,p.action,p.target_id);
@@ -283,17 +412,30 @@ begin
         insert into public.products(company_id,name,unit,price,cost,active) values(p_company,x->>'name',x->>'unit',(x->>'price')::numeric,0,true) returning id into v_id;
         v_type:='product';
       when 'create_quote_draft' then
-        v_id:=public.zt_save_quote_idempotent(p_company,null,p_request_id,
+        -- Same lock as the canonical RPC: an occupied internal key fails closed.
+        perform pg_advisory_xact_lock(hashtextextended(p_company::text||':quote:'||p.operation_id::text,0));
+        if exists(select 1 from public.quotes where company_id=p_company and client_request_id=p.operation_id) then
+          raise exception 'Colisão de operação interna' using errcode='23505';
+        end if;
+        v_id:=public.zt_save_quote_idempotent(p_company,null,p.operation_id,
           jsonb_build_object('client_id',p.client_id,'status','draft','issue_date',v_today),
           jsonb_build_array(jsonb_build_object('kind','free','name',x->>'description','quantity',(x->>'quantity')::numeric,
             'unit',x->>'unit','unit_price',(x->>'unitPrice')::numeric,'unit_cost',0)));
         select number into v_number from public.quotes where id=v_id; v_type:='quote';
       when 'create_work_order' then
-        v_id:=public.zt_save_work_order_idempotent(p_company,null,p_request_id,
+        perform pg_advisory_xact_lock(hashtextextended(p_company::text||':work_order:'||p.operation_id::text,0));
+        if exists(select 1 from public.work_orders where company_id=p_company and client_request_id=p.operation_id) then
+          raise exception 'Colisão de operação interna' using errcode='23505';
+        end if;
+        v_id:=public.zt_save_work_order_idempotent(p_company,null,p.operation_id,
           jsonb_build_object('client_id',p.client_id,'request',x->>'description','address',x->>'address','status','unscheduled'),'[]');
         select number into v_number from public.work_orders where id=v_id; v_type:='work_order';
       when 'create_financial_entry' then
-        v_id:=public.zt_save_manual_financial_entry(p_company,null,p_request_id,jsonb_build_object(
+        perform pg_advisory_xact_lock(hashtextextended(p_company::text||':financial:'||p.operation_id::text,0));
+        if exists(select 1 from public.financial_entries where company_id=p_company and client_request_id=p.operation_id) then
+          raise exception 'Colisão de operação interna' using errcode='23505';
+        end if;
+        v_id:=public.zt_save_manual_financial_entry(p_company,null,p.operation_id,jsonb_build_object(
           'kind','income','description',x->>'description','amount',(x->>'amount')::numeric,'due_date',x->>'dueDate',
           'paid',(x->>'paid')::boolean,'paid_at',x->>'paidAt','payment_method',x->>'paymentMethod','category',x->>'category','client_id',p.client_id));
         v_type:='financial_entry';
@@ -307,7 +449,11 @@ begin
         update public.work_orders set pending_note=x->>'note',updated_at=now() where id=p.target_id and company_id=p_company;
         v_id:=p.target_id; v_type:='work_order';
       when 'mark_assigned_order_return' then
-        perform public.zt_mark_work_order_needs_return(p.target_id,x->>'reason',null,null,'normal',null,p_request_id);
+        -- assistant_target already holds the canonical work-order row lock.
+        if exists(select 1 from public.work_order_returns where company_id=p_company and request_id=p.operation_id) then
+          raise exception 'Colisão de operação interna' using errcode='23505';
+        end if;
+        perform public.zt_mark_work_order_needs_return(p.target_id,x->>'reason',null,null,'normal',null,p.operation_id);
         v_id:=p.target_id; v_type:='work_order';
       when 'finalize_assigned_work_order' then
         perform public.zt_finalize_work_order_with_warranty_overrides(p.target_id,nullif(x->>'report',''),null,null,7,'[]','[]',null);
@@ -318,14 +464,18 @@ begin
     v_result:=jsonb_build_object('result',jsonb_build_object('entityType',v_type,'id',v_id,'number',v_number,'message','Ação concluída.'));
   exception when others then
     -- Do not expose database details, raw input or financial state in errors/audit.
-    v_result:=jsonb_build_object('error','Não foi possível executar a ação. Confira o registro e prepare uma nova tentativa.');
+    v_result:=jsonb_build_object('error','Não foi possível executar a ação. Confira o registro e prepare uma nova tentativa.',
+      'code',zt_private.assistant_error_code(sqlstate));
   end;
-  insert into public.assistant_action_audit(company_id,actor_user_id,action,target_type,target_id,request_id,success)
-    values(p_company,auth.uid(),p.action,v_type,coalesce(v_id,p.target_id),p_request_id,not(v_result ? 'error'));
   update zt_private.assistant_plans set input=null,preview=null,result=v_result,
     state=case when v_result ? 'error' then 'failed' else 'succeeded' end
     where company_id=p_company and actor_user_id=auth.uid() and request_id=p_request_id;
+  perform zt_private.assistant_audit(p_company,p_request_id,case when v_result ? 'error' then 'failed' else 'succeeded' end,v_result->>'code');
   return v_result;
+exception when others then
+  perform zt_private.assistant_audit(p_company,p_request_id,'denied',zt_private.assistant_error_code(sqlstate));
+  return jsonb_build_object('error','Não foi possível confirmar a ação. Verifique a prévia e o acesso.',
+    'code',zt_private.assistant_error_code(sqlstate));
 end $$;
 
 create function public.zt_assistant_consume_ai_quota(p_company uuid)
@@ -333,7 +483,6 @@ returns uuid language plpgsql security definer set search_path='' as $$
 begin
   if auth.uid() is null or not public.zt_is_member(p_company) then raise exception 'Sem acesso ativo' using errcode='42501'; end if;
   perform zt_private.assistant_subscription(p_company);
-  perform pg_advisory_xact_lock(hashtextextended(p_company::text||':'||auth.uid()::text||':assistant_ai_quota',0));
   return public.zt_consume_ai_quota(p_company);
 end $$;
 
@@ -343,8 +492,8 @@ revoke all on function zt_private.assistant_validate(text,jsonb) from public,ano
 revoke all on function zt_private.assistant_resolve(uuid,text,text,boolean) from public,anon,authenticated;
 revoke all on function zt_private.assistant_target(uuid,text,uuid,boolean) from public,anon,authenticated;
 revoke all on function public.zt_assistant_plan(uuid,text,jsonb,uuid) from public,anon;
-revoke all on function public.zt_assistant_execute(uuid,uuid) from public,anon;
+revoke all on function public.zt_assistant_execute(uuid,uuid,text) from public,anon;
 revoke all on function public.zt_assistant_consume_ai_quota(uuid) from public,anon;
 grant execute on function public.zt_assistant_plan(uuid,text,jsonb,uuid) to authenticated;
-grant execute on function public.zt_assistant_execute(uuid,uuid) to authenticated;
+grant execute on function public.zt_assistant_execute(uuid,uuid,text) to authenticated;
 grant execute on function public.zt_assistant_consume_ai_quota(uuid) to authenticated;
