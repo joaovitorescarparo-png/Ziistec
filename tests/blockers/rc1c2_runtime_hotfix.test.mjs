@@ -72,7 +72,7 @@ const osProps = (os) => ({
 
 test('RC-1C.2 real legacy surfaces render without runtime ReferenceError', async (t) => {
   const vite = await createServer({
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, ws: false },
     appType: 'custom',
     logLevel: 'error',
   });
