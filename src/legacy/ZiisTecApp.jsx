@@ -1367,7 +1367,7 @@ export default function ZiisTec({ contexto }) {
             Buscar cliente, OS, produto, serial...
           </button>
         </div>
-        <div className={cx("max-w-[1180px] mx-auto px-4 sm:px-8 lg:px-10 py-6 sm:py-7 md:pb-16", keyboardOpen ? "pb-8" : "pb-28")}>
+        <div className={cx("max-w-[1180px] mx-auto px-4 sm:px-8 lg:px-10 py-6 sm:py-7 md:pb-16", keyboardOpen ? "pb-8" : "pb-[calc(7rem+env(safe-area-inset-bottom))]")}>
           {!permitido(tela) ? <SemPermissao papel={papel} /> : <>
           {tela === "inicio" && <Inicio {...props} />}
           {tela === "agenda" && <Agenda {...props} />}
@@ -3625,17 +3625,17 @@ function OSDetalhe(p) {
   const acoesSecundarias = acoes.filter((acao) => !acao.principal);
 
   return (
-    <>
+    <div className="min-w-0 max-w-full [overflow-wrap:anywhere] [&_h2]:min-w-0 [&_section>div:first-child]:flex-wrap">
       <button onClick={() => setOsAberta(null)} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
         <ArrowLeft className="w-4 h-4" /> Ordens de serviço
       </button>
 
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{os.numero}</h1>
           <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {acaoPrincipal && <Btn icon={acaoPrincipal.icon} onClick={acaoPrincipal.fn}>{acaoPrincipal.label}</Btn>}
           {(acoesSecundarias.length > 0 || papel === "proprietario" || (podeAdministrarOS && os.status !== "concluida" && os.status !== "cancelada")) && (
             <details className="relative group" data-no-edge-swipe>
@@ -3654,7 +3654,7 @@ function OSDetalhe(p) {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Cliente</p><p className="mt-1 font-medium text-slate-900 truncate">{c?.fantasia || c?.nome || nomeCliente(os.clienteId)}</p></div>
           <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Data e horário</p><p className="mt-1 text-sm text-slate-700">{os.data ? `${dataBR(os.data)}${os.hora ? ` · ${os.hora}` : ""}` : "Sem agendamento"}</p></div>
-          <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Endereço</p><div className="mt-1"><Endereco valor={os.local} local={os.localServico} compacto /></div></div>
+          <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Endereço</p><div className="mt-1"><Endereco valor={os.local} local={os.localServico} className="min-w-0 max-w-full [&>span]:min-w-0" /></div></div>
           <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Serviço</p><p className="mt-1 text-sm text-slate-700 line-clamp-2">{resumoOS(os)}</p></div>
         </div>
       </Panel>
@@ -3685,21 +3685,21 @@ function OSDetalhe(p) {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
-        <div className="lg:col-span-2 space-y-7">
+      <div className="grid min-w-0 max-w-full lg:grid-cols-3 gap-6 lg:gap-8 items-start">
+        <div className="min-w-0 max-w-full lg:col-span-2 space-y-7">
           <section>
             <Rotulo acao={podeAdministrarOS && os.data ? (
               <button onClick={() => pedirConfirmacao({ titulo: "Remover agendamento?", texto: "A ordem volta para a lista de trabalhos sem data.", confirmar: "Remover", acao: () => desagendarOS(os.id) })}
-                className="text-[13px] font-medium text-slate-500 hover:text-rose-700">Remover agendamento</button>) : null}>Agendamento e local</Rotulo>
-            <Panel className="p-5 space-y-5">
+                className="min-h-11 text-left text-[13px] font-medium text-slate-500 hover:text-rose-700">Remover agendamento</button>) : null}>Agendamento e local</Rotulo>
+            <Panel className="min-w-0 p-4 sm:p-5 space-y-5">
               {os.data ? (
                 <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="text-center px-4 py-2 rounded-xl bg-slate-900 text-white">
+                  <div className="flex min-w-0 max-w-full items-center gap-3">
+                    <div className="shrink-0 text-center px-4 py-2 rounded-xl bg-slate-900 text-white">
                       <p className="text-[11px] uppercase tracking-wide text-slate-300">{diaCurto(os.data)}</p>
                       <p className="text-xl font-semibold leading-tight tabular-nums">{os.data.slice(8)}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-[15px] font-medium text-slate-900">{diaSemana(os.data)}, {dataBR(os.data)}{os.hora ? ` às ${os.hora}` : ""}</p>
                       {empresa.temEquipe && <p className="text-[13px] text-slate-500">Responsável: {os.responsavel}</p>}
                     </div>
@@ -3732,44 +3732,44 @@ function OSDetalhe(p) {
                 <>
                   <div className="divide-y divide-slate-100">
                     {os.itens.map((i) => (
-                      <div key={i.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
+                      <div key={i.id} className="flex min-w-0 flex-col items-stretch gap-2 px-4 sm:px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
-                          <p className="text-[15px] text-slate-800 truncate">{i.nome}</p>
+                          <p className="text-[15px] text-slate-800 whitespace-normal break-words">{i.nome}</p>
                           <p className="text-[12px] text-slate-400">
                             {i.qtd} {unidadeLabel(i.unidade)}{verValores ? ` × ${brl(i.preco)}` : ""}{i.tipo === "produto" ? " · produto" : ""}
                           </p>
                         </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          {verValores && <span className="font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</span>}
+                        <div className="flex min-w-0 items-center justify-between gap-3 sm:shrink-0 sm:justify-end">
+                          {verValores && <span className="max-w-full font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</span>}
                           {os.status !== "concluida" && (
                             <button onClick={() => up({ itens: os.itens.filter((x) => x.id !== i.id) })} aria-label={`Remover ${i.nome}`}
-                              className={cx("p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50", ring)}><Trash2 className="w-4 h-4" /></button>
+                              className={cx("min-h-11 min-w-11 shrink-0 inline-flex items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50", ring)}><Trash2 className="w-4 h-4" /></button>
                           )}
                         </div>
                       </div>
                     ))}
                     {(os.adicionais || []).map((a) => (
-                      <div key={a.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
+                      <div key={a.id} className="flex min-w-0 flex-col items-stretch gap-2 px-4 sm:px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
-                          <p className="text-[15px] text-slate-800 truncate">{a.nome}</p>
+                          <p className="text-[15px] text-slate-800 whitespace-normal break-words">{a.nome}</p>
                           <p className="text-[12px] text-amber-700">
                             adicional durante a execução · {a.qtd} {unidadeLabel(a.unidade)}{verValores ? ` × ${brl(a.preco)}` : ""}
                             {!verValores && a.aguardandoValor ? " · valor a definir pelo proprietário" : ""}
                           </p>
                         </div>
-                        {verValores && <span className="font-semibold text-slate-900 tabular-nums">{brl(a.qtd * a.preco)}</span>}
+                        {verValores && <span className="max-w-full font-semibold text-slate-900 tabular-nums">{brl(a.qtd * a.preco)}</span>}
                       </div>
                     ))}
                     {os.valorAdicional > 0 && (
-                      <div className="flex items-center justify-between gap-3 px-5 py-3.5">
+                      <div className="flex min-w-0 flex-col items-stretch gap-2 px-4 sm:px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                         <div><p className="text-[15px] text-slate-800">{os.descricaoAdicional || "Valor adicional"}</p>
                           <p className="text-[12px] text-amber-700">adicional durante a execução</p></div>
-                        <span className="font-semibold text-slate-900 tabular-nums">{brl(os.valorAdicional)}</span>
+                        <span className="max-w-full font-semibold text-slate-900 tabular-nums">{brl(os.valorAdicional)}</span>
                       </div>
                     )}
                   </div>
                   {verValores && (
-                    <div className="flex justify-between items-baseline px-5 py-4 border-t border-slate-100 bg-slate-50/60">
+                    <div className="flex flex-wrap justify-between items-baseline gap-x-4 gap-y-2 px-4 sm:px-5 py-4 border-t border-slate-100 bg-slate-50/60">
                       <span className="text-[14px] font-medium text-slate-600">Total do atendimento</span>
                       <span className="text-xl font-semibold text-slate-900 tabular-nums">{brl(cobrado)}</span>
                     </div>
@@ -3790,7 +3790,7 @@ function OSDetalhe(p) {
                   {(os.itens || []).filter((i) => i.aguardandoValor).map((i) => (
                     <div key={i.id} className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 rounded-xl bg-white/80 px-3.5 py-3 ring-1 ring-amber-200/70">
                       <div className="min-w-0 flex-1">
-                        <p className="text-[14px] font-medium text-slate-800 truncate">{i.nome}</p>
+                        <p className="text-[14px] font-medium text-slate-800 whitespace-normal break-words">{i.nome}</p>
                         <p className="text-[12px] text-slate-500">{i.qtd} {unidadeLabel(i.unidade)} · informado pelo técnico</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -3894,7 +3894,7 @@ function OSDetalhe(p) {
                   ))}
                 </div>
               )}
-              <div className="flex gap-2">
+              <div className="flex min-w-0 gap-2 [&>input]:min-w-0">
                 <Input value={txtCheck} onChange={(e) => setTxtCheck(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCheck()} placeholder="Adicionar item ao checklist" aria-label="Novo item do checklist" />
                 <Btn variant="soft" icon={Plus} onClick={addCheck} title="Adicionar item" />
               </div>
@@ -3916,18 +3916,18 @@ function OSDetalhe(p) {
           )}
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 max-w-full space-y-6">
           <section>
             <Rotulo>Cliente</Rotulo>
             <Panel className="p-5">
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
                 <Avatar nome={c?.nome} tipo={c?.tipo} />
                 <div className="min-w-0">
                   <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
                   <p className="text-[13px] text-slate-500">{c?.telefone}</p>
                 </div>
               </div>
-              <div className="mt-3 text-[13px]"><Endereco valor={os.local} local={os.localServico} /></div>
+              <div className="mt-3 text-[13px]"><Endereco valor={os.local} local={os.localServico} className="min-w-0 max-w-full [&>span]:min-w-0" /></div>
               {c?.whatsapp && (
                 <Btn variant="soft" size="sm" icon={Share2} className="w-full mt-4"
                   onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp)}?text=${encodeURIComponent(`Olá! Confirmando nosso atendimento${os.data ? ` dia ${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : ""}.`)}`, "_blank")}>
@@ -3951,10 +3951,10 @@ function OSDetalhe(p) {
             <section>
               <Rotulo>Resultado deste serviço</Rotulo>
               <Panel className="p-5 space-y-3 text-[14px]">
-                <div className="flex justify-between"><span className="text-slate-500">Cobrado</span><span className="font-medium tabular-nums">{brl(cobrado)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Custo de itens</span><span className="tabular-nums">− {brl(somaCustos(os.itens))}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Outros custos</span><span className="tabular-nums">− {brl(os.custosExtras || 0)}</span></div>
-                <div className="flex justify-between pt-3 border-t border-slate-100">
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1"><span className="text-slate-500">Cobrado</span><span className="font-medium tabular-nums">{brl(cobrado)}</span></div>
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1"><span className="text-slate-500">Custo de itens</span><span className="tabular-nums">− {brl(somaCustos(os.itens))}</span></div>
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1"><span className="text-slate-500">Outros custos</span><span className="tabular-nums">− {brl(os.custosExtras || 0)}</span></div>
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 pt-3 border-t border-slate-100">
                   <span className="font-medium text-slate-700">Resultado bruto</span>
                   <span className={cx("font-semibold tabular-nums", cobrado - custoTotal >= 0 ? "text-emerald-700" : "text-rose-700")}>{brl(cobrado - custoTotal)}</span>
                 </div>
@@ -3972,7 +3972,7 @@ function OSDetalhe(p) {
                   return (
                     <button key={g.id} onClick={() => abrirGarantia(g.id)} className={cx("w-full flex items-start justify-between gap-3 text-left", ring)}>
                       <div className="min-w-0">
-                        <p className="text-[13.5px] text-slate-800 truncate">{g.descricao}</p>
+                        <p className="text-[13.5px] text-slate-800 whitespace-normal break-words">{g.descricao}</p>
                         <p className="text-[12px] text-slate-400">{g.tipo === "servico" ? "Serviço" : "Fabricante"}{g.serie ? ` · série ${g.serie}` : ""} · {st.detalhe}</p>
                       </div>
                       <span className="text-[12px] text-slate-500 shrink-0 tabular-nums">até {dataBR(g.ate)}</span>
@@ -4009,7 +4009,7 @@ function OSDetalhe(p) {
               <button key={x.id} onClick={() => { up({ itens: [...os.itens, novoItem === "servicos" ? itemServico(x, 1) : itemProduto(x, 1)] }); setNovoItem(null); }}
                 className={cx("w-full flex items-center justify-between gap-4 rounded-xl ring-1 ring-slate-200 px-4 py-3.5 text-left hover:ring-teal-500", ring)}>
                 <div><p className="font-medium text-slate-800">{x.nome}</p><p className="text-[12px] text-slate-400">{x.categoria || [x.marca, x.modelo].filter(Boolean).join(" ")}</p></div>
-                <div className="text-right"><p className="font-semibold text-slate-900 tabular-nums">{brl(x.preco)}</p><p className="text-[12px] text-slate-400">por {unidadeLabel(x.unidade)}</p></div>
+                <div className="text-right"><p className="max-w-full font-semibold text-slate-900 tabular-nums">{brl(x.preco)}</p><p className="text-[12px] text-slate-400">por {unidadeLabel(x.unidade)}</p></div>
               </button>
             ))}
           </div>
@@ -4029,7 +4029,7 @@ function OSDetalhe(p) {
           }
           finalizarOS(os.id, extras); setFinalizando(false);
         }} jaConcluida={os.status === "concluida"} verValores={verValores} />}
-    </>
+    </div>
   );
 }
 
