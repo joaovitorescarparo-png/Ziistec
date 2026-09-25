@@ -13,7 +13,8 @@ do $$
 declare v_total int; v_anon int; v_missing_path int; v_private_auth int; v_dynamic int;
 begin
   select count(*) into v_total from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private');
-  if v_total<>116 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=116 actual=%',v_total; end if;
+  -- 0092 adds nine definers; replacing the existing quota definer adds zero.
+  if v_total<>125 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=125 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;
@@ -35,6 +36,54 @@ begin
   if v_dynamic<>1 then raise exception 'RC1B_UNEXPECTED_DYNAMIC_SQL_COUNT=%',v_dynamic; end if;
   if not exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname='public' and p.proname='rls_auto_enable' and p.proconfig @> array['search_path=pg_catalog']::text[] and not has_function_privilege('authenticated',p.oid,'EXECUTE') and not has_function_privilege('anon',p.oid,'EXECUTE')) then
     raise exception 'RC1B_RLS_AUTO_ENABLE_NOT_HARDENED';
+  end if;
+end $$;
+
+-- Verify the actual Assistant catalog/ACL, not only the aggregate inventory.
+-- Six new private + three new public definers; quota is replaced, not added.
+do $$
+declare r record; v_oid oid; v_proc pg_proc%rowtype;
+begin
+  for r in select * from (values
+    ('zt_private.assistant_purge_plans()',true,false),
+    ('zt_private.assistant_audit(uuid,uuid,text,text,text,bytea)',true,false),
+    ('zt_private.assistant_authorize(uuid,text)',true,false),
+    ('zt_private.assistant_subscription(uuid)',true,false),
+    ('zt_private.assistant_resolve(uuid,text,text,boolean)',true,false),
+    ('zt_private.assistant_target(uuid,text,uuid,boolean)',true,false),
+    ('public.zt_assistant_plan(uuid,text,jsonb,uuid)',true,true),
+    ('public.zt_assistant_execute(uuid,uuid,text)',true,true),
+    ('public.zt_assistant_consume_ai_quota(uuid)',true,true),
+    ('zt_private.zt_consume_ai_quota(uuid)',true,false),
+    ('zt_private.assistant_validate(text,jsonb)',false,false),
+    ('zt_private.assistant_error_code(text)',false,false)
+  ) as expected(signature,is_definer,authenticated_execute) loop
+    v_oid:=to_regprocedure(r.signature);
+    if v_oid is null then raise exception 'ASSISTANT_FUNCTION_MISSING: %',r.signature; end if;
+    select * into strict v_proc from pg_proc where oid=v_oid;
+    if v_proc.prosecdef is distinct from r.is_definer then
+      raise exception 'ASSISTANT_SECURITY_MODE_DRIFT: %',r.signature;
+    end if;
+    if not exists(select 1 from unnest(coalesce(v_proc.proconfig,array[]::text[])) setting
+      where setting in ('search_path=','search_path=""')) then
+      raise exception 'ASSISTANT_SEARCH_PATH_NOT_EMPTY: %',r.signature;
+    end if;
+    if exists(select 1 from aclexplode(coalesce(v_proc.proacl,acldefault('f',v_proc.proowner))) acl
+      where acl.grantee=0 and acl.privilege_type='EXECUTE') then
+      raise exception 'ASSISTANT_PUBLIC_EXECUTE: %',r.signature;
+    end if;
+    if has_function_privilege('anon',v_oid,'EXECUTE') then
+      raise exception 'ASSISTANT_ANON_EXECUTE: %',r.signature;
+    end if;
+    if has_function_privilege('authenticated',v_oid,'EXECUTE') is distinct from r.authenticated_execute then
+      raise exception 'ASSISTANT_AUTH_EXECUTE_DRIFT: %',r.signature;
+    end if;
+  end loop;
+  if has_function_privilege('service_role','zt_private.assistant_purge_plans()','EXECUTE') then
+    raise exception 'ASSISTANT_CLEANUP_SERVICE_ROLE_EXPOSED';
+  end if;
+  if to_regprocedure('public.zt_assistant_execute(uuid,uuid)') is not null then
+    raise exception 'ASSISTANT_LEGACY_EXECUTE_SIGNATURE_PRESENT';
   end if;
 end $$;
 
