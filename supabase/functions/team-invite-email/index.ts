@@ -1,8 +1,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
 
 const STAGING_APP = "https://ziistec-git-hardening-v2-staging-js-connect.vercel.app";
+const RC1D_APP = "https://ziistec-git-rc1d-stabilization-js-connect.vercel.app";
 const LOCAL_APPS = new Set(["http://localhost:5173", "http://127.0.0.1:5173"]);
-const ALLOWED_ORIGINS = new Set([STAGING_APP, ...LOCAL_APPS]);
+const ALLOWED_ORIGINS = new Set([STAGING_APP, RC1D_APP, ...LOCAL_APPS]);
 
 const json = (status: number, body: unknown, origin = "") => new Response(JSON.stringify(body), {
   status,

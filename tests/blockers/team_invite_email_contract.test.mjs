@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { transformSync } from 'esbuild';
 
 const read=(p)=>readFileSync(p,'utf8');
 
@@ -29,6 +30,33 @@ test('team invite redirect allowlist is exact for this staging branch',()=>{
   assert.match(edge,/https:\/\/ziistec-git-hardening-v2-staging-js-connect\.vercel\.app/);
   assert.doesNotMatch(edge,/\*\.vercel|\*\*|ziistec\.vercel\.app/);
   assert.match(edge,/invalid_redirect/);
+});
+
+test('team invite origin allowlist is exact: hardening, RC-1D and existing local origins only',()=>{
+  const edge=read('supabase/functions/team-invite-email/index.ts');
+  const preamble=edge.slice(edge.indexOf('const STAGING_APP'),edge.indexOf('Deno.serve('));
+  const {code}=transformSync(preamble,{loader:'ts'});
+  const {ALLOWED_ORIGINS,normalizeRedirect}=new Function(`${code}\nreturn { ALLOWED_ORIGINS, normalizeRedirect };`)();
+  const hardening='https://ziistec-git-hardening-v2-staging-js-connect.vercel.app';
+  const rc1d='https://ziistec-git-rc1d-stabilization-js-connect.vercel.app';
+  const local=['http://localhost:5173','http://127.0.0.1:5173'];
+  assert.deepEqual([...ALLOWED_ORIGINS].sort(),[hardening,rc1d,...local].sort());
+  for(const origin of ALLOWED_ORIGINS){
+    assert.equal(new URL(origin).origin,origin);
+    assert.doesNotMatch(origin,/\*/);
+  }
+  for(const origin of [hardening,rc1d,...local]) assert.equal(normalizeRedirect(`${origin}/`),`${origin}/`);
+  for(const rejected of [
+    'https://example.com/',
+    'https://ziistec-git-rc1c-mobile-ux-stabilization-js-connect.vercel.app/',
+    'https://ziistec-git-zz-probe-wildcard-js-connect.vercel.app/',
+    'https://ziistec.vercel.app/',
+    'http://ziistec-git-rc1d-stabilization-js-connect.vercel.app/',
+    `${rc1d}/a/b`,
+    `${rc1d}/?x=1`,
+  ]) assert.equal(normalizeRedirect(rejected),'');
+  assert.equal((edge.match(/ALLOWED_ORIGINS\.has\(origin\)/g)||[]).length,4);
+  assert.doesNotMatch(edge,/Access-Control-Allow-Origin"\s*:\s*"\*"/);
 });
 
 test('technician email metadata does not expose private business fields',()=>{
