@@ -1,3 +1,47 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* MOBILE HOMOLOGATION · waves 4-6 shared field ergonomics.
+   Mantém a autoridade de negócio no backend; só corrige viewport/touch no cliente. */
+@media (max-width: 820px) {
+  html,
+  body,
+  #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  button {
+    min-width: 44px;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select {
+    min-height: 44px;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    scroll-margin-bottom: 6rem;
+  }
+
+  [class~="min-h-screen"] {
+    min-height: 100dvh !important;
+  }
+
+  [class~="max-h-[94vh]"] {
+    max-height: 94dvh !important;
+  }
+
+  img[alt^="QR Code Pix"] {
+    display: block;
+    width: min(16rem, 100%) !important;
+    height: auto !important;
+    aspect-ratio: 1 / 1;
+  }
+}
