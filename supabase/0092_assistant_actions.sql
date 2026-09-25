@@ -214,7 +214,7 @@ begin
       if jsonb_typeof(v)<>'number' then raise exception 'Valor numérico inválido' using errcode='22023'; end if;
       v_num:=(v::text)::numeric;
       if v_num<0 or (k in ('amount','quantity') and v_num=0)
-        or v_num>case when k='quantity' then 10000 when k='amount' then 999999999.99 else 999999.99 end
+        or v_num>(case when k='quantity' then 10000 when k='amount' then 999999999.99 else 999999.99 end)
         or (k='quantity' and v_num<>round(v_num,3))
         or (k<>'quantity' and v_num<>round(v_num,2)) then
         raise exception 'Valor fora dos limites' using errcode='22023';

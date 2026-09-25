@@ -108,6 +108,12 @@ const functionBody = name => {
   assert.notEqual(start, -1);
   return sql.slice(start, sql.indexOf('end $$;', start) + 7);
 };
+test('SQL static: CASE inside validator IF cannot terminate its condition at the inner THEN', () => {
+  // PL/pgSQL reads IF up to the first THEN outside parentheses (read_sql_construct).
+  // This guards the exact CI compilation failure; it is not a PostgreSQL parser.
+  const validate = functionBody('zt_private.assistant_validate');
+  assert.match(validate, /or v_num>\(case when k='quantity' then 10000 when k='amount' then 999999999\.99 else 999999\.99 end\)/);
+});
 test('SQL static: quantity is checked and normalized before preview/input digest', () => {
   const validate = functionBody('zt_private.assistant_validate');
   assert.match(validate, /security invoker/);
