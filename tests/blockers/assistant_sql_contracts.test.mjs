@@ -136,8 +136,30 @@ test('SQL static: canonical creation keys are private; preview receipt precedes 
   assert.ok(execute.indexOf('confirmed_at=clock_timestamp()') < execute.indexOf('case p.action'));
   assert.match(sql, /grant execute on function public.zt_assistant_execute\(uuid,uuid,text\)/);
 });
-test('SQL static: independent scrub schedule, expiry checks, sanitized audit and denied fallback', () => {
-  assert.match(sql, /cron.schedule\('ziistec-assistant-plan-retention','\* \* \* \* \*'/);
+test('SQL static: scheduler is optional, absent cron has no executable reference or extension installation', () => {
+  const scheduler = sql.match(/do \$assistant_scheduler\$([\s\S]*?)\$assistant_scheduler\$;/)?.[1];
+  assert.ok(scheduler);
+  assert.match(scheduler, /if to_regprocedure\('cron.schedule\(text,text,text\)'\) is not null then/);
+  assert.match(scheduler, /execute 'select cron.schedule\(\$1,\$2,\$3\)'/);
+  assert.match(scheduler, /using 'ziistec-assistant-plan-retention','\* \* \* \* \*','select zt_private.assistant_purge_plans\(\)'/);
+  assert.match(scheduler, /exception when insufficient_privilege then\s+raise notice/);
+  const absent = scheduler.slice(scheduler.lastIndexOf('else'));
+  assert.match(absent, /raise notice 'Assistant automatic cleanup not configured: pg_cron unavailable/);
+  assert.doesNotMatch(absent, /execute|perform|raise exception/i);
+  assert.doesNotMatch(sql, /0092 requires pg_cron|create extension|^select cron.schedule/im);
+});
+test('SQL static: cleanup retains restricted ACL and expiry rejects pending execution before business writes', () => {
+  assert.match(sql, /create function zt_private.assistant_purge_plans\(\)\s+returns void language sql security definer set search_path=''/);
+  assert.match(sql, /revoke all on function zt_private.assistant_purge_plans\(\) from public,anon,authenticated,service_role/);
+  assert.doesNotMatch(sql, /grant[^;]*assistant_purge_plans/i);
+  assert.match(sql, /retain_until timestamptz not null default now\(\)\+interval '30 minutes'/);
+  assert.match(sql, /update zt_private.assistant_plans set input=null,preview=null,\s+state=case when state='pending' then 'expired' else state end/);
+  const execute = functionBody('public.zt_assistant_execute');
+  const expiry = execute.indexOf("if p.state='expired' or p.expires_at<=clock_timestamp()");
+  assert.ok(expiry >= 0 && expiry < execute.indexOf('case p.action'));
+  assert.match(execute.slice(expiry, execute.indexOf('case p.action')), /return jsonb_build_object\('error',[^;]*'PLAN_EXPIRED'\);/);
+});
+test('SQL static: expiry checks, sanitized audit and denied fallback remain present', () => {
   assert.match(sql, /retain_until<=clock_timestamp\(\)/);
   assert.match(sql, /p.expires_at<=clock_timestamp\(\)/);
   assert.match(sql, /assistant_audit\(p_company,p_request_id,'denied',zt_private.assistant_error_code\(sqlstate\),p_action,v_hash\)/);

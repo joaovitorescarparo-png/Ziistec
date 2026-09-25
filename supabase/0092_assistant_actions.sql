@@ -1,12 +1,6 @@
 -- Assistente MVP: a model proposes; the database authorizes, previews and executes.
 -- No changes to the existing commercial /api/ai owner-only contract.
--- Unapplied migration. Retention requires pg_cron to be enabled before application.
--- Fail before creating objects if the independent cleanup scheduler is unavailable.
-do $$ begin
-  if to_regprocedure('cron.schedule(text,text,text)') is null then
-    raise exception '0092 requires pg_cron for assistant plan retention';
-  end if;
-end $$;
+-- Unapplied migration. The core does not require a scheduler or install extensions.
 
 -- Shared serialization point for ALL consumers of zt_consume_ai_quota(uuid).
 -- A row write also causes stale REPEATABLE READ snapshots to fail, not overspend.
@@ -70,7 +64,7 @@ create policy assistant_audit_owner_select on public.assistant_action_audit
 for select to authenticated using (public.zt_is_owner(company_id));
 
 -- Pending arguments contain operational data, never the original transcript.
--- They are not exposed by the Data API and are scrubbed on completion/expiry.
+-- Not exposed by the Data API; scrubbed on completion, observed expiry or cleanup.
 create table zt_private.assistant_plans (
   company_id uuid not null references public.companies(id),
   actor_user_id uuid not null references auth.users(id),
@@ -98,8 +92,10 @@ alter table zt_private.assistant_plans enable row level security;
 revoke all on zt_private.assistant_plans from public,anon,authenticated;
 
 create index assistant_plans_retention on zt_private.assistant_plans(retain_until) where input is not null;
--- Independent transaction, every minute. Expiry blocks execution immediately;
--- physical scrubbing follows within one scheduler interval while cron is healthy.
+-- Retention policy: scrub input/preview after retain_until (30 minutes).
+-- Expiry blocks execution independently of physical cleanup. Without a scheduler,
+-- an administrator must arrange independent calls to this private cleanup function;
+-- abandoned content is NOT automatically scrubbed merely by reaching its deadline.
 create function zt_private.assistant_purge_plans()
 returns void language sql security definer set search_path='' as $$
   update zt_private.assistant_plans set input=null,preview=null,
@@ -107,7 +103,22 @@ returns void language sql security definer set search_path='' as $$
   where retain_until<=clock_timestamp() and (input is not null or preview is not null);
 $$;
 revoke all on function zt_private.assistant_purge_plans() from public,anon,authenticated,service_role;
-select cron.schedule('ziistec-assistant-plan-retention','* * * * *','select zt_private.assistant_purge_plans()');
+-- Optional adapter only: do not resolve cron SQL when the extension is absent.
+-- The stable job name updates the same job for the migration's database role.
+do $assistant_scheduler$
+begin
+  if to_regprocedure('cron.schedule(text,text,text)') is not null then
+    begin
+      execute 'select cron.schedule($1,$2,$3)'
+        using 'ziistec-assistant-plan-retention','* * * * *','select zt_private.assistant_purge_plans()';
+    exception when insufficient_privilege then
+      raise notice 'Assistant automatic cleanup not configured: scheduler permission denied. Arrange independent administrator cleanup calls.';
+    end;
+  else
+    raise notice 'Assistant automatic cleanup not configured: pg_cron unavailable. Arrange independent administrator cleanup calls.';
+  end if;
+end;
+$assistant_scheduler$;
 
 -- Never persist SQLERRM, arguments, transcript or arbitrary caller-supplied labels.
 create function zt_private.assistant_error_code(p_state text)
