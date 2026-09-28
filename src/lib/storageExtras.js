@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { prepararLogoTransparente } from './logoImage';
 import { inferEvidenceStage, persistWorkOrderEvidence } from './workOrderEvidence';
+import { isProductImagePath, safeProductImageUrl, createSignedProductImagePreview } from './productImagePreview';
 
 const safe=(name)=>String(name||'arquivo').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/-+/g,'-').slice(-120);
 const check=(r)=>{if(r?.error) throw r.error; return r?.data;};
@@ -47,8 +48,14 @@ const PRODUCT_IMAGE_BUCKET='zt-product-images';
 const LEGACY_PRODUCT_IMAGE_BUCKET='zt-branding';
 
 export async function resolverImagemProdutoDB(path){
-  if(!path) return null;
-  return (await signed(PRODUCT_IMAGE_BUCKET,path)) || signed(LEGACY_PRODUCT_IMAGE_BUCKET,path);
+  if(!isProductImagePath(path)) return null;
+  const current=safeProductImageUrl(await signed(PRODUCT_IMAGE_BUCKET,path),supabase?.supabaseUrl,path);
+  return current || safeProductImageUrl(await signed(LEGACY_PRODUCT_IMAGE_BUCKET,path),supabase?.supabaseUrl,path);
+}
+
+export async function prepararPreviewImagemProdutoDB(path){
+  const url=await resolverImagemProdutoDB(path);
+  return url ? createSignedProductImagePreview(url,supabase?.supabaseUrl,path) : null;
 }
 
 export async function salvarImagemProdutoDB(productId,file,companyId,oldPath=null){

@@ -30,7 +30,8 @@ import {
 } from "../lib/runtimeApi";
 import { cancelarAssinaturaDB, reativarAssinaturaDB } from "../lib/subscriptionApi";
 import { chamarIAReal } from "../lib/aiApi";
-import { resolverLogoEmpresaDB, persistirFotosOSDB, resolverImagemProdutoDB, salvarImagemProdutoDB, removerImagemProdutoDB } from "../lib/storageExtras";
+import { resolverLogoEmpresaDB, persistirFotosOSDB, resolverImagemProdutoDB, salvarImagemProdutoDB, removerImagemProdutoDB, prepararPreviewImagemProdutoDB } from "../lib/storageExtras";
+import { createProductImagePreview } from "../lib/productImagePreview";
 import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
@@ -2151,11 +2152,17 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
   useEffect(() => {
     let active = true;
     let objectUrl = null;
+    setImagemPreview(null);
     if (imagemArquivo) {
-      objectUrl = URL.createObjectURL(imagemArquivo);
-      setImagemPreview(objectUrl);
+      createProductImagePreview(imagemArquivo).then((url) => {
+        if (!active) { URL.revokeObjectURL(url); return; }
+        objectUrl = url; setImagemPreview(url);
+      }).catch(() => { if (active) aviso("Não foi possível preparar a prévia. Escolha uma foto JPG, PNG ou WEBP válida."); });
     } else if (formP?.imagemPath && !removerImagem) {
-      resolverImagemProdutoDB(formP.imagemPath).then((url) => { if (active) setImagemPreview(url); }).catch(() => { if (active) setImagemPreview(null); });
+      prepararPreviewImagemProdutoDB(formP.imagemPath).then((url) => {
+        if (!active) { if (url) URL.revokeObjectURL(url); return; }
+        objectUrl = url; setImagemPreview(url);
+      }).catch(() => { if (active) setImagemPreview(null); });
     } else setImagemPreview(null);
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [imagemArquivo, formP?.imagemPath, removerImagem]);
