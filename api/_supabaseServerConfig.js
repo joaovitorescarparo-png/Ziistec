@@ -9,6 +9,7 @@ const STAGING_BRANCHES = Object.freeze([
   'hardening-v2-staging',
   'field-workflow-v1',
   'rc1c-mobile-ux-stabilization',
+  'codex/ziistec-assistant-mvp-v1',
 ]);
 
 const clean = (value) => String(value || '').trim();

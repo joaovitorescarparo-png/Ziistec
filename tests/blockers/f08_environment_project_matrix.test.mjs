@@ -4,6 +4,7 @@ import { PROD_SUPABASE_HOSTS, STAGING_SUPABASE_HOSTS, resolverConfigSupabase } f
 import {
   PROD_SUPABASE_URL,
   STAGING_SUPABASE_URL,
+  STAGING_BRANCHES,
   resolverSupabaseServidor,
 } from '../../api/_supabaseServerConfig.js';
 
@@ -17,6 +18,7 @@ const FIELD_WORKFLOW_BRANCH = 'field-workflow-v1';
 const FIELD_WORKFLOW_HOST = 'ziistec-git-field-workflow-v1-js-connect.vercel.app';
 const RC1C_BRANCH = 'rc1c-mobile-ux-stabilization';
 const RC1C_HOST = 'ziistec-git-rc1c-mobile-ux-stabilization-js-connect.vercel.app';
+const ASSISTANT_BRANCH = 'codex/ziistec-assistant-mvp-v1';
 const ASSISTANT_HOST = 'ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app';
 
 const client = ({ deploymentEnv, host, envUrl = '', envKey = '' }) => resolverConfigSupabase({
@@ -193,5 +195,45 @@ test('F08 Assistant client: somente o alias exato do Preview do Assistant usa St
   ]) {
     mustFailClosed(client({ deploymentEnv: 'preview', host, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), `preview desconhecido ${host} com staging`);
     mustFailClosed(client({ deploymentEnv: 'preview', host }), `preview desconhecido ${host} sem env`);
+  }
+});
+
+test('F08 Assistant server: somente a branch exata do Assistant em Preview usa Staging', () => {
+  assert.equal(STAGING_BRANCHES.filter((branch) => branch === ASSISTANT_BRANCH).length, 1, 'assistant branch exata na allowlist de staging');
+  assert.equal(STAGING_BRANCHES.some((branch) => branch.includes('*')), false, 'allowlist de branches sem wildcard');
+
+  for (const [url, key] of [[STAGING_SUPABASE_URL, STAGING_KEY], ['', '']]) {
+    const label = `assistant server preview staging ${url ? 'explícito' : 'fallback'}`;
+    const result = server({ vercelEnv: 'preview', branch: ASSISTANT_BRANCH, url, key });
+    mustConfigure(result, STAGING_SUPABASE_URL, label);
+    assert.equal(result.publishableKey, STAGING_KEY, `${label}: key de staging`);
+    assert.equal(result.origem, url ? 'env-staging' : 'staging-fallback', `${label}: contexto de preview staging`);
+  }
+  for (const [url, key] of [[PROD_SUPABASE_URL, PROD_KEY], [STAGING_SUPABASE_URL, INVALID_KEY], [INVALID_URL, INVALID_KEY], [STAGING_SUPABASE_URL, '']]) {
+    mustFailClosed(server({ vercelEnv: 'preview', branch: ASSISTANT_BRANCH, url, key }), `assistant server preview recusa ${url} ${key ? 'com key' : 'sem key'}`);
+  }
+  mustFailClosed(server({ vercelEnv: '', branch: ASSISTANT_BRANCH, url: STAGING_SUPABASE_URL, key: STAGING_KEY }), 'assistant server sem VERCEL_ENV');
+
+  for (const branch of ['main', ASSISTANT_BRANCH]) {
+    for (const [url, key] of [['', ''], [PROD_SUPABASE_URL, PROD_KEY]]) {
+      const label = `server production ${branch} ${url ? 'explícito' : 'fallback'}`;
+      const result = server({ vercelEnv: 'production', branch, url, key });
+      mustConfigure(result, PROD_SUPABASE_URL, label);
+      assert.equal(result.publishableKey, PROD_KEY, `${label}: key de produção`);
+    }
+    for (const [url, key] of [[STAGING_SUPABASE_URL, STAGING_KEY], [INVALID_URL, INVALID_KEY], [PROD_SUPABASE_URL, INVALID_KEY]]) {
+      mustFailClosed(server({ vercelEnv: 'production', branch, url, key }), `server production ${branch} recusa ${url}`);
+    }
+  }
+
+  for (const branch of [
+    'codex/ziistec-assistant-mvp-v2',
+    'codex/ziistec-assistant-mvp',
+    `${ASSISTANT_BRANCH}-extra`,
+    'codex/*',
+    'codex-ziistec-assistant-mvp-v1',
+  ]) {
+    mustFailClosed(server({ vercelEnv: 'preview', branch, url: STAGING_SUPABASE_URL, key: STAGING_KEY }), `preview server desconhecido ${branch} com staging`);
+    mustFailClosed(server({ vercelEnv: 'preview', branch }), `preview server desconhecido ${branch} sem env`);
   }
 });
