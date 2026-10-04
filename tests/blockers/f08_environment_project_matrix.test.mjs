@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolverConfigSupabase } from '../../src/lib/supabaseConfig.js';
+import { PROD_SUPABASE_HOSTS, STAGING_SUPABASE_HOSTS, resolverConfigSupabase } from '../../src/lib/supabaseConfig.js';
 import {
   PROD_SUPABASE_URL,
   STAGING_SUPABASE_URL,
@@ -17,6 +17,7 @@ const FIELD_WORKFLOW_BRANCH = 'field-workflow-v1';
 const FIELD_WORKFLOW_HOST = 'ziistec-git-field-workflow-v1-js-connect.vercel.app';
 const RC1C_BRANCH = 'rc1c-mobile-ux-stabilization';
 const RC1C_HOST = 'ziistec-git-rc1c-mobile-ux-stabilization-js-connect.vercel.app';
+const ASSISTANT_HOST = 'ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app';
 
 const client = ({ deploymentEnv, host, envUrl = '', envKey = '' }) => resolverConfigSupabase({
   deploymentEnv,
@@ -160,4 +161,37 @@ test('F08 client: development aceita apenas staging explícito', () => {
   mustFailClosed(client({ deploymentEnv: 'development', host: 'localhost', envUrl: PROD_SUPABASE_URL, envKey: PROD_KEY }), 'client development produção');
   mustFailClosed(client({ deploymentEnv: 'development', host: 'localhost', envUrl: INVALID_URL, envKey: INVALID_KEY }), 'client development terceiro');
   mustFailClosed(client({ deploymentEnv: 'development', host: 'localhost', envUrl: STAGING_SUPABASE_URL }), 'client development parcial');
+});
+
+test('F08 Assistant client: somente o alias exato do Preview do Assistant usa Staging', () => {
+  assert.equal(STAGING_SUPABASE_HOSTS.filter((host) => host === ASSISTANT_HOST).length, 1, 'assistant host exato na allowlist de staging');
+  assert.equal(PROD_SUPABASE_HOSTS.includes(ASSISTANT_HOST), false, 'assistant host nunca na allowlist de produção');
+  assert.equal([...PROD_SUPABASE_HOSTS, ...STAGING_SUPABASE_HOSTS].some((host) => host.includes('*')), false, 'allowlists sem wildcard');
+
+  for (const deploymentEnv of ['preview', '']) {
+    const label = `assistant client staging explícito (${deploymentEnv || 'env inferido'})`;
+    const result = client({ deploymentEnv, host: ASSISTANT_HOST, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY });
+    mustConfigure(result, STAGING_SUPABASE_URL, label);
+    assert.equal(result.anonKey, STAGING_KEY, `${label}: key de staging`);
+    assert.equal(result.origem, 'env-staging', `${label}: contexto de preview staging`);
+  }
+  mustConfigure(client({ deploymentEnv: 'preview', host: ASSISTANT_HOST }), STAGING_SUPABASE_URL, 'assistant client fallback staging');
+
+  for (const [envUrl, envKey] of [[PROD_SUPABASE_URL, PROD_KEY], [STAGING_SUPABASE_URL, INVALID_KEY], [INVALID_URL, INVALID_KEY]]) {
+    mustFailClosed(client({ deploymentEnv: 'preview', host: ASSISTANT_HOST, envUrl, envKey }), `assistant client par não autorizado ${envUrl}`);
+  }
+  mustFailClosed(client({ deploymentEnv: 'preview', host: ASSISTANT_HOST, envUrl: STAGING_SUPABASE_URL }), 'assistant client env parcial');
+  for (const [envUrl, envKey] of [[PROD_SUPABASE_URL, PROD_KEY], [STAGING_SUPABASE_URL, STAGING_KEY], ['', '']]) {
+    mustFailClosed(client({ deploymentEnv: 'production', host: ASSISTANT_HOST, envUrl, envKey }), `assistant client nunca recebe production ${envUrl || 'sem env'}`);
+  }
+
+  for (const host of [
+    'ziistec-git-codex-ziistec-assistant-mvp-v2-js-connect.vercel.app',
+    'ziistec-git-codex-ziistec-assistant-mvp-js-connect.vercel.app',
+    `${ASSISTANT_HOST}.example.com`,
+    'ziistec-a1b2c3d4e-js-connect.vercel.app',
+  ]) {
+    mustFailClosed(client({ deploymentEnv: 'preview', host, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), `preview desconhecido ${host} com staging`);
+    mustFailClosed(client({ deploymentEnv: 'preview', host }), `preview desconhecido ${host} sem env`);
+  }
 });
