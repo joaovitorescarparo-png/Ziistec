@@ -2592,10 +2592,10 @@ function interpretarParaFormulario(bruto, { clientes, servicos, produtos, empres
 function OrcamentoDoc(p) {
   const { orc, cliente, empresa, mudarStatusOrc, duplicarOrcamento, gerarOS, setOrcamentoAberto, aviso, pedirConfirmacao, excluirRegistro, papel } = p;
   const [editando, setEditando] = useState(false);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
   const c = cliente(orc.clienteId);
   if (editando) return <OrcamentoEditor {...p} inicial={orc} onFechar={() => setEditando(false)} />;
 
-  const [gerandoPdf, setGerandoPdf] = useState(false);
   const arquivoPdf = nomeArquivoDoc(orc.numero, c?.fantasia || c?.nome);
   const textoWhats = () => mensagemOrcamento(orc, c, empresa);
   const baixarPdf = async () => {
@@ -6329,4 +6329,4 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
 
 /* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
 
-export { OSDetalhe, NovaOS, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado };
+export { OSDetalhe, NovaOS, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado };
