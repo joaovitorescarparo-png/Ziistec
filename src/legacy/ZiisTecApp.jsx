@@ -69,6 +69,11 @@ const totalOS = (os) => somaItens(os.itens) + somaAdicionais(os) + (os.valorAdic
 const resumoOS = (os) => os.itens.map((i) => i.nome).join(" · ")
   || (os.descricaoLivre || "").trim()
   || (os.emGarantia ? "atendimento em garantia" : "sem descrição");
+// OS vinda do banco só traz responsavelId: o nome vem da equipe carregada ou do próprio usuário.
+const nomeResponsavelOS = (os, equipe = [], usuarioAtual = null) =>
+  equipe.find((m) => m.usuarioId === os.responsavelId)?.usuario?.nome
+  || (os.responsavelId && os.responsavelId === usuarioAtual?.id ? usuarioAtual.nome : "")
+  || os.responsavel || "Sem técnico";
 const num = (v) => { const n = parseFloat(String(v).replace(",", ".")); return Number.isFinite(n) ? n : 0; };
 const precoComAcrescimo = (custo, percentual) => Number((Math.max(0, num(custo)) * (1 + Math.max(0, num(percentual)) / 100)).toFixed(2));
 const acrescimoSobreCusto = (custo, preco) => {
@@ -3340,7 +3345,7 @@ function FormItemLivre({ onAdicionar, rotulo = "Adicionar ao orçamento" }) {
 
 /* ====================================================== Ordens de serviço */
 function OrdensServico(p) {
-  const { ordens, nomeCliente, osAberta, setOsAberta, clientes, salvarOS, empresa, orcamentos, lancamentos, abrirOS, permitido } = p;
+  const { ordens, nomeCliente, osAberta, setOsAberta, clientes, salvarOS, empresa, orcamentos, lancamentos, abrirOS, permitido, equipe, usuarioAtual } = p;
   const soMinhas = !permitido("todasOS");
   const [filtro, setFiltro] = useState("dia");
   const [criando, setCriando] = useState(false);
@@ -3369,7 +3374,7 @@ function OrdensServico(p) {
               {os.localServico && <span className="text-[13px] text-slate-400">· {os.localServico}</span>}
             </div>
             <p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
-            <p className="text-[12px] text-slate-400 mt-1">{os.data ? `${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : "Sem agendamento"}{empresa.temEquipe ? ` · ${os.responsavel}` : ""}</p>
+            <p className="text-[12px] text-slate-400 mt-1">{os.data ? `${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : "Sem agendamento"}{empresa.temEquipe ? ` · ${nomeResponsavelOS(os, equipe, usuarioAtual)}` : ""}</p>
             <div className="mt-2.5">
               <Trilha etapas={[
                 { label: orc ? orc.numero : "OS direta", feito: true },
@@ -3712,7 +3717,7 @@ function OSDetalhe(p) {
                     </div>
                     <div className="min-w-0">
                       <p className="text-[15px] font-medium text-slate-900">{diaSemana(os.data)}, {dataBR(os.data)}{os.hora ? ` às ${os.hora}` : ""}</p>
-                      {empresa.temEquipe && <p className="text-[13px] text-slate-500">Responsável: {os.responsavel}</p>}
+                      {empresa.temEquipe && <p className="text-[13px] text-slate-500">Responsável: {nomeResponsavelOS(os, equipe, usuarioAtual)}</p>}
                     </div>
                   </div>
                   <Btn size="sm" variant="soft" icon={CalendarClock} onClick={() => setAgendando(true)}>Alterar</Btn>
@@ -6329,4 +6334,4 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
 
 /* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
 
-export { OSDetalhe, NovaOS, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado };
+export { OSDetalhe, NovaOS, OrdensServico, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado };
