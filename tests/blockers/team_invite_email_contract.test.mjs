@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
+import { transformSync } from 'esbuild';
 
 const read=(p)=>readFileSync(p,'utf8');
 
@@ -24,11 +26,75 @@ test('team invite delivery uses native Supabase Invite and server-only privilege
   assert.match(client,/body:\{invite_id:inviteId,redirect_to:redirectTo\}/);
 });
 
-test('team invite redirect allowlist is exact for this staging branch',()=>{
+const previewOrigin='https://ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app';
+const stagingOrigin='https://ziistec-git-hardening-v2-staging-js-connect.vercel.app';
+const acceptedOrigins=[stagingOrigin,previewOrigin,'http://localhost:5173','http://127.0.0.1:5173'];
+const rejectedOrigins=[
+  'https://unknown.example',
+  `${previewOrigin}.evil.example`,
+  previewOrigin.replace('https:', 'http:'),
+  previewOrigin.replace('https:', 'ftp:'),
+  'javascript:alert(1)',
+  `${previewOrigin}/invite`,
+  `${previewOrigin}?invite=1`,
+  `${previewOrigin}#invite`,
+  '*',
+  'https://*.vercel.app',
+];
+
+function loadInviteContract(){
+  let handler;
+  const edge=read('supabase/functions/team-invite-email/index.ts').replace(/^import .*;\r?\n/m,'');
+  const {code}=transformSync(`${edge}\nglobalThis.normalizeRedirect=normalizeRedirect;`,{loader:'ts'});
+  const context={
+    URL,Response,
+    Deno:{serve:(fn)=>{handler=fn;},env:{get:()=>{throw new Error('Contract must not access environment');}}},
+    createClient:()=>{throw new Error('Contract must not access Supabase');},
+  };
+  runInNewContext(code,context);
+  return {handler,normalizeRedirect:context.normalizeRedirect};
+}
+
+test('team invite redirect allows only exact approved origins and root redirects',()=>{
   const edge=read('supabase/functions/team-invite-email/index.ts');
-  assert.match(edge,/https:\/\/ziistec-git-hardening-v2-staging-js-connect\.vercel\.app/);
+  const {normalizeRedirect}=loadInviteContract();
+  for(const origin of acceptedOrigins){
+    assert.equal(normalizeRedirect(origin),`${origin}/`,origin);
+    assert.equal(normalizeRedirect(`${origin}/`),`${origin}/`,origin);
+  }
+  for(const origin of rejectedOrigins) assert.equal(normalizeRedirect(origin),'',origin);
   assert.doesNotMatch(edge,/\*\.vercel|\*\*|ziistec\.vercel\.app/);
   assert.match(edge,/invalid_redirect/);
+});
+
+test('team invite preflight accepts exact origins and rejects malformed or wildcard origins',async()=>{
+  const {handler}=loadInviteContract();
+  for(const origin of acceptedOrigins){
+    const response=await handler(new Request('https://edge.example',{method:'OPTIONS',headers:{Origin:origin}}));
+    assert.equal(response.status,204,origin);
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'),origin);
+  }
+  for(const origin of rejectedOrigins){
+    for(const method of ['OPTIONS','POST']){
+      const response=await handler(new Request('https://edge.example',{method,headers:{Origin:origin}}));
+      assert.equal(response.status,403,`${method} ${origin}`);
+      assert.equal(response.headers.get('Access-Control-Allow-Origin'),null);
+      assert.equal((await response.json()).error,'origin_not_allowed');
+    }
+  }
+});
+
+test('team invite rejects invalid redirects before accessing backend or sending email',async()=>{
+  const {handler}=loadInviteContract();
+  for(const redirect of rejectedOrigins){
+    const response=await handler(new Request('https://edge.example',{
+      method:'POST',
+      headers:{Origin:previewOrigin,Authorization:'Bearer contract-test','Content-Type':'application/json'},
+      body:JSON.stringify({invite_id:'00000000-0000-0000-0000-000000000001',redirect_to:redirect}),
+    }));
+    assert.equal(response.status,400,redirect);
+    assert.equal((await response.json()).error,'invalid_redirect');
+  }
 });
 
 test('technician email metadata does not expose private business fields',()=>{
