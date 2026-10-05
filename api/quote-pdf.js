@@ -344,7 +344,12 @@ export default async function handler(req, res) {
     const rightInfoH = 68;
     const notesH = noteLines.length ? 24 + noteLines.length * 11 : 0;
     const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 12;
-    const totalBlockH = 44;
+    const discount = Number(quote.discount || 0);
+    const surcharge = Number(quote.surcharge || 0);
+    // Subtotal, desconto e acréscimo: 14pt por linha e folga até a faixa do TOTAL.
+    const adjustmentsH = discount > 0 || surcharge > 0 ? 14 * (1 + (discount > 0) + (surcharge > 0)) + 13 : 0;
+    const totalBoxH = 44;
+    const totalBlockH = totalBoxH + adjustmentsH;
     const warrantyH=warrantyLines.length?26+warrantyLines.length*11:0;
     const signatureH = 58;
     const closingGapH = 20;
@@ -353,19 +358,19 @@ export default async function handler(req, res) {
     if (shouldBreakPdfBlock(y,lowerBlockH,SAFE_BOTTOM) && canKeepClosingTogether(lowerBlockH,A4[1]-88,SAFE_BOTTOM)) newPage(true);
     else if (shouldBreakPdfBlock(y,totalBlockH,SAFE_BOTTOM)) newPage(true);
 
-    const discount = Number(quote.discount || 0);
-    const surcharge = Number(quote.surcharge || 0);
     const grand = Math.max(0, subtotal - discount + surcharge);
     const totalX = A4[0] - margin - 230;
     if (discount > 0 || surcharge > 0) {
       txt('Subtotal', totalX, y, 8.5, normal, muted); txtRight(money(subtotal), A4[0] - margin, y, 8.5, normal, ink); y -= 14;
       if (discount > 0) { txt('Desconto', totalX, y, 8.5, normal, muted); txtRight(`- ${money(discount)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 14; }
-      if (surcharge > 0) { txt('Acréscimo', totalX, y, 8.5, normal, muted); txtRight(`+ ${money(surcharge)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 18; }
+      if (surcharge > 0) { txt('Acréscimo', totalX, y, 8.5, normal, muted); txtRight(`+ ${money(surcharge)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 14; }
+      // A faixa do TOTAL ocupa de y-17 a y+21: começa abaixo da última linha de ajuste.
+      y -= 13;
     }
     page.drawRectangle({ x: totalX - 10, y: y - 17, width: A4[0] - margin - totalX + 10, height: 38, color: navy });
     txt('TOTAL', totalX + 3, y - 2, 11, bold, white);
     txtRight(money(grand), A4[0] - margin - 14, y - 4, 15, bold, white);
-    y -= totalBlockH;
+    y -= totalBoxH;
 
     if(warrantyLines.length){
       ensure(30);
