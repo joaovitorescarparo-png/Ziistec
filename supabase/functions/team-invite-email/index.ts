@@ -5,6 +5,7 @@ const LOCAL_APPS = new Set(["http://localhost:5173", "http://127.0.0.1:5173"]);
 const ALLOWED_ORIGINS = new Set([
   STAGING_APP,
   ...LOCAL_APPS,
+  "https://ziistec-git-rc1d-stabilization-js-connect.vercel.app",
   "https://ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app",
 ]);
 

@@ -28,16 +28,20 @@ test('team invite delivery uses native Supabase Invite and server-only privilege
 
 const previewOrigin='https://ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app';
 const stagingOrigin='https://ziistec-git-hardening-v2-staging-js-connect.vercel.app';
-const acceptedOrigins=[stagingOrigin,previewOrigin,'http://localhost:5173','http://127.0.0.1:5173'];
+const rc1dOrigin='https://ziistec-git-rc1d-stabilization-js-connect.vercel.app';
+const hostedOrigins=[stagingOrigin,rc1dOrigin,previewOrigin];
+const acceptedOrigins=[...hostedOrigins,'http://localhost:5173','http://127.0.0.1:5173'];
 const rejectedOrigins=[
   'https://unknown.example',
-  `${previewOrigin}.evil.example`,
-  previewOrigin.replace('https:', 'http:'),
-  previewOrigin.replace('https:', 'ftp:'),
+  ...hostedOrigins.flatMap(origin=>[
+    `${origin}.evil.example`,
+    origin.replace('https:', 'http:'),
+    origin.replace('https:', 'ftp:'),
+    `${origin}/invite`,
+    `${origin}?invite=1`,
+    `${origin}#invite`,
+  ]),
   'javascript:alert(1)',
-  `${previewOrigin}/invite`,
-  `${previewOrigin}?invite=1`,
-  `${previewOrigin}#invite`,
   '*',
   'https://*.vercel.app',
 ];
