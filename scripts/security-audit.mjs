@@ -43,6 +43,7 @@ export function evaluateAudit(runtime, full, lock) {
   function visit(name, trail = new Set()) {
     demand(!trail.has(name), `Cyclic audit dependency: ${name}`);
     const item = full.vulnerabilities[name];
+    demand(item?.severity !== 'critical', `Unapproved advisory: CRITICAL package ${name}`);
     demand(item && !Object.hasOwn(runtime.vulnerabilities, name), `Exception is not exclusively development: ${name}`);
     demand(item.nodes.every((node) => lock.packages[node]?.dev === true), `Non-development or missing lockfile node: ${name}`);
     const copies = Object.entries(lock.packages).filter(([path]) => path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`));
@@ -51,10 +52,18 @@ export function evaluateAudit(runtime, full, lock) {
     const fix = item.fixAvailable;
     demand(fix === false || (object(fix) && fix.name === 'tailwindcss' && fix.isSemVerMajor === true && typeof fix.version === 'string'), `Fix available or unknown remediation: ${name}`);
     const next = new Set([...trail, name]);
+    let blockingCause = false;
     for (const via of item.via) {
-      if (typeof via === 'string') visit(via, next);
-      else demand(via.url === ALLOWED_ADVISORY && via.name === 'braces' && via.dependency === 'braces' && name === 'braces' && via.severity === 'high', `Unapproved advisory: ${name}`);
+      if (typeof via === 'string') {
+        if (!blocking(full.vulnerabilities[via])) continue;
+        visit(via, next);
+      } else {
+        if (!['high', 'critical'].includes(via.severity)) continue;
+        demand(via.url === ALLOWED_ADVISORY && via.name === 'braces' && via.dependency === 'braces' && name === 'braces' && via.severity === 'high', `Unapproved advisory: ${name}`);
+      }
+      blockingCause = true;
     }
+    demand(blockingCause, `Unapproved advisory: unexplained HIGH severity for ${name}`);
     tolerated.add(name);
   }
   for (const [name, item] of Object.entries(full.vulnerabilities)) if (blocking(item)) visit(name);

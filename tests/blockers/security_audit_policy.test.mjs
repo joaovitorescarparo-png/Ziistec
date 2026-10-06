@@ -23,6 +23,41 @@ test('accepts only the development advisory and its transitive impact', () => {
   assert.doesNotThrow(() => parseAudit(result(full.vulnerabilities)));
 });
 
+for (const severity of ['low', 'moderate']) test(`${severity} alone does not block runtime or full audit`, () => {
+  const { lock } = fixture();
+  const item = { ...vulnerability('other', [{ ...advisory(), name: 'other', severity, url: 'https://example.test/advisory' }]), severity, fixAvailable: true };
+  const report = parseAudit(result({ other: item }));
+  assert.deepEqual(evaluateAudit(report, report, lock), []);
+});
+
+test('moderate transitive and direct causes alongside allowed HIGH do not require an exception', () => {
+  const { runtime, full, lock } = fixture();
+  const moderate = { ...advisory(), name: 'other', dependency: 'other', severity: 'moderate', url: 'https://example.test/moderate' };
+  full.vulnerabilities.other = { ...vulnerability('other', [moderate]), severity: 'moderate', fixAvailable: true };
+  full.vulnerabilities.middle = { ...vulnerability('middle', ['other']), severity: 'moderate', fixAvailable: true };
+  full.vulnerabilities.tailwindcss.via.push('middle', moderate);
+  assert.deepEqual(evaluateAudit(runtime, parseAudit(result(full.vulnerabilities)), lock), ['braces', 'micromatch', 'tailwindcss']);
+});
+
+for (const severity of ['high', 'critical']) test(`unrelated ${severity} blocks in full audit`, () => {
+  const { runtime, full, lock } = fixture();
+  full.vulnerabilities.other = { ...vulnerability('other', [{ ...advisory(), name: 'other', severity, url: 'https://example.test/other' }]), severity };
+  lock.packages['node_modules/other'] = { dev: true };
+  assert.throws(() => evaluateAudit(runtime, full, lock), /Unapproved advisory/);
+});
+
+test('critical transitive package cannot inherit the HIGH exception', () => {
+  const { runtime, full, lock } = fixture();
+  full.vulnerabilities.tailwindcss.severity = 'critical';
+  assert.throws(() => evaluateAudit(runtime, full, lock), /CRITICAL/);
+});
+
+test('HIGH package with only moderate causes fails closed', () => {
+  const { runtime, full, lock } = fixture();
+  full.vulnerabilities.braces.via[0].severity = 'moderate';
+  assert.throws(() => evaluateAudit(runtime, full, lock), /unexplained HIGH/);
+});
+
 for (const severity of ['high', 'critical']) test(`runtime ${severity} blocks even the allowed advisory`, () => {
   const { runtime, full, lock } = fixture();
   runtime.vulnerabilities.braces = { ...full.vulnerabilities.braces, severity };
