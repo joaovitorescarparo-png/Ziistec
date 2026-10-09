@@ -14,7 +14,10 @@ declare v_total int; v_anon int; v_missing_path int; v_private_auth int; v_dynam
 begin
   select count(*) into v_total from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private');
   -- 0092 adds nine definers; replacing the existing quota definer adds zero.
-  if v_total<>125 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=125 actual=%',v_total; end if;
+  -- Blocos 3/4 add five public definers: 0093 zt_get_service_report, 0095 zt_save_work_order_report,
+  -- 0097 zt_issue_service_receipt, 0098 zt_client_service_history and zt_work_order_history_detail.
+  -- 0096 replaces zt_private.zt_save_work_order (adds zero); 0094/0095 triggers are invoker.
+  if v_total<>130 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=130 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;
