@@ -33,6 +33,10 @@ import { chamarIAReal } from "../lib/aiApi";
 import { resolverLogoEmpresaDB, persistirFotosOSDB, resolverImagemProdutoDB, salvarImagemProdutoDB, removerImagemProdutoDB, prepararPreviewImagemProdutoDB } from "../lib/storageExtras";
 import { createProductImagePreview } from "../lib/productImagePreview";
 import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
+import QuoteClientLocationField from "../components/QuoteClientLocationField";
+import ServiceReceiptPanel from "../components/ServiceReceiptPanel";
+import LocationHistoryPanel from "../components/LocationHistoryPanel";
+import { listarLocaisClienteOrcamentoV2DB } from "../lib/quoteReuseV2Api";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
 import useModalViewport from "../hooks/useModalViewport";
@@ -1649,7 +1653,7 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
 }
 
 /* =================================================================== Agenda */
-function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, orcamentos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao }) {
+function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, orcamentos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao, real }) {
   const tecnico = papel === "tecnico";
   const [dia, setDia] = useState(HOJE);
   const [visao, setVisao] = useState(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "lista" : "semana"));
@@ -1802,7 +1806,7 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
       </>}
 
       {!tecnico && <AgendarModal os={agendando} onClose={() => setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />}
-      {!tecnico && novaOS && <NovaOS onClose={() => setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} orcamentos={orcamentos} />}
+      {!tecnico && novaOS && <NovaOS onClose={() => setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} orcamentos={orcamentos} real={real} />}
     </>
   );
 }
@@ -1869,6 +1873,15 @@ function Clientes(p) {
 
   const [localCliente, setLocalCliente] = useState("");
   useEffect(() => setLocalCliente(""), [clienteAberto]);
+  // Locais cadastrados (client_locations) do cliente aberto: base relacional do histórico por local.
+  const [locaisCadastrados, setLocaisCadastrados] = useState([]);
+  useEffect(() => {
+    setLocaisCadastrados([]);
+    if (!real || !clienteAberto || papel !== "proprietario") return;
+    let ativo = true;
+    listarLocaisClienteOrcamentoV2DB(clienteAberto).then((r) => { if (ativo) setLocaisCadastrados(r || []); }).catch(() => {});
+    return () => { ativo = false; };
+  }, [real, clienteAberto, papel]);
 
   if (clienteAberto) {
     const c = clientes.find((x) => x.id === clienteAberto);
@@ -1879,8 +1892,13 @@ function Clientes(p) {
     const gar = garantias.filter((g) => g.clienteId === c.id);
     const recebido = pgs.filter((l) => l.pago).reduce((t, l) => t + l.valor, 0);
     const aberto = pgs.filter((l) => !l.pago).reduce((t, l) => t + l.valor, 0);
-    const locais = [...new Set(oss.map((o) => o.localServico).filter(Boolean))];
-    const ossVisiveis = localCliente ? oss.filter((o) => o.localServico === localCliente) : oss;
+    // OS vinculada a local cadastrado é agrupada pelo vínculo; OS antiga só tem o texto do local.
+    const locaisVinculados = locaisCadastrados.filter((l) => oss.some((o) => o.localId === l.id));
+    const vinculada = (o) => Boolean(o.localId && locaisVinculados.some((l) => l.id === o.localId));
+    const locais = [...new Set(oss.filter((o) => !vinculada(o)).map((o) => o.localServico).filter(Boolean))];
+    const localSelecionadoId = localCliente.startsWith("loc:") ? localCliente.slice(4) : "";
+    const ossVisiveis = localCliente ? oss.filter((o) => (localSelecionadoId ? o.localId === localSelecionadoId : !vinculada(o) && o.localServico === localCliente)) : oss;
+    const nomeLocalCliente = localSelecionadoId ? (locaisVinculados.find((l) => l.id === localSelecionadoId)?.name || "local cadastrado") : localCliente;
     const retornos = real ? revisoesCliente.filter((r)=>r.clienteId===c.id && r.status==="pending").map((r)=>({ data:r.data, servico:r.descricao })) : oss.filter((o) => o.retorno).map((o) => o.retorno);
 
     return (
@@ -1925,11 +1943,12 @@ function Clientes(p) {
                 {c.whatsapp && <Btn variant="soft" size="sm" icon={Share2} className="w-full" onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp)}`, "_blank")}>Falar no WhatsApp</Btn>}
               </Panel>
             </section>
-            {locais.length > 0 && (
+            {(locaisVinculados.length > 0 || locais.length > 0) && (
               <section>
                 <Rotulo>Locais atendidos</Rotulo>
                 <Panel className="p-4 sm:p-5 flex flex-wrap gap-2">
                   <button type="button" onClick={() => setLocalCliente("")} aria-pressed={!localCliente} className={cx("min-h-11 rounded-xl px-3 py-2 text-[13px] font-medium", !localCliente ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}>Todos os locais</button>
+                  {locaisVinculados.map((l) => <button type="button" key={l.id} onClick={() => setLocalCliente(`loc:${l.id}`)} aria-pressed={localCliente === `loc:${l.id}`} className={cx("min-h-11 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-medium text-left break-words", localCliente === `loc:${l.id}` ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}><MapPin className="w-3.5 h-3.5 shrink-0" />{l.name}</button>)}
                   {locais.map((l) => <button type="button" key={l} onClick={() => setLocalCliente(l)} aria-pressed={localCliente === l} className={cx("min-h-11 rounded-xl px-3 py-2 text-[13px] font-medium text-left break-words", localCliente === l ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}>{l}</button>)}
                 </Panel>
               </section>
@@ -1999,7 +2018,7 @@ function Clientes(p) {
             </section>
 
             <section>
-              <Rotulo>{localCliente ? `Histórico em ${localCliente}` : "Histórico de serviços"}</Rotulo>
+              <Rotulo>{localCliente ? `Histórico em ${nomeLocalCliente}` : "Histórico de serviços"}</Rotulo>
               <Panel className="divide-y divide-slate-100 overflow-hidden">
                 {ossVisiveis.length === 0 ? <Empty icon={ClipboardList} title={localCliente ? "Nenhuma OS neste local" : "Nenhuma OS ainda"} /> : ossVisiveis.map((o) => (
                   <Linha key={o.id} onClick={() => abrirOS(o.id)}>
@@ -3446,10 +3465,10 @@ function OrdensServico(p) {
 
 /* Abertura de OS pensada para o campo: descrever o problema já basta.
    O catálogo é atalho, não obrigação. */
-function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual, dataInicial = "" }) {
+function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual, dataInicial = "", real = false }) {
   const [novoCliente, setNovoCliente] = useState(false);
   const [f, setF] = useState({
-    clienteId: "", orcamentoId: "", descricaoLivre: "", local: "", localServico: "",
+    clienteId: "", orcamentoId: "", descricaoLivre: "", local: "", localServico: "", localId: "",
     itens: [], data: dataInicial || "", hora: "09:00", responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null, obs: "",
   });
   const [catalogo, setCatalogo] = useState(false);
@@ -3459,7 +3478,8 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const escolherCliente = (id) => {
     const cl = clientes.find((x) => x.id === id);
-    setF((s) => ({ ...s, clienteId: id, orcamentoId: orcamentos.some((o) => o.id === s.orcamentoId && o.clienteId === id) ? s.orcamentoId : "", local: cl?.endereco || s.local }));
+    // Local cadastrado pertence ao cliente: trocar o cliente sempre limpa o vínculo.
+    setF((s) => ({ ...s, clienteId: id, localId: id === s.clienteId ? s.localId : "", orcamentoId: orcamentos.some((o) => o.id === s.orcamentoId && o.clienteId === id) ? s.orcamentoId : "", local: cl?.endereco || s.local }));
   };
   const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];
   const orcamentoSelecionado = orcamentosCliente.find((o) => o.id === f.orcamentoId);
@@ -3525,6 +3545,11 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
           <Field label="Endereço do atendimento"><Input value={f.local} onChange={(e) => set("local", e.target.value)} placeholder="Rua, número, bairro" /></Field>
           <Field label="Local do serviço" hint="Ex.: Portaria, Apto 304, Loja 4."><Input value={f.localServico} onChange={(e) => set("localServico", e.target.value)} /></Field>
         </div>
+
+        {real && f.clienteId && (
+          <QuoteClientLocationField clientId={f.clienteId} value={f.localId || ""}
+            onSelect={(loc) => setF((s) => ({ ...s, localId: loc?.id || "", localServico: loc ? (s.localServico || loc.name) : s.localServico, local: loc?.address || s.local }))} />
+        )}
 
         <div>
           <button onClick={() => setCatalogo((v) => !v)} className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
@@ -3613,6 +3638,7 @@ function OSDetalhe(p) {
   const [txtCheck, setTxtCheck] = useState("");
   const [agendando, setAgendando] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
+  const [comprovanteAberto, setComprovanteAberto] = useState(false);
   const orc = orcamentos.find((o) => o.id === os.orcamentoId);
   const cobranca = lancamentos.find((l) => l.origemTipo === "os" && l.origemId === os.id);
   const gar = garantias.filter((g) => g.osId === os.id);
@@ -3655,6 +3681,10 @@ function OSDetalhe(p) {
     if (podeAdministrarOS) acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
   }
   if (os.status === "andamento") acoes.push({ label: "Finalizar atendimento", icon: Check, fn: () => setFinalizando(true), principal: true });
+  // Comprovante de Serviço (documento não fiscal): proprietário, OS concluída e banco real.
+  // A emissão também é recusada pelo backend para técnico.
+  if (verValores && real && os.status === "concluida") acoes.push({ label: "Comprovante de Serviço", icon: Receipt, fn: () => setComprovanteAberto(true), principal: true });
+  const historicoLocalVisivel = Boolean(real && os.localId && (podeAdministrarOS || (os.status !== "concluida" && os.status !== "cancelada")));
   const acaoPrincipal = acoes.find((acao) => acao.principal);
   const acoesSecundarias = acoes.filter((acao) => !acao.principal);
 
@@ -3756,6 +3786,16 @@ function OSDetalhe(p) {
               </a>
             </Panel>
           </section>
+
+          {historicoLocalVisivel && (
+            <section>
+              <Rotulo>Atendimentos anteriores neste local</Rotulo>
+              <Panel className="overflow-hidden">
+                <LocationHistoryPanel clientId={os.clienteId} locationId={os.localId} currentWorkOrderId={os.id}
+                  owner={verValores} onAbrirOS={verValores ? abrirOS : undefined} />
+              </Panel>
+            </section>
+          )}
 
           <section>
             <Rotulo acao={permitido("catalogo")
@@ -4034,6 +4074,12 @@ function OSDetalhe(p) {
       </div>
 
       <AgendarModal os={agendando ? os : null} onClose={() => setAgendando(false)} onSalvar={agendarOS} empresa={empresa} diaSugerido={HOJE} equipe={equipe} />
+
+      {comprovanteAberto && (
+        <Modal open onClose={() => setComprovanteAberto(false)} title={`Comprovante de Serviço · ${os.numero}`} sub="Documento não fiscal emitido pelo proprietário">
+          <ServiceReceiptPanel workOrderId={os.id} telefoneCliente={c?.whatsapp || c?.telefone || ""} onAviso={aviso} />
+        </Modal>
+      )}
 
       {novoItem && (
         <Modal open onClose={() => setNovoItem(null)} title="Adicionar ao atendimento" sub="Do seu catálogo" wide>
