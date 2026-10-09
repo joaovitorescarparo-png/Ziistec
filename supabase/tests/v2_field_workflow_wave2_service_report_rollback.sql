@@ -15,7 +15,14 @@ create temp table zt_fw2 (
   unauthorized_tech_rows integer,
   cross_tenant_rows integer,
   authorized_tech_rows integer,
-  disabled_tech_rows integer
+  disabled_tech_rows integer,
+  -- 0093: técnico lê o relatório só pela projeção sem financeiro.
+  authorized_tech_report_rows integer,
+  tech_projection jsonb,
+  owner_projection jsonb,
+  unauthorized_tech_rpc_blocked boolean,
+  cross_tenant_rpc_blocked boolean,
+  disabled_tech_rpc_blocked boolean
 ) on commit drop;
 insert into zt_fw2 default values;
 grant select,update on zt_fw2 to authenticated;
@@ -188,18 +195,37 @@ values('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000
 on conflict(company_id,user_id) do update set role='technician',status='active';
 set local role authenticated;
 update zt_fw2 set unauthorized_tech_rows=(select count(*) from public.work_order_reports where id=(select report_id from zt_fw2));
+do $$ declare b boolean:=false; begin
+  begin perform public.zt_get_service_report((select work_order_id from zt_fw2)); exception when insufficient_privilege then b:=true; end;
+  update zt_fw2 set unauthorized_tech_rpc_blocked=b;
+end $$;
 reset role;
 
 -- Owner da outra empresa também não lê.
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
 set local role authenticated;
 update zt_fw2 set cross_tenant_rows=(select count(*) from public.work_order_reports where id=(select report_id from zt_fw2));
+do $$ declare b boolean:=false; begin
+  begin perform public.zt_get_service_report((select work_order_id from zt_fw2)); exception when insufficient_privilege then b:=true; end;
+  update zt_fw2 set cross_tenant_rpc_blocked=b;
+end $$;
 reset role;
 
--- Técnico atribuído e ativo lê o snapshot sanitizado.
+-- Técnico atribuído e ativo não lê a linha bruta (pagamento/preços); lê o próprio relato
+-- e a projeção sem financeiro pela RPC.
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000003',true);
 set local role authenticated;
-update zt_fw2 set authorized_tech_rows=(select count(*) from public.work_order_reports where id=(select report_id from zt_fw2));
+update zt_fw2 set
+  authorized_tech_rows=(select count(*) from public.work_order_reports where id=(select report_id from zt_fw2)),
+  authorized_tech_report_rows=(select count(*) from public.work_order_reports
+    where work_order_id=(select work_order_id from zt_fw2) and entry_type='report'),
+  tech_projection=public.zt_get_service_report((select work_order_id from zt_fw2));
+reset role;
+
+-- Proprietário recebe o snapshot completo pela mesma RPC.
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+set local role authenticated;
+update zt_fw2 set owner_projection=public.zt_get_service_report((select work_order_id from zt_fw2));
 reset role;
 
 -- Desativação remove acesso imediatamente.
@@ -212,17 +238,47 @@ reset role;
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000003',true);
 set local role authenticated;
 update zt_fw2 set disabled_tech_rows=(select count(*) from public.work_order_reports where id=(select report_id from zt_fw2));
+do $$ declare b boolean:=false; begin
+  begin perform public.zt_get_service_report((select work_order_id from zt_fw2)); exception when insufficient_privilege then b:=true; end;
+  update zt_fw2 set disabled_tech_rpc_blocked=b;
+end $$;
 reset role;
 
 do $$
-declare t zt_fw2%rowtype;
+declare t zt_fw2%rowtype; v jsonb;
 begin
   select * into t from zt_fw2;
   if t.report_id is null then raise exception 'Relatório ausente'; end if;
   if t.unauthorized_tech_rows <> 0 then raise exception 'Técnico não atribuído leu relatório'; end if;
   if t.cross_tenant_rows <> 0 then raise exception 'Cross-tenant leu relatório'; end if;
-  if t.authorized_tech_rows <> 1 then raise exception 'Técnico atribuído não leu relatório'; end if;
+  if t.authorized_tech_rows <> 0 then raise exception 'Técnico atribuído leu a linha bruta do relatório com pagamento/preços'; end if;
+  if coalesce(t.authorized_tech_report_rows,0) < 1 then raise exception 'Técnico atribuído perdeu acesso ao próprio relato'; end if;
   if t.disabled_tech_rows <> 0 then raise exception 'Técnico desativado continuou lendo relatório'; end if;
+  if not coalesce(t.unauthorized_tech_rpc_blocked,false) then raise exception 'Técnico não atribuído leu relatório pela RPC'; end if;
+  if not coalesce(t.cross_tenant_rpc_blocked,false) then raise exception 'Cross-tenant leu relatório pela RPC'; end if;
+  if not coalesce(t.disabled_tech_rpc_blocked,false) then raise exception 'Técnico desativado leu relatório pela RPC'; end if;
+
+  v:=t.tech_projection->'snapshot';
+  if t.tech_projection->>'viewer_role' <> 'technician' or (t.tech_projection->>'id')::uuid <> t.report_id then
+    raise exception 'Projeção do técnico ausente ou de outro relatório';
+  end if;
+  if v ? 'payment' or not coalesce((v->>'financial_redacted')::boolean,false) then
+    raise exception 'Projeção do técnico expôs bloco de pagamento';
+  end if;
+  if v::text ~* 'unit_price|price_pending|billable_total|approved_|payment_method|status_label|unit_cost|extra_cost' then
+    raise exception 'Projeção do técnico expôs valores/financeiro';
+  end if;
+  if v#>>'{client,name}' <> 'Condomínio Snapshot Original' or v#>>'{items,0,name}' <> 'Fechadura Snapshot Original'
+     or jsonb_array_length(coalesce(v->'evidence','[]'::jsonb)) <> 1
+     or coalesce(v#>>'{technical_report,body}','') not like 'Relato técnico snapshot:%' then
+    raise exception 'Projeção do técnico perdeu conteúdo operacional';
+  end if;
+
+  v:=t.owner_projection->'snapshot';
+  if t.owner_projection->>'viewer_role' <> 'owner' or not v ? 'payment' or v ? 'financial_redacted'
+     or (v#>>'{items,0,unit_price}')::numeric <> 250 then
+    raise exception 'Proprietário não recebeu o snapshot completo';
+  end if;
 end $$;
 
 rollback;
