@@ -34,22 +34,25 @@ async function findAttachment({companyId,bucket,category,workOrderId,purchaseId,
 }
 
 export async function hidratarComplementosDB(data,companyId){
-  const [rr,aa,mm,cc]=await Promise.all([
+  const [rr,aa,mm,cc,rt]=await Promise.all([
     supabase.from('work_order_reports').select('*').eq('company_id',companyId).order('created_at',{ascending:true}),
     supabase.from('attachments').select('*').eq('company_id',companyId).order('created_at',{ascending:true}),
     supabase.from('work_order_materials').select('*').eq('company_id',companyId).order('created_at',{ascending:true}),
     supabase.from('work_order_checklists').select('*').eq('company_id',companyId).order('position',{ascending:true}),
+    supabase.from('work_order_returns').select('*').eq('company_id',companyId).order('created_at',{ascending:true}),
   ]);
-  check(rr);check(aa);check(mm);check(cc);
+  check(rr);check(aa);check(mm);check(cc);check(rt);
   const attachments=await Promise.all((aa.data||[]).map(async a=>({...a,url:await signed(a.bucket,a.path)})));
   const ordens=(data.ordens||[]).map(o=>{
     const reps=(rr.data||[]).filter(r=>r.work_order_id===o.id);
     const reports=reps.filter(r=>r.entry_type==='report');
     const hist=reps.filter(r=>r.entry_type==='history').map(r=>({id:r.id,quando:(r.created_at||'').slice(0,10),texto:r.body}));
-    const mats=(mm.data||[]).filter(m=>m.work_order_id===o.id).map(m=>({id:m.id,tipo:'produto',catalogoId:m.product_id,nome:m.name,unidade:'unidade',qtd:Number(m.quantity||1),preco:0,custo:Number(m.unit_cost||0),materialRegistrado:true,serie:m.serial_number||''}));
-    const checklist=(cc.data||[]).filter(c=>c.work_order_id===o.id).map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done)}));
+    const mats=(mm.data||[]).filter(m=>m.work_order_id===o.id).map(m=>({id:m.id,tipo:'produto',catalogoId:m.product_id,nome:m.name,unidade:'unidade',qtd:Number(m.quantity||1),preco:0,custo:Number(m.unit_cost||0),materialRegistrado:true,serie:m.serial_number||'',garantiaPolitica:m.warranty_policy||'catalog',garantiaMesesOverride:m.warranty_override_months==null?null:Number(m.warranty_override_months)}));
+    const checklist=(cc.data||[]).filter(c=>c.work_order_id===o.id).map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done),obrigatorio:Boolean(c.required),templateId:c.source_template_id||null}));
+    const retornos=(rt.data||[]).filter(r=>r.work_order_id===o.id);
+    const retornoHist=retornos.map(r=>({id:`return-${r.id}`,quando:(r.created_at||'').slice(0,10),texto:[`Precisa retornar · ${r.reason}`,r.material_needed?`Material necessário: ${r.material_needed}`:null,`Prioridade: ${{low:'baixa',normal:'normal',high:'alta',urgent:'urgente'}[r.priority]||r.priority}`,r.expected_return_date?`Previsão: ${String(r.expected_return_date).split('-').reverse().join('/')}`:null,r.returned_at?`Retorno realizado: ${new Date(r.returned_at).toLocaleDateString('pt-BR')}`:null,r.notes?`Observação: ${r.notes}`:null].filter(Boolean).join(' · ')}));
     const fotos=attachments.filter(a=>a.work_order_id===o.id).map(a=>({id:a.id,nome:a.file_name,categoria:a.category||'Foto',url:a.url,path:a.path,bucket:a.bucket,persistido:true}));
-    return {...o,relato:reports.at(-1)?.body||o.relato||'',historico:hist.length?hist:o.historico||[],checklist,fotos,itens:[...(o.itens||[]),...mats],custosExtras:Number(o.valorAdicional||o.custosExtras||0),valorAdicional:0};
+    return {...o,relato:reports.at(-1)?.body||o.relato||'',historico:[...(hist.length?hist:o.historico||[]),...retornoHist].sort((a,b)=>(a.quando||'').localeCompare(b.quando||'')),retornos,checklist,fotos,itens:[...(o.itens||[]),...mats],custosExtras:Number(o.valorAdicional||o.custosExtras||0),valorAdicional:0};
   });
   const compras=(data.compras||[]).map(c=>({...c,anexos:attachments.filter(a=>a.purchase_id===c.id).map(a=>({id:a.id,nome:a.file_name,url:a.url,path:a.path,bucket:a.bucket,persistido:true}))}));
   return {...data,ordens,compras};
@@ -164,7 +167,7 @@ async function persistirChecklist(os,checklist,companyId,userId){
   if(apagar.length) check(await supabase.from('work_order_checklists').delete().eq('work_order_id',os.id).in('id',apagar));
 
   const fresh=check(await supabase.from('work_order_checklists').select('*').eq('work_order_id',os.id).order('position',{ascending:true}))||[];
-  return fresh.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done)}));
+  return fresh.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done),obrigatorio:Boolean(c.required),templateId:c.source_template_id||null}));
 }
 
 async function persistirEdicaoOSDBNow(os,patch,companyId,userId,papel){
@@ -199,13 +202,18 @@ export function persistirEdicaoOSDB(os,patch,companyId,userId,papel){
 export async function prepararFinalizacaoOSDB(os,extras,companyId,userId,papel){
   await uploadFotosOSDB(os.id,extras.fotos||[],companyId,userId);
   const baseIds=new Set((os.itens||[]).map(i=>i.id));
-  const materiais=(extras.itens||[]).filter(i=>!baseIds.has(i.id) && !i.adicional && !i.isExtra).map(m=>({
-    product_id:isUuid(m.catalogoId)?m.catalogoId:null,
-    name:m.nome||'Material',
-    quantity:Number(m.qtd||1),
-    unit_cost:papel==='proprietario'?Number(m.custo||0):0,
-    serial_number:m.serie||null,
-  }));
+  const materiais=(extras.itens||[]).filter(i=>!baseIds.has(i.id) && !i.adicional && !i.isExtra).map(m=>{
+    const politica=papel==='proprietario'?(m.garantiaPolitica||'catalog'):'catalog';
+    return {
+      product_id:isUuid(m.catalogoId)?m.catalogoId:null,
+      name:m.nome||'Material',
+      quantity:Number(m.qtd||1),
+      unit_cost:papel==='proprietario'?Number(m.custo||0):0,
+      serial_number:m.serie||null,
+      warranty_policy:politica,
+      warranty_override_months:papel==='proprietario'&&politica==='custom'?Math.max(1,Math.min(120,Number(m.garantiaMesesOverride||1))):null,
+    };
+  });
   const adicionais=(extras.adicionais||[]).map(a=>({
     name:a.nome||'Adicional',
     unit:a.unidade||'unidade',
@@ -215,3 +223,5 @@ export async function prepararFinalizacaoOSDB(os,extras,companyId,userId,papel){
   }));
   return {materiaisDB:materiais,adicionaisDB:adicionais};
 }
+
+/* FIELD WORKFLOW V1 · wave 3b · checklist and return hydration */
