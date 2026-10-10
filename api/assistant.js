@@ -59,7 +59,7 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
         if (body.currentWorkOrder !== undefined && body.currentWorkOrder !== null && !uuid.test(body.currentWorkOrder)) throw new HttpError(400, 'OS atual inválida.');
         let plan = localReadIntent(body.text, role);
         if (!plan) {
-          if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY) throw new HttpError(503, 'Interpretação por IA desativada. Escolha uma ação e preencha os campos para continuar.');
+          if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY) throw new HttpError(503, 'Interpretação por IA indisponível neste ambiente. Você ainda pode consultar a agenda de hoje, o próximo atendimento ou buscar um telefone.');
           await rpc('zt_assistant_consume_ai_quota', { p_company: body.companyId });
           plan = await infer({ text: body.text, role, currentWorkOrder: body.currentWorkOrder, env, fetchImpl });
         }

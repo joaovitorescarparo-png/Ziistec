@@ -41,17 +41,22 @@ function content(tree) {
   return content(tree.props?.children);
 }
 const find = (tree, type, text) => nodes(tree).find(n => n.type === type && (text === undefined || content(n).includes(text)));
-function panel(request) {
+function panel(request, options = {}) {
+  let speechCallbacks;
+  const speech = { supported: true, cancel() {}, start() {}, stop() {}, ...options.speech };
   const render = componentHarness('src/components/AssistantPanel.jsx', {
     '../lib/assistantTools': toolRegistry,
     '../lib/assistantApi': { requestAssistant: request, createAssistantRequestId: () => requestId, assistantFormInput: (_, values) => values },
-    '../hooks/useSpeechInput': { __esModule: true, default: () => ({ supported: true, cancel() {}, start() {}, stop() {} }) },
+    '../hooks/useSpeechInput': { __esModule: true, default: callbacks => { speechCallbacks = callbacks; return speech; } },
     'lucide-react': { Sparkles: 'span', Mic: 'span', X: 'span' },
   });
-  const props = { companyId, role: 'owner' };
+  const props = { companyId, role: options.role || 'owner' };
   let tree = render(props);
   find(tree, 'button').props.onClick();
-  return () => render(props);
+  const rerender = () => render(props);
+  rerender.speech = speech;
+  rerender.completeSpeech = text => speechCallbacks.onComplete(text);
+  return rerender;
 }
 const typeText = (render, text) => find(render(), 'textarea').props.onChange({ target: { value: text } });
 const submit = render => find(render(), 'form').props.onSubmit({ preventDefault() {} });
@@ -150,4 +155,77 @@ test('API clarification returns without a plan/execute RPC; mutation plan only c
   assert.equal((await run()).result.confirmationRequired, true);
   assert.equal(paths.some(p => p.endsWith('zt_assistant_plan')), true);
   assert.equal(paths.some(p => p.endsWith('zt_assistant_execute')), false);
+});
+
+test('conversation opens with text and optional examples; manual tools are secondary and no interpretation step is required', () => {
+  const render = panel(async () => ({}));
+  const tree = render();
+  assert.ok(find(tree, 'textarea'));
+  assert.ok(find(tree, 'button', 'Enviar'));
+  assert.equal(find(tree, 'button', 'Interpretar'), undefined);
+  const manual = find(tree, 'details', 'Preencher ação manualmente');
+  assert.ok(manual && !manual.props.open);
+  assert.ok(find(manual, 'select'));
+});
+
+test('voice completion automatically plans once, never executes, and cancel/edit suppresses late completion', async () => {
+  const calls = [];
+  const render = panel(async p => { calls.push(p); return { action: 'create_client', confirmationRequired: true, preview: [] }; });
+  find(render(), 'button', 'Ditar').props.onClick(); render();
+  render.completeSpeech('Cria um cliente chamado TESTE ASSISTANT');
+  render.completeSpeech('Cria um cliente chamado TESTE ASSISTANT');
+  await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].operation, 'plan');
+  assert.match(calls[0].text, /TESTE ASSISTANT/);
+  assert.ok(find(render(), 'button', 'Confirmar'));
+  find(render(), 'button', 'Editar').props.onClick();
+  find(render(), 'button', 'Ditar').props.onClick(); render();
+  typeText(render, 'Texto corrigido'); render();
+  render.completeSpeech('Texto antigo'); await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(find(render(), 'textarea').props.value, 'Texto corrigido');
+});
+
+test('unsupported voice and listening/transcribing/processing states retain usable text fallback', async () => {
+  const fallback = panel(async () => ({}), { speech: { supported: false } });
+  assert.match(content(fallback()), /não oferece reconhecimento de voz/);
+  typeText(fallback, 'O que tenho hoje?');
+  assert.equal(find(fallback(), 'button', 'Enviar').props.disabled, false);
+  let finish;
+  const render = panel(() => new Promise(resolve => { finish = resolve; }));
+  render.speech.listening = true; render.speech.busy = true;
+  assert.match(content(render()), /Ouvindo/);
+  render.speech.listening = false; render.speech.processing = true;
+  assert.match(content(render()), /Transcrevendo/);
+  assert.ok(find(render(), 'button', 'Cancelar ditado'));
+  render.speech.processing = false; render.speech.busy = false;
+  typeText(render, 'O que tenho hoje?'); submit(render);
+  assert.match(content(render()), /Processando/);
+  finish({ result: { items: [], message: 'Sem atendimentos.' } }); await tick();
+  assert.ok(find(render(), 'textarea'), 'can continue in the same panel after a read');
+});
+
+test('technician tools exclude administrative data and sensitive completion requires reinforced confirmation', async () => {
+  const calls = [];
+  const render = panel(async p => { calls.push(p); return { action: 'finalize_assigned_work_order', confirmationRequired: true, preview: [] }; }, { role: 'technician' });
+  const offered = nodes(render()).filter(n => n.type === 'option').map(n => n.props.value);
+  assert.ok(!offered.includes('create_financial_entry') && !offered.includes('owner_find_client'));
+  typeText(render, 'Finalizar esta OS'); submit(render); await tick();
+  find(render(), 'button', 'Confirmar').props.onClick();
+  assert.equal(calls.length, 1);
+  find(render(), 'input').props.onChange({ target: { checked: true } });
+  find(render(), 'button', 'Confirmar').props.onClick(); await tick();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].operation, 'execute');
+});
+
+test('spoken clarification preserves the original request instead of starting a new action', async () => {
+  const calls = [];
+  const render = panel(async p => { calls.push(p); return calls.length === 1 ? { question: 'Qual horário?' } : { confirmationRequired: true, preview: [] }; });
+  typeText(render, 'Agenda OS-0002 amanhã'); submit(render); await tick();
+  find(render(), 'button', 'Ditar').props.onClick(); render();
+  render.completeSpeech('às 14h'); await tick();
+  assert.match(calls[1].text, /Agenda OS-0002 amanhã\nPergunta: Qual horário\?\nResposta: às 14h/);
+  assert.deepEqual(calls.map(p => p.operation), ['plan', 'plan']);
 });

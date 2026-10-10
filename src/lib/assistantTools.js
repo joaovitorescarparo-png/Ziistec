@@ -11,6 +11,7 @@ const tool = (name, label, role, properties = {}, required = [], mutation = fals
 });
 export const ASSISTANT_TOOLS = Object.freeze([
   tool('owner_today_schedule', 'O que tenho hoje?', 'owner'),
+  tool('owner_next_appointment', 'Próximo atendimento', 'owner'),
   tool('owner_find_client', 'Buscar cliente', 'owner', { query: query('Nome do cliente') }, ['query']),
   tool('owner_find_quote', 'Buscar orçamento', 'owner', { query: query('Número do orçamento') }, ['query']),
   tool('owner_find_work_order', 'Buscar OS', 'owner', { query: query('Número da OS') }, ['query']),
@@ -19,8 +20,8 @@ export const ASSISTANT_TOOLS = Object.freeze([
     client: query('Cliente'), description: text('Serviço', 500), quantity: { type: 'number', title: 'Quantidade', exclusiveMinimum: 0, maximum: 10000 },
     unit: text('Unidade', 50), unitPrice: money('Preço unitário (R$)'),
   }, ['client', 'description', 'quantity', 'unitPrice'], true),
-  tool('create_work_order', 'Crie uma OS', 'owner', { client: query('Cliente'), description: text('Serviço', 2000), address: text('Endereço', 500, 0) }, ['client', 'description'], true),
-  tool('schedule_work_order', 'Agende uma visita', 'owner', { workOrder: query('Número da OS'), date: date('Data'), time: { type: 'string', title: 'Horário', format: 'time' } }, ['workOrder', 'date', 'time'], true),
+  tool('create_work_order', 'Crie uma OS', 'owner', { client: query('Cliente'), description: text('Serviço', 2000), address: text('Endereço', 500, 0), date: date('Data'), time: { type: 'string', title: 'Horário', format: 'time' } }, ['client', 'description'], true),
+  tool('schedule_work_order', 'Agende uma visita', 'owner', { workOrder: query('Número da OS'), client: query('Cliente'), date: date('Data'), time: { type: 'string', title: 'Horário', format: 'time' } }, ['date', 'time'], true),
   tool('create_product', 'Cadastre um produto', 'owner', { name: text('Nome'), unit: text('Unidade', 50), price: money('Preço de venda (R$)') }, ['name', 'price'], true),
   tool('create_financial_entry', 'Lance uma receita', 'owner', {
     description: text('Descrição', 500), amount: money('Valor (R$)', 0.01, 999999999.99), dueDate: date('Vencimento'),
@@ -29,6 +30,7 @@ export const ASSISTANT_TOOLS = Object.freeze([
     client: query('Cliente'), category: text('Categoria', 120),
   }, ['description', 'amount', 'dueDate', 'paid'], true),
   tool('technician_today_orders', 'Quais OS tenho hoje?', 'technician'),
+  tool('technician_next_appointment', 'Meu próximo atendimento', 'technician'),
   tool('technician_open_assigned_order', 'Abrir OS atribuída', 'technician', { workOrder: query('Número da OS') }, ['workOrder']),
   tool('add_assigned_work_report', 'Registrar o que foi feito', 'technician', { workOrder: query('Número da OS'), report: text('Relato', 10000) }, ['workOrder', 'report'], true),
   tool('mark_assigned_order_pending', 'Registrar pendência', 'technician', { workOrder: query('Número da OS'), note: text('Pendência', 3000) }, ['workOrder', 'note'], true),
@@ -63,5 +65,7 @@ export function validateAssistantInput(action, input, role) {
     if (normalized.paid && (!normalized.paidAt || !normalized.paymentMethod)) throw new Error('Informe data e forma do recebimento.');
     if (!normalized.paid && (normalized.paidAt || normalized.paymentMethod)) throw new Error('Uma receita pendente não pode ter recebimento informado.');
   }
+  if (action === 'create_work_order' && Boolean(normalized.date) !== Boolean(normalized.time)) throw new Error('Informe data e horário juntos para agendar a OS.');
+  if (action === 'schedule_work_order' && Boolean(normalized.workOrder) === Boolean(normalized.client)) throw new Error('Informe o cliente ou o número da OS, somente um deles.');
   return normalized;
 }

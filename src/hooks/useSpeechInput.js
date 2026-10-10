@@ -6,9 +6,10 @@ const getSpeechCtor=()=>{
   return window.SpeechRecognition||window.webkitSpeechRecognition||null;
 };
 
-export default function useSpeechInput({language='pt-BR',onText,maxDurationMs=30000,processingTimeoutMs=5000}={}){
+export default function useSpeechInput({language='pt-BR',onText,onComplete,continuous,maxDurationMs=30000,processingTimeoutMs=5000}={}){
   const recognitionRef=useRef(null);
   const onTextRef=useRef(onText);
+  const onCompleteRef=useRef(onComplete);
   const activeRef=useRef(false);
   const cancelledRef=useRef(false);
   const finalRef=useRef('');
@@ -18,7 +19,7 @@ export default function useSpeechInput({language='pt-BR',onText,maxDurationMs=30
   const [supported,setSupported]=useState(false);
   const [state,dispatch]=useReducer(speechReducer,initialSpeechState);
 
-  useEffect(()=>{onTextRef.current=onText;},[onText]);
+  useEffect(()=>{onTextRef.current=onText;onCompleteRef.current=onComplete;},[onText,onComplete]);
   useEffect(()=>{setSupported(Boolean(getSpeechCtor()));},[]);
 
   const clearTimers=useCallback(()=>{
@@ -67,11 +68,12 @@ export default function useSpeechInput({language='pt-BR',onText,maxDurationMs=30
     const recognition=new SpeechRecognition();
     recognitionRef.current=recognition;activeRef.current=true;
     recognition.lang=language;
-    recognition.continuous=!isAppleMobile(typeof navigator==='undefined'?'':navigator.userAgent);
+    recognition.continuous=continuous ?? !isAppleMobile(typeof navigator==='undefined'?'':navigator.userAgent);
     recognition.interimResults=true;
     recognition.maxAlternatives=1;
-    recognition.onstart=()=>dispatch({type:'START'});
+    recognition.onstart=()=>{if(recognitionRef.current===recognition) dispatch({type:'START'});};
     recognition.onresult=(event)=>{
+      if(recognitionRef.current!==recognition) return;
       let finalText='';let interimText='';
       for(let i=event.resultIndex;i<event.results.length;i+=1){
         const text=event.results[i]?.[0]?.transcript||'';
@@ -82,16 +84,18 @@ export default function useSpeechInput({language='pt-BR',onText,maxDurationMs=30
       emit(cleanFinal,interimText);
     };
     recognition.onerror=(event)=>{
+      if(recognitionRef.current!==recognition) return;
       const code=String(event?.error||'');
       if(code==='aborted'&&cancelledRef.current) return;
       finishError(code||'unknown');
     };
     recognition.onend=()=>{
+      if(recognitionRef.current!==recognition) return;
       if(processingTimerRef.current){clearTimeout(processingTimerRef.current);processingTimerRef.current=null;}
       if(maxTimerRef.current){clearTimeout(maxTimerRef.current);maxTimerRef.current=null;}
       recognitionRef.current=null;activeRef.current=false;
       if(cancelledRef.current){cancelledRef.current=false;dispatch({type:'CANCEL'});return;}
-      if(finalRef.current.trim()){dispatch({type:'SUCCESS'});scheduleIdle();}
+      if(finalRef.current.trim()){dispatch({type:'SUCCESS'});scheduleIdle();onCompleteRef.current?.(finalRef.current.trim());}
       else dispatch({type:'ERROR',message:speechErrorMessage('no-speech')});
     };
     dispatch({type:'START'});
@@ -103,7 +107,7 @@ export default function useSpeechInput({language='pt-BR',onText,maxDurationMs=30
       if(String(error?.name||'')==='InvalidStateError') return false;
       finishError('Não consegui iniciar o microfone. Tente novamente.');return false;
     }
-  },[clearTimers,emit,finishError,language,maxDurationMs,scheduleIdle,state.status]);
+  },[clearTimers,continuous,emit,finishError,language,maxDurationMs,scheduleIdle,state.status]);
 
   useEffect(()=>()=>cancel(),[cancel]);
 
