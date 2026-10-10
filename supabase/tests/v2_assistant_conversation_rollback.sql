@@ -72,7 +72,7 @@ union all select client_b,company_b,'__ASSISTANT_CLIENT_B__','11900000002','Rua 
 set local role authenticated;
 do $$
 declare t zt_assistant_test%rowtype; p jsonb; r jsonb; again jsonb; req uuid:=gen_random_uuid();
-  id uuid; n integer; d date:=(now() at time zone 'America/Sao_Paulo')::date;
+  v_wo_id uuid; n integer; d date:=(now() at time zone 'America/Sao_Paulo')::date;
 begin
   select * into t from zt_assistant_test;
   select count(*) into n from public.work_orders where company_id=t.company_a;
@@ -85,22 +85,22 @@ begin
     and p->'preview' @> '[{"label":"Responsável"}]'::jsonb,p::text);
   r:=public.zt_assistant_execute(t.company_a,req,repeat('0',64));
   perform pg_temp.record_result('04_wrong_hash_denied',r->>'code'='INVALID_INPUT',r::text);
-  r:=public.zt_assistant_execute(t.company_a,req,p->>'previewHash'); id:=(r#>>'{result,id}')::uuid;
+  r:=public.zt_assistant_execute(t.company_a,req,p->>'previewHash'); v_wo_id:=(r#>>'{result,id}')::uuid;
   again:=public.zt_assistant_execute(t.company_a,req,p->>'previewHash');
-  perform pg_temp.record_result('05_create_retry_same_result',r=again and id is not null,r::text);
+  perform pg_temp.record_result('05_create_retry_same_result',r=again and v_wo_id is not null,r::text);
   perform pg_temp.record_result('06_create_once',(select count(*) from public.work_orders where company_id=t.company_a)=n+1);
-  perform pg_temp.record_result('07_create_persisted_schedule_owner',exists(select 1 from public.work_orders w where w.id=id
+  perform pg_temp.record_result('07_create_persisted_schedule_owner',exists(select 1 from public.work_orders w where w.id=v_wo_id
     and w.scheduled_date=d+1 and w.scheduled_time='14:00' and w.assigned_to=t.owner_a and w.status='scheduled'));
-  update zt_assistant_test set wo_open=id;
+  update zt_assistant_test set wo_open=v_wo_id;
   req:=gen_random_uuid();
   p:=public.zt_assistant_plan(t.company_a,'schedule_work_order',jsonb_build_object('client',t.client_a::text,'date',(d+3)::text,'time','09:00'),req);
   perform pg_temp.record_result('08_schedule_client_preview',p->>'confirmationRequired'='true' and p->'preview' @> '[{"label":"OS"}]'::jsonb,p::text);
-  perform pg_temp.record_result('09_schedule_preview_no_write',exists(select 1 from public.work_orders w where w.id=id and w.scheduled_date=d+1));
+  perform pg_temp.record_result('09_schedule_preview_no_write',exists(select 1 from public.work_orders w where w.id=v_wo_id and w.scheduled_date=d+1));
   r:=public.zt_assistant_execute(t.company_a,req,p->>'previewHash');
   again:=public.zt_assistant_execute(t.company_a,req,p->>'previewHash');
-  perform pg_temp.record_result('10_schedule_same_existing_once',r=again and r#>>'{result,id}'=id::text
+  perform pg_temp.record_result('10_schedule_same_existing_once',r=again and r#>>'{result,id}'=v_wo_id::text
     and (select count(*) from public.work_orders where company_id=t.company_a)=n+1,r::text);
-  perform pg_temp.record_result('11_schedule_persisted',exists(select 1 from public.work_orders w where w.id=id and w.scheduled_date=d+3 and w.scheduled_time='09:00'));
+  perform pg_temp.record_result('11_schedule_persisted',exists(select 1 from public.work_orders w where w.id=v_wo_id and w.scheduled_date=d+3 and w.scheduled_time='09:00'));
 
   -- Assigned future and today's visits; no costs/financial fields enter the projection.
   update zt_assistant_test set wo_report=public.zt_save_work_order_idempotent(t.company_a,null,gen_random_uuid(),
@@ -121,7 +121,7 @@ begin
   perform pg_temp.record_result('15_phone_read',r#>>'{result,items,0,detail}' like '%11900000001%',r::text);
   r:=public.zt_assistant_plan(t.company_a,'create_work_order',jsonb_build_object('client',t.client_a::text,'description','x','date',d::text),gen_random_uuid());
   perform pg_temp.record_result('16_date_requires_time',r->>'code'='INVALID_INPUT',r::text);
-  r:=public.zt_assistant_plan(t.company_a,'schedule_work_order',jsonb_build_object('client',t.client_a::text,'workOrder',id::text,'date',d::text,'time','09:00'),gen_random_uuid());
+  r:=public.zt_assistant_plan(t.company_a,'schedule_work_order',jsonb_build_object('client',t.client_a::text,'workOrder',v_wo_id::text,'date',d::text,'time','09:00'),gen_random_uuid());
   perform pg_temp.record_result('17_ambiguous_reference_rejected',r->>'code'='INVALID_INPUT',r::text);
   r:=public.zt_assistant_plan(t.company_a,'create_work_order',jsonb_build_object('client',t.client_b::text,'description','cross'),gen_random_uuid());
   perform pg_temp.record_result('18_cross_tenant_client_rejected',r ? 'error',r::text);
