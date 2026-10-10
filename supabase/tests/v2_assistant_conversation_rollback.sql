@@ -146,7 +146,7 @@ begin
   perform pg_temp.record_result('23_tech_private_client_search_denied',r->>'code'='ACCESS_DENIED',r::text);
 end $$;
 reset role;
-update public.company_members m set status='inactive' from zt_assistant_test t where m.company_id=t.company_a and m.user_id=t.tech_a;
+update public.company_members m set status='disabled' from zt_assistant_test t where m.company_id=t.company_a and m.user_id=t.tech_a;
 set local role authenticated;
 do $$
 declare t zt_assistant_test%rowtype; r jsonb;
