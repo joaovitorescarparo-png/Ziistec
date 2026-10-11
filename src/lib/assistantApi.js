@@ -21,7 +21,7 @@ export async function requestAssistant(payload, { signal } = {}) {
     body: JSON.stringify(body),
   });
   const result = await response.json().catch(() => null);
-  if (!response.ok) throw Object.assign(new Error(result?.error || 'Não foi possível concluir. Tente novamente com a mesma solicitação.'), { kind: response.status === 401 ? 'auth' : 'api', status: response.status });
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'Não foi possível concluir. Tente novamente com a mesma solicitação.'), { kind: response.status === 401 ? 'auth' : 'api', status: response.status, code: typeof result?.code === 'string' ? result.code : undefined });
   if (!result || typeof result !== 'object') throw new Error('Resposta inválida. Consulte a solicitação novamente.');
   if (payload.operation !== 'execute' && result.confirmationRequired === true) {
     if (result.requestId !== payload.requestId || result.previewVersion !== 1 || !/^[0-9a-f]{64}$/.test(result.previewHash || '')) {

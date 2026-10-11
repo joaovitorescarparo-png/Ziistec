@@ -56,6 +56,7 @@ function panel(request, options = {}) {
   const rerender = () => render(props);
   rerender.speech = speech;
   rerender.completeSpeech = text => speechCallbacks.onComplete(text);
+  rerender.speechOptions = () => speechCallbacks;
   return rerender;
 }
 const typeText = (render, text) => find(render(), 'textarea').props.onChange({ target: { value: text } });
@@ -228,4 +229,27 @@ test('spoken clarification preserves the original request instead of starting a 
   render.completeSpeech('às 14h'); await tick();
   assert.match(calls[1].text, /Agenda OS-0002 amanhã\nPergunta: Qual horário\?\nResposta: às 14h/);
   assert.deepEqual(calls.map(p => p.operation), ['plan', 'plan']);
+});
+
+test('interpretação livre desligada aparece como aviso neutro, mantém o texto e não parece falha nem erro de microfone', async () => {
+  const message = 'A interpretação livre ainda não está habilitada neste ambiente. Consultas simples continuam disponíveis.';
+  const calls = [];
+  const render = panel(async payload => { calls.push(payload); throw Object.assign(new Error(message), { kind: 'api', status: 503, code: 'FREE_INTERPRETATION_DISABLED' }); });
+  typeText(render, 'Crie uma OS amanhã às duas'); submit(render); await tick();
+  const text = content(render());
+  assert.match(text, /interpretação livre ainda não está habilitada neste ambiente\. Consultas simples continuam disponíveis/);
+  assert.doesNotMatch(text, /Falha na solicitação|microfone|ditado/i);
+  assert.equal(nodes(render()).some(n => n.props?.role === 'alert'), false);
+  assert.equal(find(render(), 'textarea').props.value, 'Crie uma OS amanhã às duas');
+  typeText(render, 'Telefone do Mauro'); render();
+  assert.doesNotMatch(content(render()), /interpretação livre/, 'editar o texto limpa o aviso');
+  assert.equal(calls.length, 1);
+});
+
+test('ditado do Assistant usa janela de silêncio e não força sessão curta do motor', () => {
+  const render = panel(async () => ({}));
+  const options = render.speechOptions();
+  assert.ok(options.silenceMs >= 1000 && options.silenceMs <= 3000, String(options.silenceMs));
+  assert.equal('continuous' in options, false);
+  assert.equal(typeof options.onComplete, 'function');
 });

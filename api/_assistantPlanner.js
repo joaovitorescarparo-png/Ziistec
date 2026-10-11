@@ -2,23 +2,80 @@ import { toolsForRole } from '../src/lib/assistantTools.js';
 
 export const saoPauloDate = (now = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 
+// Prefixo da pergunta de desambiguação de cliente; a resposta volta pelo fluxo de esclarecimento.
+export const CLIENT_AMBIGUITY_QUESTION = 'Encontrei mais de um cliente compatível com';
+
+// Sem acento e minúsculo, um caractere por caractere: os índices continuam valendo no texto original.
+export function foldText(value) {
+  return [...String(value ?? '')].map(ch => ch.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().slice(0, 1) || ' ').join('');
+}
+
+const FILLER_START = /^(?:(?:oi|ola|ei|bom dia|boa tarde|boa noite|assistente|ziistec|por favor|entao|me diz|me diga|me fala|me informa|me informe) )+/;
+const FILLER_END = / (?:por favor|pra mim|para mim)$/;
+const ACTIVITY = '(?:atendimento|atendimentos|servico|servicos|os|ordens de servico|trabalho|trabalhos|visita|visitas|compromisso|compromissos)';
+const TODAY = [
+  /^(?:qual e |qual |como esta |como e )?(?:a )?(?:minha )?agenda (?:de |para |pra )?hoje$/,
+  new RegExp(`^(?:qual e |quais sao |quais )?(?:a |as |os )?(?:minha |minhas |meus |meu )?${ACTIVITY} (?:de |para |pra )?hoje$`),
+  new RegExp(`^(?:o que|quais (?:os |as )?${ACTIVITY}) (?:eu )?(?:tenho|tem|temos) (?:para |pra )?hoje$`),
+  new RegExp(`^(?:eu )?(?:tenho|tem|temos) (?:algum |alguma |algo )?(?:${ACTIVITY} )?(?:marcad[oa]s? |agendad[oa]s? )?(?:para |pra )?hoje$`),
+];
+const NEXT = [
+  /^(?:qual e |qual |quando e |quando sera |quando )?(?:o )?(?:meu )?proximo (?:atendimento|servico|compromisso|agendamento|trabalho)$/,
+  /^(?:qual e |qual |quando e |quando )?(?:a )?(?:minha )?proxima (?:visita|os|ordem de servico)$/,
+];
+// Somente consulta: verbo de leitura opcional + telefone/contato + nome. Escritas seguem para a IA.
+const PHONE = /^(?:(?:me )?(?:procura|procure|procurar|busca|busque|buscar|encontra|encontre|acha|ache|mostra|mostre|ve|veja|passa|passe|da|de|diga|fala|fale|informa|informe|consulta|consulte)(?: pra mim| para mim)? )?(?:qual (?:e )?)?(?:(?:o|pelo|por|um) )?(?:numero (?:de |do )?)?(?:telefone|fone|celular|contato|whatsapp|zap|numero)(?: de contato)? (?:do|da|de) (?:cliente )?(.+)$/d;
+const NOT_A_NAME = /\b(?:para|pra|mude|muda|mudar|altera|altere|alterar|atualiza|atualize|atualizar|troca|troque|trocar|novo|nova|cadastra|cadastre|cadastrar|apaga|apague|apagar|exclui|exclua|excluir|agenda|agende|agendar|crie|cria|criar|orcamento)\b/;
+const validName = folded => folded.length >= 2 && folded.length <= 80 && !/\d/.test(folded) && folded.split(' ').length <= 6 && !NOT_A_NAME.test(folded);
+
+function prepare(text) {
+  // Pontuação interna vira espaço e espaços colapsam antes da dobra para manter os índices alinhados.
+  const original = [...String(text ?? '').replace(/[,;:]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[?!.\s]+$/, '')];
+  const folded = original.map(ch => foldText(ch)).join('');
+  const lead = folded.match(FILLER_START)?.[0].length || 0;
+  const tail = folded.slice(lead).match(FILLER_END)?.[0].length || 0;
+  return { original, offset: lead, core: folded.slice(lead, folded.length - tail) };
+}
+
+function phoneLookup(text) {
+  const { original, offset, core } = prepare(text);
+  const match = PHONE.exec(core);
+  if (!match || !validName(match[1])) return null;
+  const [from, to] = match.indices[1];
+  return { action: 'owner_find_client', input: { query: original.slice(offset + from, offset + to).join('').trim() } };
+}
+
+// Resposta à pergunta de desambiguação gerada pela própria API (nunca a de um provedor).
+function clarifiedClientLookup(text) {
+  const lines = String(text).split('\n');
+  const question = lines.filter(line => line.startsWith('Pergunta: ')).at(-1)?.slice('Pergunta: '.length) || '';
+  if (!question.startsWith(CLIENT_AMBIGUITY_QUESTION) || !phoneLookup(lines[0])) return null;
+  const answer = lines.filter(line => line.startsWith('Resposta: ')).at(-1)?.slice('Resposta: '.length) || '';
+  const direct = phoneLookup(answer);
+  if (direct) return direct;
+  const { original, offset, core } = prepare(answer);
+  const article = core.match(/^(?:(?:e|eh|seria|o|a|do|da|de|cliente) )+/)?.[0].length || 0;
+  if (!validName(core.slice(article))) return { question: 'Informe o nome completo do cliente para eu buscar o telefone.' };
+  return { action: 'owner_find_client', input: { query: original.slice(offset + article, offset + core.length).join('').trim() } };
+}
+
 export function localReadIntent(text, role) {
-  const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[?!.]+$/, '');
-  if (/^e depois dess[ea]$/.test(normalized)) {
+  const value = String(text ?? '');
+  if (value.includes('\n')) return role === 'owner' ? clarifiedClientLookup(value) : null;
+  const { core } = prepare(value);
+  if (/^e depois dess[ea]$/.test(core)) {
     return { question: 'Qual atendimento você quer usar como referência? Informe a OS e a data para eu conferir.' };
   }
-  if (/^(agenda de hoje|minhas os de hoje|o que tenho hoje|quais (?:os|trabalhos|servicos) (?:eu )?tenho hoje)$/.test(normalized)) {
+  if (TODAY.some(pattern => pattern.test(core))) {
     return { action: role === 'owner' ? 'owner_today_schedule' : 'technician_today_orders', input: {} };
   }
-  if (/^(qual (?:e )?(?:o )?meu proximo atendimento|proximo atendimento)$/.test(normalized)) {
+  if (NEXT.some(pattern => pattern.test(core))) {
     return { action: role === 'owner' ? 'owner_next_appointment' : 'technician_next_appointment', input: {} };
   }
-  if (role === 'owner' && /^(quanto tenho (?:para|a) receber (?:esta|nessa|nesta) semana|a receber nesta semana)$/.test(normalized)) {
+  if (role === 'owner' && /^(quanto tenho (?:para|a) receber (?:esta|nessa|nesta) semana|a receber nesta semana)$/.test(core)) {
     return { question: 'A consulta de valores a receber nesta semana ainda não está disponível no Assistant.' };
   }
-  const phone = text.trim().replace(/[?!.]+$/, '').match(/^(?:procura|procure|busca|busque|qual [ée])\s+(?:o\s+)?telefone\s+d[oa]\s+cliente\s+(.+)$/i);
-  if (role === 'owner' && phone) return { action: 'owner_find_client', input: { query: phone[1].trim() } };
-  return null;
+  return role === 'owner' ? phoneLookup(value) : null;
 }
 
 // Provider output is an untrusted proposal; schemas and database enforce the authority.

@@ -5,6 +5,9 @@ import { toolsForRole } from '../lib/assistantTools';
 import { requestAssistant, createAssistantRequestId, assistantFormInput } from '../lib/assistantApi';
 
 const button = 'min-h-11 rounded-xl px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600 disabled:opacity-50';
+// Pausas curtas dentro da frase não encerram o ditado; o envio automático só ocorre após este silêncio.
+const VOICE_SILENCE_MS = 1800;
+const FREE_INTERPRETATION_DISABLED = 'FREE_INTERPRETATION_DISABLED';
 const fieldClass = 'w-full min-w-0 rounded-xl border border-slate-300 px-3 py-3 text-base';
 const suggestions = {
   owner: ['Qual meu próximo atendimento?', 'Quanto tenho para receber esta semana?', 'Procura o telefone do cliente Mauro.'],
@@ -19,6 +22,7 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
   const [answer, setAnswer] = useState(null);
   const [error, setError] = useState('');
   const [errorKind, setErrorKind] = useState('');
+  const [notice, setNotice] = useState('');
   const [clarification, setClarification] = useState('');
   const conversation = useRef('');
   const [busy, setBusy] = useState(false);
@@ -30,9 +34,9 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
   const epoch = useRef(0), abort = useRef(null), requestId = useRef(null);
   const allowed = toolsForRole(role);
   const tool = allowed.find(item => item.name === action);
-  const reset = () => { epoch.current += 1; abort.current?.abort(); locked.current = false; setBusy(false); requestId.current = null; setAnswer(null); setError(''); setUncertain(false); setSensitiveConfirmed(false); };
+  const reset = () => { epoch.current += 1; abort.current?.abort(); locked.current = false; setBusy(false); requestId.current = null; setAnswer(null); setError(''); setNotice(''); setUncertain(false); setSensitiveConfirmed(false); };
   const edit = () => { reset(); conversation.current = ''; setClarification(''); setErrorKind(''); };
-  const speech = useSpeechInput({ continuous: false,
+  const speech = useSpeechInput({ silenceMs: VOICE_SILENCE_MS,
     onText: ({ text: spoken, finalText, interimText }) => { if (voiceActive.current && (finalText || interimText) && spoken && !locked.current) { requestId.current = null; setText(spoken); } },
     onComplete: spoken => { if (voiceActive.current && open && !locked.current) { voiceActive.current = false; send('plan', spoken); } },
   });
@@ -77,7 +81,7 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
     if (operation === 'execute' && (!answer?.confirmationRequired || answer.result || !requestId.current)) return;
     if (operation === 'execute' && ['create_financial_entry', 'finalize_assigned_work_order'].includes(answer.action) && !sensitiveConfirmed) return;
     if (operation === 'plan' && !(spokenText ?? text).trim()) return;
-    locked.current = true; setBusy(true); setError(''); cancelVoice();
+    locked.current = true; setBusy(true); setError(''); setNotice(''); cancelVoice();
     setErrorKind('');
     requestId.current ||= createAssistantRequestId();
     const generation = epoch.current;
@@ -107,6 +111,8 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
       if (operation === 'execute' && result.result) await onChanged?.();
     } catch (failure) {
       if (epoch.current !== generation || failure.name === 'AbortError') return;
+      // Interpretação livre desligada não é falha: o texto continua editável para uma consulta simples.
+      if (failure.code === FREE_INTERPRETATION_DISABLED) { setNotice(failure.message); requestId.current = null; return; }
       setError(failure.message || 'Não foi possível conectar. Tente novamente.');
       setErrorKind(failure.kind === 'auth' ? 'auth' : 'api');
       if (operation === 'execute') setUncertain(previous => previous || !failure.status || failure.status >= 500);
@@ -133,7 +139,7 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
           {answer && <><h3 className="font-medium">{allowed.find(item => item.name === answer.action)?.label || 'Resultado'}</h3><dl className="space-y-2">{(answer.preview || []).map((item, index) => <div key={index}><dt className="text-sm text-slate-500">{item.label}</dt><dd>{String(item.value ?? '')}</dd></div>)}</dl>{answer.result?.message && <p role="status">{answer.result.message}</p>}{records.map(record => <div key={record.id} className="rounded-xl bg-slate-50 p-3"><p>{record.number || record.title}</p><p className="text-sm">{record.detail}</p><button type="button" onClick={() => { onOpenRecord?.(record); close(); }} className={`${button} text-teal-800`}>Abrir registro</button></div>)}
             {answer.confirmationRequired && !answer.result && <><p role="status">Revise os dados. Aguardando sua confirmação.</p>{sensitive && <label className="flex items-center gap-2"><input type="checkbox" disabled={busy} checked={sensitiveConfirmed} onChange={event => setSensitiveConfirmed(event.target.checked)} />Revisei o impacto desta ação e autorizo sua execução.</label>}<div className="flex flex-wrap gap-2"><button type="button" disabled={busy || (sensitive && !sensitiveConfirmed)} onClick={() => send('execute')} className={`${button} bg-teal-700 text-white`}>{uncertain ? 'Consultar / tentar novamente' : 'Confirmar'}</button><button type="button" disabled={busy || uncertain} onClick={edit} className={`${button} bg-slate-100`}>Editar</button><button type="button" disabled={busy || uncertain} onClick={() => { edit(); setText(''); setAction(''); setValues({}); }} className={button}>Cancelar</button></div></>}
             {(!answer.confirmationRequired || answer.result) && <button type="button" disabled={busy} onClick={() => { edit(); setText(''); setAction(''); setValues({}); }} className={`${button} bg-slate-100`}>Nova solicitação</button>}</>}
-          {busy && <p role="status">Processando…</p>}{error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{errorKind === 'auth' ? 'Sessão expirada: ' : 'Falha na solicitação: '}{error}{uncertain && ' O resultado pode já ter sido salvo. Consulte novamente antes de iniciar outra ação.'}</p>}
+          {busy && <p role="status">Processando…</p>}{notice && <p role="status" className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{notice}</p>}{error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{errorKind === 'auth' ? 'Sessão expirada: ' : 'Falha na solicitação: '}{error}{uncertain && ' O resultado pode já ter sido salvo. Consulte novamente antes de iniciar outra ação.'}</p>}
         </div>
       </section>
     </div>}

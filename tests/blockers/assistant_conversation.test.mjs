@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { localReadIntent, inferAssistantPlan, saoPauloDate } from '../../api/_assistantPlanner.js';
-import { createAssistantHandler } from '../../api/assistant.js';
+import { localReadIntent, inferAssistantPlan, saoPauloDate, CLIENT_AMBIGUITY_QUESTION } from '../../api/_assistantPlanner.js';
+import { createAssistantHandler, FREE_INTERPRETATION_DISABLED_MESSAGE } from '../../api/assistant.js';
 import { validateAssistantInput, toolsForRole } from '../../src/lib/assistantTools.js';
 
 const companyId = '10000000-0000-4000-8000-000000000001';
@@ -106,7 +106,9 @@ test('unauthenticated, missing membership and model-proposed owner tools for tec
 
 test('paid inference remains opt-in with clear fallback and no provider or quota call', async () => {
   const h = harness({ paid: false }); const r = await h.run('Cria um cliente chamado TESTE ASSISTANT.');
-  assert.equal(r.status, 503); assert.match(r.body.error, /indisponível neste ambiente/);
+  assert.equal(r.status, 503); assert.equal(r.body.error, FREE_INTERPRETATION_DISABLED_MESSAGE);
+  assert.equal(r.body.code, 'FREE_INTERPRETATION_DISABLED');
+  assert.doesNotMatch(r.body.error, /microfone|voz|ditado/i);
   assert.equal(h.inference.length, 0); assert.equal(h.calls.some(c => c.url.includes('/rpc/')), false);
 });
 
@@ -121,4 +123,87 @@ test('provider prompt uses São Paulo civil date and only current-role tools; in
   assert.ok(registry.some(t => t.name === 'technician_next_appointment'));
   assert.ok(registry.every(t => !t.name.startsWith('owner_')));
   await assert.rejects(inferAssistantPlan({ text: 'x', role: 'owner', env: {}, fetchImpl: async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: 'not json' }] }) }) }), /Nada foi executado/);
+});
+
+test('variações naturais de telefone e agenda são consultas locais, sem IA paga nem confirmação', async () => {
+  const cases = [
+    ...['Procura o telefone do Mauro', 'Procure pelo telefone do Mauro', 'Qual o telefone do Mauro?', 'Busca o telefone do cliente Mauro', 'Telefone do Mauro']
+      .map(phrase => ['owner', phrase, 'owner_find_client', { query: 'Mauro' }]),
+    ...['Qual meu próximo atendimento?', 'Qual é o meu próximo atendimento?', 'Próximo atendimento'].flatMap(phrase => [
+      ['owner', phrase, 'owner_next_appointment', {}], ['technician', phrase, 'technician_next_appointment', {}]]),
+    ...['Tenho atendimento hoje?', 'O que tenho hoje?', 'Minha agenda de hoje'].flatMap(phrase => [
+      ['owner', phrase, 'owner_today_schedule', {}], ['technician', phrase, 'technician_today_orders', {}]]),
+  ];
+  for (const [role, phrase, action, input] of cases) {
+    const h = harness({ role, paid: false });
+    const result = await h.run(phrase);
+    assert.equal(result.status, 200, phrase);
+    assert.equal(h.inference.length, 0, phrase);
+    assert.deepEqual(h.calls.find(c => c.url.endsWith('/zt_assistant_plan')).args,
+      { p_company: companyId, p_action: action, p_input: input, p_request_id: requestId }, phrase);
+    assert.equal(h.calls.some(c => /execute|quota/.test(c.url)), false, phrase);
+  }
+  assert.deepEqual(localReadIntent('Qual é o telefone da Maria José?', 'owner'), { action: 'owner_find_client', input: { query: 'Maria José' } });
+});
+
+test('escritas e frases fora do padrão nunca viram consulta local', () => {
+  for (const phrase of ['Crie um orçamento para o Mauro com instalação de câmera', 'Crie uma OS amanhã às duas', 'Atualize o telefone do Mauro para 11999990000',
+    'Telefone do Mauro é 11999990000', 'Cadastre o telefone do Mauro', 'Agende o Mauro para amanhã', 'Telefone']) {
+    assert.equal(localReadIntent(phrase, 'owner'), null, phrase);
+  }
+  assert.equal(localReadIntent('Telefone do Mauro', 'technician'), null);
+  assert.equal(localReadIntent('Cadastre um cliente\nPergunta: Qual o nome do cliente?\nResposta: Mauro', 'owner'), null);
+});
+
+test('cliente ambíguo pede esclarecimento; nome exato e resposta resolvem localmente sem expor telefone na pergunta', async () => {
+  const clients = ['Mauro Silva', 'Mauro Souza', 'Mauro Silva Junior', 'Ana Lima'];
+  const make = () => {
+    const calls = [], inference = [];
+    const handler = createAssistantHandler({ env: {}, infer: async () => { inference.push(1); return null; },
+      resolveConfig: () => ({ configurado: true, url: 'https://example.invalid', publishableKey: 'test-placeholder' }),
+      fetchImpl: async (url, options) => {
+        const args = options.body && JSON.parse(options.body); calls.push({ url, args });
+        const data = url.endsWith('/auth/v1/user') ? { id: userId } : url.includes('/company_members?') ? [{ role: 'owner' }] :
+          url.endsWith('/zt_assistant_plan') ? { confirmationRequired: false, result: { message: 'Consulta concluída.', items: clients
+            .filter(name => name.toLowerCase().includes(args.p_input.query.toLowerCase()))
+            .map((name, i) => ({ id: `id-${i}`, entityType: 'client', title: name, detail: `1190000000${i}` })) } } : {};
+        return { ok: true, json: async () => data };
+      } });
+    const run = async text => { let status, body;
+      await handler({ method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer test-placeholder' }, body: { operation: 'plan', companyId, requestId, text } },
+        { setHeader() {}, status(v) { status = v; return this; }, json(v) { body = v; } });
+      return { status, body }; };
+    return { calls, inference, run };
+  };
+  const h = make();
+  const ambiguous = await h.run('Procure pelo telefone do Mauro');
+  assert.equal(ambiguous.status, 200);
+  assert.ok(ambiguous.body.question.startsWith(CLIENT_AMBIGUITY_QUESTION));
+  assert.match(ambiguous.body.question, /Mauro Silva; Mauro Souza; Mauro Silva Junior/);
+  assert.equal(ambiguous.body.result, undefined);
+  assert.doesNotMatch(ambiguous.body.question, /\d/);
+
+  const answered = await h.run(`Procure pelo telefone do Mauro\nPergunta: ${ambiguous.body.question}\nResposta: Mauro Souza`);
+  assert.deepEqual(answered.body.result.items.map(i => i.title), ['Mauro Souza']);
+  assert.equal(h.calls.filter(c => c.url.endsWith('/zt_assistant_plan')).at(-1).args.p_input.query, 'Mauro Souza');
+
+  const exact = await h.run('Telefone do Mauro Silva');
+  assert.deepEqual(exact.body.result.items.map(i => i.title), ['Mauro Silva'], 'nome idêntico resolve sem perguntar');
+  const none = await h.run('Telefone do Pedro');
+  assert.deepEqual(none.body.result.items, []);
+  assert.equal(h.inference.length, 0);
+  assert.equal(localReadIntent(`Telefone do Mauro\nPergunta: ${ambiguous.body.question}\nResposta: 123`, 'owner').question, 'Informe o nome completo do cliente para eu buscar o telefone.');
+});
+
+test('busca manual de cliente (preview) mostra a lista pedida e não vira pergunta', async () => {
+  let status, body;
+  await createAssistantHandler({ env: {}, resolveConfig: () => ({ configurado: true, url: 'https://example.invalid', publishableKey: 'test-placeholder' }),
+    fetchImpl: async url => ({ ok: true, json: async () => url.endsWith('/auth/v1/user') ? { id: userId } : url.includes('/company_members?') ? [{ role: 'owner' }] :
+      { confirmationRequired: false, result: { items: [{ id: 'a', title: 'Mauro Silva' }, { id: 'b', title: 'Mauro Souza' }] } } }) })(
+    { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer test-placeholder' },
+      body: { operation: 'preview', companyId, requestId, action: 'owner_find_client', input: { query: 'Mauro' } } },
+    { setHeader() {}, status(v) { status = v; return this; }, json(v) { body = v; } });
+  assert.equal(status, 200);
+  assert.equal(body.question, undefined);
+  assert.equal(body.result.items.length, 2);
 });

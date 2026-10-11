@@ -1,10 +1,23 @@
 import { resolverSupabaseServidor } from './_supabaseServerConfig.js';
 import { paidAiEnabled } from './_paidFeatures.js';
 import { findAssistantTool, validateAssistantInput } from '../src/lib/assistantTools.js';
-import { inferAssistantPlan, localReadIntent } from './_assistantPlanner.js';
+import { CLIENT_AMBIGUITY_QUESTION, foldText, inferAssistantPlan, localReadIntent } from './_assistantPlanner.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
+export const FREE_INTERPRETATION_DISABLED_MESSAGE = 'A interpretação livre ainda não está habilitada neste ambiente. Consultas simples continuam disponíveis.';
+class HttpError extends Error { constructor(status, message, code) { super(message); this.status = status; this.code = code; } }
+
+// Mais de um cliente compatível: pergunta em vez de escolher. Nome idêntico ao pedido resolve sozinho.
+function clientLookupOutcome(data, query) {
+  const items = Array.isArray(data?.result?.items) ? data.result.items : [];
+  if (items.length < 2) return data;
+  const wanted = foldText(query).replace(/\s+/g, ' ').trim();
+  const exact = items.filter(item => foldText(item?.title).replace(/\s+/g, ' ').trim() === wanted);
+  if (exact.length === 1) return { ...data, result: { ...data.result, items: exact, message: 'Consulta concluída.' } };
+  const names = [...new Set(items.map(item => String(item?.title || '').trim()).filter(Boolean))];
+  const listed = names.slice(0, 5).join('; ') + (names.length > 5 ? '; …' : '');
+  return { question: `${CLIENT_AMBIGUITY_QUESTION} "${String(query).slice(0, 80)}": ${listed}. Qual deles? Informe o nome completo.`.slice(0, 500) };
+}
 
 export function createAssistantHandler({ env = process.env, fetchImpl = fetch, resolveConfig = resolverSupabaseServidor, infer = inferAssistantPlan } = {}) {
   return async (req, res) => {
@@ -59,7 +72,7 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
         if (body.currentWorkOrder !== undefined && body.currentWorkOrder !== null && !uuid.test(body.currentWorkOrder)) throw new HttpError(400, 'OS atual inválida.');
         let plan = localReadIntent(body.text, role);
         if (!plan) {
-          if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY) throw new HttpError(503, 'Interpretação por IA indisponível neste ambiente. Você ainda pode consultar a agenda de hoje, o próximo atendimento ou buscar um telefone.');
+          if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY) throw new HttpError(503, FREE_INTERPRETATION_DISABLED_MESSAGE, 'FREE_INTERPRETATION_DISABLED');
           await rpc('zt_assistant_consume_ai_quota', { p_company: body.companyId });
           plan = await infer({ text: body.text, role, currentWorkOrder: body.currentWorkOrder, env, fetchImpl });
         }
@@ -73,9 +86,10 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
       try { normalized = validateAssistantInput(action, input, role); }
       catch (error) { throw new HttpError(422, error.message); }
       const data = await rpc('zt_assistant_plan', { p_company: body.companyId, p_action: action, p_input: normalized, p_request_id: body.requestId });
-      return res.status(200).json(data);
+      // Só a linguagem natural pergunta; a busca manual (preview) mostra a lista que o usuário pediu.
+      return res.status(200).json(body.operation === 'plan' && action === 'owner_find_client' ? clientLookupOutcome(data, normalized.query) : data);
     } catch (error) {
-      return res.status(error.status || 502).json({ error: error.status ? error.message : 'Não foi possível concluir a comunicação. Tente novamente com o mesmo pedido.' });
+      return res.status(error.status || 502).json({ error: error.status ? error.message : 'Não foi possível concluir a comunicação. Tente novamente com o mesmo pedido.', ...(error.status && error.code ? { code: error.code } : {}) });
     }
   };
 }
