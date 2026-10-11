@@ -121,7 +121,7 @@ begin
       t:=btrim(v_in->>k);
       if k='clientRef' then
         if t !~ v_uuid then raise exception 'Escolha inválida' using errcode='22023'; end if;
-      elsif length(t)>case k when 'notes' then 2000 when 'servicePlace' then 500 else 120 end or (t='' and k='client') then
+      elsif length(t)>(case k when 'notes' then 2000 when 'servicePlace' then 500 else 120 end) or (t='' and k='client') then
         raise exception 'Texto vazio ou muito longo: %',k using errcode='22023';
       end if;
       if t<>'' then v_out:=v_out||jsonb_build_object(k,t); end if;
