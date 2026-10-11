@@ -16,7 +16,7 @@
 - Vercel hospeda Preview/produção.
 - `src/legacy/ZiisTecApp.jsx` e as fontes V2 consolidadas são canônicas; build/verify normais são read-only. Reconstrução + codemods históricos só rodam explicitamente via `npm run materialize:legacy`.
 - Recursos V2 devem ser absorvidos pelo shell principal sem criar dois produtos paralelos.
-- Assistente: o provedor de IA só propõe nomes/quantidades/valores ditos; o banco (`zt_assistant_plan`) resolve cliente, catálogo, IDs e preço, e toda escrita passa por prévia + confirmação (`previewHash`). O provedor só é chamado por `api/_anthropicGateway.js`, atrás de `ENABLE_PAID_AI` + quota.
+- Assistente: o provedor de IA só propõe nomes/quantidades/valores ditos; o banco (`zt_assistant_plan`) resolve cliente, catálogo, IDs e preço, e toda escrita passa por prévia + confirmação (`previewHash`). Provedores de IA só são chamados pelo gateway neutro `api/_aiGateway.js` (Gemini principal; Anthropic opcional), atrás de `ENABLE_EXTERNAL_AI` + `AI_PROVIDER` + chave + quota; frases simples usam fast-path local sem IA.
 
 ## Ambientes
 

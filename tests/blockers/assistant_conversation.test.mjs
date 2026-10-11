@@ -10,7 +10,7 @@ const requestId = '30000000-0000-4000-8000-000000000003';
 function harness({ role = 'owner', proposal, authenticated = true, member = true, paid = true } = {}) {
   const calls = [], inference = [];
   const handler = createAssistantHandler({
-    env: paid ? { ENABLE_PAID_AI: 'true', ANTHROPIC_API_KEY: 'test-placeholder' } : {},
+    env: paid ? { ENABLE_EXTERNAL_AI: 'true', AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'test-placeholder' } : {},
     resolveConfig: () => ({ configurado: true, url: 'https://example.invalid', publishableKey: 'test-placeholder' }),
     infer: async args => { inference.push(args); return proposal; },
     fetchImpl: async (url, options) => {
@@ -115,19 +115,20 @@ test('paid inference remains opt-in with clear fallback and no provider or quota
 test('provider prompt uses São Paulo civil date and only current-role tools; invalid response cannot execute', async () => {
   const now = new Date('2026-10-11T01:00:00Z'); assert.equal(saoPauloDate(now), '2026-10-10');
   let request;
-  const paidEnv = { ENABLE_PAID_AI: 'true', ANTHROPIC_API_KEY: 'test-placeholder' };
+  const paidEnv = { ENABLE_EXTERNAL_AI: 'true', AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'test-placeholder' };
   // O gateway repete a trava de custo: sem flag/chave nem chega a chamar o provedor.
   let reached = false;
   await assert.rejects(inferAssistantPlan({ text: 'x', role: 'owner', env: {}, fetchImpl: async () => { reached = true; } }), /Não foi possível interpretar/);
   assert.equal(reached, false);
   await inferAssistantPlan({ text: 'E depois desse?', role: 'technician', now, env: paidEnv, fetchImpl: async (_, options) => {
-    request = JSON.parse(options.body); return { ok: true, json: async () => ({ content: [{ type: 'text', text: '{"question":"Qual OS?"}' }] }) };
+    request = JSON.parse(options.body); return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"question":"Qual OS?"}' }] } }] }) };
   } });
-  assert.match(request.system, /hoje 2026-10-10/); assert.match(request.system, /não invente contexto/);
-  const registry = JSON.parse(request.system.split('Ferramentas: ')[1]);
+  const system = request.systemInstruction.parts[0].text;
+  assert.match(system, /hoje 2026-10-10/); assert.match(system, /não invente contexto/);
+  const registry = JSON.parse(system.split('Ferramentas: ')[1]);
   assert.ok(registry.some(t => t.name === 'technician_next_appointment'));
   assert.ok(registry.every(t => !t.name.startsWith('owner_')));
-  await assert.rejects(inferAssistantPlan({ text: 'x', role: 'owner', env: paidEnv, fetchImpl: async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: 'not json' }] }) }) }), /Nada foi executado/);
+  await assert.rejects(inferAssistantPlan({ text: 'x', role: 'owner', env: paidEnv, fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'not json' }] } }] }) }) }), /Nada foi executado/);
 });
 
 test('variações naturais de telefone e agenda são consultas locais, sem IA paga nem confirmação', async () => {

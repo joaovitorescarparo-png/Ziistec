@@ -1,6 +1,5 @@
 import { supabaseServidor } from './_supabaseServerConfig.js';
-import { paidAiAtivo } from './_paidFeatures.js';
-import { requestAnthropicText } from './_anthropicGateway.js';
+import { externalAiEnabled, externalAiReady, requestAiText } from './_aiGateway.js';
 
 const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 
@@ -72,12 +71,11 @@ export default async function handler(req, res) {
   }
 
   // Fail-closed de custo: mesmo com chave configurada, não chama provedor pago sem liberação explícita.
-  if (!paidAiAtivo) {
+  if (!externalAiEnabled(process.env)) {
     return res.status(503).json({ error: 'IA paga temporariamente desativada nesta fase do ZiisTec.' });
   }
 
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return res.status(503).json({ error: 'IA ainda não configurada no servidor.' });
+  if (!externalAiReady(process.env)) return res.status(503).json({ error: 'IA ainda não configurada no servidor.' });
 
   // A quota continua vinculada ao tenant e à assinatura, mas só é consumida após owner + cost gates.
   const quota = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_ai_quota`, {
@@ -95,7 +93,7 @@ export default async function handler(req, res) {
 
   try {
     // Chamada ao provedor somente pelo gateway único do servidor (timeout e trava de custo inclusos).
-    const text = await requestAnthropicText({ maxTokens: 1200, messages: [{ role: 'user', content: prompt }], label: 'Anthropic' });
+    const text = await requestAiText({ maxTokens: 1200, messages: [{ role: 'user', content: prompt }], label: 'Quote AI' });
     return res.status(200).json({ text: String(text || '').slice(0, 20000) });
   } catch (error) {
     console.error('AI proxy error', error instanceof Error ? error.message : 'unknown');

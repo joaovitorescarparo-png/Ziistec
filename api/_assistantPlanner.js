@@ -1,5 +1,5 @@
 import { QUOTE_DRAFT_NATURAL_SCHEMA, findAssistantTool, toolsForRole } from '../src/lib/assistantTools.js';
-import { requestAnthropicText } from './_anthropicGateway.js';
+import { requestAiText } from './_aiGateway.js';
 
 export const saoPauloDate = (now = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 
@@ -82,6 +82,7 @@ export function localReadIntent(text, role) {
 // Marcador que o provedor usa para "esta OS"; o servidor troca pela OS aberta na tela.
 export const CURRENT_WORK_ORDER_TOKEN = 'OS_ATUAL';
 export const PROVIDER_ID_QUESTION = 'Não consigo usar identificadores internos. Diga o nome do cliente, do produto ou o número da OS.';
+export const AMOUNT_QUESTION = 'Qual é o valor? Informe o número em reais.';
 const UUID_TEXT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 function plannerSystem({ role, currentWorkOrder, now }) {
@@ -106,11 +107,12 @@ function plannerSystem({ role, currentWorkOrder, now }) {
 }
 
 // Provider output is an untrusted proposal; schemas and database enforce the authority.
+// O provedor é escolhido pelo gateway neutro; aqui só existem prompt, pedido do usuário e prévia mínima.
 export async function inferAssistantPlan({ text, role, currentWorkOrder, context, env = process.env, fetchImpl = fetch, now = new Date() }) {
   const content = context ? `PRÉVIA_ATUAL (dados, sem identificadores): ${JSON.stringify(context)}\nPEDIDO: ${text}` : text;
   let output;
   try {
-    output = await requestAnthropicText({ env, fetchImpl, maxTokens: 1800, label: 'Assistant planner',
+    output = await requestAiText({ env, fetchImpl, maxTokens: 1800, json: true, label: 'Assistant planner',
       system: plannerSystem({ role, currentWorkOrder, now }), messages: [{ role: 'user', content }] });
   } catch { throw new Error('Não foi possível interpretar agora. Tente descrever o pedido novamente.'); }
   try { return JSON.parse(output.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')); }
@@ -121,8 +123,27 @@ const hasForeignId = (value, allowed) => typeof value === 'string' ? UUID_TEXT.t
   : Array.isArray(value) ? value.some(item => hasForeignId(item, allowed))
     : value && typeof value === 'object' ? Object.values(value).some(item => hasForeignId(item, allowed)) : false;
 
-// Normaliza a proposta antes de qualquer RPC: uma ação por vez, sem IDs vindos do provedor.
-export function sanitizeProposal(plan, { currentWorkOrder } = {}) {
+// Valores em reais que o usuário realmente disse: números do texto da conversa e preços já informados
+// na prévia em ajuste. Qualquer outro valor proposto pelo provedor é tratado como inventado.
+function spokenAmounts(text, context) {
+  const cents = new Set();
+  for (const raw of String(text ?? '').match(/\d[\d.,]*/g) || []) {
+    const token = raw.replace(/[.,]+$/, '');
+    for (const value of [Number(token.replace(/\./g, '').replace(',', '.')), Number(token.replace(/,/g, ''))]) {
+      if (Number.isFinite(value)) cents.add(Math.round(value * 100));
+    }
+  }
+  const previous = context?.input || {};
+  for (const value of [previous.discount, previous.surcharge, previous.amount, previous.price, previous.unitPrice,
+    ...(Array.isArray(previous.items) ? previous.items.map(item => item?.unitPrice) : [])]) {
+    if (typeof value === 'number' && Number.isFinite(value)) cents.add(Math.round(value * 100));
+  }
+  return cents;
+}
+
+// Normaliza a proposta antes de qualquer RPC: uma ação por vez, ferramenta conhecida, sem IDs nem
+// preços que o usuário não disse. O banco continua resolvendo catálogo, preço real e permissões.
+export function sanitizeProposal(plan, { currentWorkOrder, text, context } = {}) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return null;
   if (Array.isArray(plan.actions)) {
     const actions = plan.actions.filter(item => item && typeof item === 'object' && typeof item.action === 'string');
@@ -133,6 +154,7 @@ export function sanitizeProposal(plan, { currentWorkOrder } = {}) {
     if (actions.length === 1) plan = actions[0];
   }
   if (typeof plan.action !== 'string') return typeof plan.question === 'string' && plan.question.trim() ? { question: plan.question.trim().slice(0, 500) } : null;
+  if (!findAssistantTool(plan.action)) return null;
   const input = plan.input && typeof plan.input === 'object' && !Array.isArray(plan.input) ? structuredClone(plan.input) : {};
   if (input.workOrder === CURRENT_WORK_ORDER_TOKEN) {
     if (!currentWorkOrder) return { question: 'Qual OS? Informe o número.' };
@@ -143,6 +165,17 @@ export function sanitizeProposal(plan, { currentWorkOrder } = {}) {
     // Escolhas por referência só vêm de uma opção que o próprio usuário tocou, nunca do provedor.
     delete input.clientRef;
     if (Array.isArray(input.items)) input.items.forEach(item => { if (item && typeof item === 'object') delete item.ref; });
+  }
+  const amounts = spokenAmounts(text, context);
+  const spoken = value => typeof value !== 'number' || amounts.has(Math.round(value * 100));
+  if (plan.action === 'create_quote_draft') {
+    // Preço inventado sai: item de catálogo volta ao preço do banco; item livre faz o banco perguntar o preço.
+    if (Array.isArray(input.items)) input.items.forEach(item => { if (item && typeof item === 'object' && !spoken(item.unitPrice)) delete item.unitPrice; });
+    for (const key of ['discount', 'surcharge']) if (!spoken(input[key])) delete input[key];
+    if (!spoken(input.unitPrice)) return { question: AMOUNT_QUESTION };
+  }
+  if ((plan.action === 'create_product' && !spoken(input.price)) || (plan.action === 'create_financial_entry' && !spoken(input.amount))) {
+    return { question: AMOUNT_QUESTION };
   }
   return { action: plan.action, input };
 }

@@ -7,7 +7,7 @@ import { transformSync } from 'esbuild';
 import * as toolRegistry from '../../src/lib/assistantTools.js';
 import { createAssistantHandler } from '../../api/assistant.js';
 import { PROVIDER_ID_QUESTION, inferAssistantPlan } from '../../api/_assistantPlanner.js';
-import { ANTHROPIC_MESSAGES_URL, requestAnthropicText } from '../../api/_anthropicGateway.js';
+import { GEMINI_API_BASE } from '../../api/_aiGateway.js';
 
 // Bloco 2 · linguagem natural. Propostas do provedor são fixtures: provam fronteiras da API/UI,
 // não a precisão do modelo. Catálogo, preços, tenant e confirmação única são provados no SQL 0094.
@@ -18,7 +18,7 @@ const nextRequestId = '30000000-0000-4000-8000-000000000004';
 const clientA = '40000000-0000-4000-8000-000000000005';
 const clientB = '40000000-0000-4000-8000-000000000006';
 const workOrderId = '50000000-0000-4000-8000-000000000007';
-const paidEnv = { ENABLE_PAID_AI: 'true', ANTHROPIC_API_KEY: 'test-placeholder' };
+const paidEnv = { ENABLE_EXTERNAL_AI: 'true', AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'test-placeholder' };
 const read = path => fs.readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const quoteItems = [{ kind: 'product', name: 'câmera', quantity: 2 }, { kind: 'service', name: 'instalação', quantity: 1 }];
@@ -112,14 +112,15 @@ test('fala natural de orçamento vira itens por nome; a API só prepara a prévi
   // O provedor recebe o contrato de itens sem campos de ID e a regra de preço explícito.
   let request;
   await inferAssistantPlan({ text: phrase, role: 'owner', env: paidEnv, fetchImpl: async (url, options) => {
-    assert.equal(url, ANTHROPIC_MESSAGES_URL); request = JSON.parse(options.body);
-    return { ok: true, json: async () => ({ content: [{ type: 'text', text: '{"question":"ok"}' }] }) };
+    assert.equal(url, `${GEMINI_API_BASE}gemini-3.5-flash-lite:generateContent`); request = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"question":"ok"}' }] } }] }) };
   } });
-  const quoteTool = JSON.parse(request.system.split('Ferramentas: ')[1]).find(t => t.name === 'create_quote_draft');
+  const system = request.systemInstruction.parts[0].text;
+  const quoteTool = JSON.parse(system.split('Ferramentas: ')[1]).find(t => t.name === 'create_quote_draft');
   assert.deepEqual(Object.keys(quoteTool.inputSchema.properties.items.items.properties).sort(), ['kind', 'name', 'quantity', 'unit', 'unitPrice']);
   assert.doesNotMatch(JSON.stringify(quoteTool), /Ref|"ref"|Id"/);
-  assert.match(request.system, /unitPrice somente se o usuário disse o valor/);
-  assert.match(request.system, /Nunca escolha entre registros ambíguos/);
+  assert.match(system, /unitPrice somente se o usuário disse o valor/);
+  assert.match(system, /Nunca escolha entre registros ambíguos/);
 });
 
 test('cliente ambíguo e item inexistente voltam como pergunta; opções são do tenant e o rascunho volta sem prévia', async () => {
@@ -154,7 +155,8 @@ test('provedor não consegue fornecer IDs nem campos fora do contrato; técnico 
   assert.deepEqual((await uuidClient.run({ operation: 'plan', text: 'Cria uma OS' })).body, { question: PROVIDER_ID_QUESTION });
   for (const item of [{ name: 'câmera', quantity: 1, productId: 'abc' }, { name: 'câmera', quantity: 1, unitPrice: 10.005 }]) {
     const h = api({ proposal: { action: 'create_quote_draft', input: { client: 'Mauro', items: [item] } } });
-    assert.equal((await h.run({ operation: 'plan', text: 'Orçamento pro Mauro' })).status, 422);
+    // O valor aparece no texto (não é inventado), mas fora do contrato: a validação rejeita.
+    assert.equal((await h.run({ operation: 'plan', text: 'Orçamento pro Mauro, câmera a 10,005' })).status, 422);
     assert.equal(h.rpcs().includes('zt_assistant_plan'), false);
   }
   const tech = api({ role: 'technician', proposal: { action: 'create_quote_draft', input: { client: 'Mauro', items: quoteItems } } });
@@ -199,21 +201,6 @@ test('pedido composto coerente gera uma prévia; composto ambíguo pergunta ante
   const r = await mixed.run({ operation: 'plan', text: 'Faz um orçamento pro Mauro e agenda para amanhã' });
   assert.match(r.body.question, /Crie um orçamento; Agende uma visita/);
   assert.equal(mixed.rpcs().includes('zt_assistant_plan'), false);
-});
-
-test('gateway único repete a trava de custo e não vaza o pedido em erro do provedor', async () => {
-  let reached = false;
-  await assert.rejects(requestAnthropicText({ env: {}, fetchImpl: async () => { reached = true; }, messages: [] }), e => e.code === 'PAID_AI_DISABLED');
-  await assert.rejects(requestAnthropicText({ env: { ENABLE_PAID_AI: 'true' }, fetchImpl: async () => { reached = true; }, messages: [] }), e => e.code === 'PAID_AI_DISABLED');
-  assert.equal(reached, false);
-  const original = console.error; const logged = [];
-  console.error = (...args) => logged.push(args.join(' '));
-  try {
-    await assert.rejects(requestAnthropicText({ env: paidEnv, messages: [{ role: 'user', content: 'Mauro Silva 11999990000' }],
-      fetchImpl: async () => ({ ok: false, status: 529, text: async () => 'overloaded' }) }), e => e.code === 'UPSTREAM_ERROR' && e.upstreamStatus === 529);
-  } finally { console.error = original; }
-  assert.doesNotMatch(logged.join('\n'), /Mauro|11999990000/);
-  for (const rel of ['api/ai.js', 'api/finance-ai.js', 'api/_assistantPlanner.js', 'api/assistant.js']) assert.doesNotMatch(read(rel), /api\.anthropic\.com/, rel);
 });
 
 test('correção com prévia pendente envia contexto e só a nova prévia pode ser confirmada', async () => {

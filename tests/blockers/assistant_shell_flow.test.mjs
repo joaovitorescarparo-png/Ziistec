@@ -134,7 +134,7 @@ test('API and authentication errors remain visible without breaking the panel', 
 test('API clarification returns without a plan/execute RPC; mutation plan only calls preview RPC', async () => {
   const paths = [];
   let proposal = { question: 'Qual cliente?' };
-  const handler = createAssistantHandler({ env: { ENABLE_PAID_AI: 'true', ANTHROPIC_API_KEY: 'test-placeholder' },
+  const handler = createAssistantHandler({ env: { ENABLE_EXTERNAL_AI: 'true', AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'test-placeholder' },
     resolveConfig: () => ({ configurado: true, url: 'https://example.invalid', publishableKey: 'test-placeholder' }),
     infer: async () => proposal,
     fetchImpl: async (url) => {

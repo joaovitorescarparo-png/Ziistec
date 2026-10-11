@@ -1,5 +1,5 @@
 import { resolverSupabaseServidor } from './_supabaseServerConfig.js';
-import { paidAiEnabled } from './_paidFeatures.js';
+import { externalAiReady } from './_aiGateway.js';
 import { findAssistantTool, validateAssistantInput } from '../src/lib/assistantTools.js';
 import { CLIENT_AMBIGUITY_QUESTION, CURRENT_WORK_ORDER_TOKEN, foldText, inferAssistantPlan, localReadIntent, sanitizeProposal } from './_assistantPlanner.js';
 
@@ -79,13 +79,13 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
         if (data?.error) throw new HttpError(data.code === 'ACCESS_DENIED' ? 403 : data.code === 'REQUEST_CONFLICT' ? 409 : 422, String(data.error).slice(0, 500), typeof data.code === 'string' ? data.code : undefined);
         return data;
       };
-      // Interpretação livre: trava de custo, contexto mínimo da prévia, quota e só então o provedor.
+      // Interpretação livre: IA externa configurada (fail-closed), contexto mínimo da prévia, quota e só então o gateway.
       const interpret = async () => {
-        if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY) throw new HttpError(503, FREE_INTERPRETATION_DISABLED_MESSAGE, 'FREE_INTERPRETATION_DISABLED');
+        if (!externalAiReady(env)) throw new HttpError(503, FREE_INTERPRETATION_DISABLED_MESSAGE, 'FREE_INTERPRETATION_DISABLED');
         const context = body.contextRequestId ? providerContext(await rpc('zt_assistant_plan_context', { p_company: body.companyId, p_request_id: body.contextRequestId }), body.currentWorkOrder) : null;
         await rpc('zt_assistant_consume_ai_quota', { p_company: body.companyId });
         const proposal = await infer({ text: body.text, role, currentWorkOrder: body.currentWorkOrder, context, env, fetchImpl });
-        return sanitizeProposal(proposal, { currentWorkOrder: body.currentWorkOrder });
+        return sanitizeProposal(proposal, { currentWorkOrder: body.currentWorkOrder, text: body.text, context });
       };
       if (body.operation === 'execute') {
         if (body.action !== undefined || body.input !== undefined || body.text !== undefined || body.currentWorkOrder !== undefined) throw new HttpError(400, 'Confirme somente o pedido revisado.');

@@ -165,7 +165,7 @@ requireText('src/lib/supabase.js', [
 // 6) Invariantes de segurança dos endpoints públicos/serverless.
 requireText('api/ai.js', [
   "req.method !== 'POST'", "auth.startsWith('Bearer ')", '/auth/v1/user',
-  '/rest/v1/rpc/zt_consume_ai_quota', 'process.env.ANTHROPIC_API_KEY',
+  '/rest/v1/rpc/zt_consume_ai_quota', 'externalAiReady(process.env)',
 ]);
 requireText('api/finance-ai.js', [
   "req.method !== 'POST'", "auth.startsWith('Bearer ')", '/auth/v1/user',

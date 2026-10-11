@@ -29,11 +29,11 @@ Enquanto o ZiisTec não tiver **mais de 4 clientes pagantes**, o desenvolvimento
 
 ## IA paga: desligada por padrão
 
-Os endpoints de Orçamento com IA e Financeiro com IA usam um **cost gate fail-closed** no servidor.
+Os endpoints de Orçamento com IA, Financeiro com IA e o Assistente usam um **cost gate fail-closed** no servidor, num gateway neutro (`api/_aiGateway.js`).
 
-- A presença de `ANTHROPIC_API_KEY` sozinha **não autoriza consumo**.
-- A IA paga só pode chamar o provedor quando `ENABLE_PAID_AI=true` estiver configurada explicitamente no servidor.
-- Com a flag ausente ou diferente de `true`, o servidor responde `503` antes de consumir quota e antes de chamar a Anthropic.
+- A presença de uma chave de provedor (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`) sozinha **não autoriza consumo**.
+- A IA externa só pode chamar o provedor quando `ENABLE_EXTERNAL_AI=true`, `AI_PROVIDER` reconhecido (`gemini`; `anthropic` é opcional) e a chave desse provedor estiverem configurados explicitamente no servidor. A antiga `ENABLE_PAID_AI` não liga mais nada.
+- Com qualquer um deles ausente ou inválido, o servidor responde `503` antes de consumir quota e antes de chamar qualquer provedor.
 - O Orçamento com IA também valida `owner` antes da trava de custo; um técnico autenticado recebe `403` e não consome quota.
 - O CI executa testes mockados que provam esses comportamentos sem rede e sem gerar custo.
 
