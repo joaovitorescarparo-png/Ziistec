@@ -7,6 +7,7 @@ import {
   STAGING_PUBLISHABLE_KEY,
   resolverSupabaseServidor,
 } from '../api/_supabaseServerConfig.js';
+import { ANTHROPIC_MESSAGES_URL } from '../api/_anthropicGateway.js';
 
 const root = process.cwd();
 const failures = [];
@@ -93,12 +94,14 @@ ok(financeQuotaIndex >= 0 && financeAnthropicIndex >= 0 && financeQuotaIndex < f
 const gateway = fs.readFileSync(path.join(root, 'api/_anthropicGateway.js'), 'utf8');
 const gatewayPaidIndex = gateway.indexOf('if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY)');
 const gatewayFetchIndex = gateway.indexOf('fetchImpl(ANTHROPIC_MESSAGES_URL');
-ok(gateway.includes("'https://api.anthropic.com/v1/messages'"), 'api/_anthropicGateway.js: URL do provedor ausente.');
+// Host derivado da constante do gateway: a verificação procura chamadas diretas, não valida URL de entrada.
+const providerUrl = new URL(ANTHROPIC_MESSAGES_URL);
+ok(providerUrl.protocol === 'https:' && providerUrl.hostname === 'api.anthropic.com' && providerUrl.pathname === '/v1/messages', 'api/_anthropicGateway.js: URL do provedor inesperada.');
 ok(gatewayPaidIndex >= 0 && gatewayFetchIndex >= 0 && gatewayPaidIndex < gatewayFetchIndex, 'api/_anthropicGateway.js: trava paga precisa ocorrer antes da chamada ao provedor.');
 ok(gateway.includes('AbortSignal.timeout'), 'api/_anthropicGateway.js: timeout ausente.');
 for (const rel of fs.readdirSync(path.join(root, 'api')).filter((name) => name.endsWith('.js') && name !== '_anthropicGateway.js').map((name) => `api/${name}`)) {
   const text = fs.readFileSync(path.join(root, rel), 'utf8');
-  ok(!text.includes('api.anthropic.com'), `${rel}: chama o provedor fora do gateway único.`);
+  ok(!text.includes(providerUrl.hostname), `${rel}: chama o provedor fora do gateway único.`);
 }
 for (const rel of ['api/ai.js', 'api/finance-ai.js', 'api/_assistantPlanner.js']) {
   ok(fs.readFileSync(path.join(root, rel), 'utf8').includes("from './_anthropicGateway.js'"), `${rel}: não usa o gateway único de IA.`);
