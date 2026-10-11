@@ -1,4 +1,4 @@
-import React,{useCallback,useEffect,useMemo,useState} from 'react';
+import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {AlertTriangle,ArrowLeft,Crosshair,ExternalLink,MapPin,RefreshCw,Save,Search,Trash2,X} from 'lucide-react';
 import {buildGoogleMapsUrl,carregarClientesLocaisV2DB,limparLocalClienteV2DB,salvarLocalClienteV2DB} from '../../lib/clientLocationsV2Api';
 
@@ -13,6 +13,7 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
   const [form,setForm]=useState({address:'',mapsUrl:'',latitude:'',longitude:'',googlePlaceId:''});
   const [saving,setSaving]=useState(false);
   const [locating,setLocating]=useState(false);
+  const appliedInitialClient=useRef(null);
 
   const load=useCallback(async()=>{
     setLoading(true);setError('');
@@ -35,7 +36,8 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
     setForm({address:client.address||'',mapsUrl:client.maps_url||'',latitude:coord(client.latitude),longitude:coord(client.longitude),googlePlaceId:client.google_place_id||''});
     setError('');
   };
-  useEffect(()=>{if(initialClientId&&rows.length&&selectedId!==initialClientId){const c=rows.find(x=>x.id===initialClientId);if(c)select(c);}},[initialClientId,rows,selectedId]);
+  // Cliente pedido pela URL é aberto uma vez por valor recebido; voltar para a lista não o reabre.
+  useEffect(()=>{if(!initialClientId||!rows.length||appliedInitialClient.current===initialClientId)return;const c=rows.find(x=>x.id===initialClientId);if(c){appliedInitialClient.current=initialClientId;select(c);}},[initialClientId,rows]);
 
   const currentMap=useMemo(()=>buildGoogleMapsUrl({address:form.address,placeId:form.googlePlaceId,latitude:form.latitude,longitude:form.longitude})||form.mapsUrl||null,[form]);
 

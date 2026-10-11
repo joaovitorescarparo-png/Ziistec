@@ -137,6 +137,8 @@ const workspaceInicial = () => {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get("v2") || null;
 };
+// Entrada de histórico criada quando o Assistente abre um registro: Voltar (inclusive no Android) retorna à origem.
+const ASSISTANT_RECORD_STATE = "ziistecAssistantRecord";
 
 export default function App() {
   const s = useSessao();
@@ -152,6 +154,20 @@ export default function App() {
     if (valor) url.searchParams.set("v2", valor);
     else url.searchParams.delete("v2");
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  // Voltar do navegador sincroniza a tela com a URL (?v2= continua sendo a fonte da rota técnica).
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const sincronizar = () => setWorkspaceV2(workspaceInicial());
+    window.addEventListener("popstate", sincronizar);
+    return () => window.removeEventListener("popstate", sincronizar);
+  }, []);
+
+  // Tela aberta pelo Assistente fecha voltando no histórico; as demais seguem para o hub V2 como antes.
+  const fecharWorkspace = (destino) => {
+    if (typeof window !== "undefined" && window.history.state?.[ASSISTANT_RECORD_STATE]) { window.history.back(); return; }
+    navegarV2(destino);
   };
 
   const abrirWorkspaceV2 = (valor) => {
@@ -219,7 +235,8 @@ export default function App() {
     for (const key of ['client', 'product', 'wo']) url.searchParams.delete(key);
     url.searchParams.set('v2', target[0]);
     if (target[1]) url.searchParams.set(target[1], record.id);
-    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    // pushState (não replaceState): o registro aberto ganha uma entrada própria e Voltar retorna à origem.
+    window.history.pushState({ [ASSISTANT_RECORD_STATE]: true }, '', `${url.pathname}${url.search}${url.hash}`);
     setWorkspaceV2(target[0]);
   };
   const comConexao = (conteudo) => <><EstadoConexao />{conteudo}
@@ -264,7 +281,7 @@ export default function App() {
 
   const owner = s.membresiaAtual?.role === "owner";
   const companyName = contexto.empresa.fantasia || contexto.empresa.nome;
-  const workspaceProps = { companyId:s.empresaId, companyName, userId:s.perfil.id, onClose:() => navegarV2("home") };
+  const workspaceProps = { companyId:s.empresaId, companyName, userId:s.perfil.id, onClose:() => fecharWorkspace("home") };
 
   if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo o ZiisTec V2"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={abrirWorkspaceV2} onClose={() => navegarV2(null)}/></Suspense>);
   if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps} initialProductId={new URLSearchParams(window.location.search).get("product")}/></Suspense>);

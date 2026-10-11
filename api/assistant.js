@@ -1,9 +1,10 @@
 import { resolverSupabaseServidor } from './_supabaseServerConfig.js';
 import { paidAiEnabled } from './_paidFeatures.js';
 import { findAssistantTool, validateAssistantInput } from '../src/lib/assistantTools.js';
-import { CLIENT_AMBIGUITY_QUESTION, foldText, inferAssistantPlan, localReadIntent } from './_assistantPlanner.js';
+import { CLIENT_AMBIGUITY_QUESTION, CURRENT_WORK_ORDER_TOKEN, foldText, inferAssistantPlan, localReadIntent, sanitizeProposal } from './_assistantPlanner.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const anyUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 export const FREE_INTERPRETATION_DISABLED_MESSAGE = 'A interpretação livre ainda não está habilitada neste ambiente. Consultas simples continuam disponíveis.';
 class HttpError extends Error { constructor(status, message, code) { super(message); this.status = status; this.code = code; } }
 
@@ -19,6 +20,23 @@ function clientLookupOutcome(data, query) {
   return { question: `${CLIENT_AMBIGUITY_QUESTION} "${String(query).slice(0, 80)}": ${listed}. Qual deles? Informe o nome completo.`.slice(0, 500) };
 }
 
+// Pergunta do banco (homônimos, item fora do catálogo): opções do próprio tenant + rascunho a completar.
+function questionOutcome(data) {
+  const options = (Array.isArray(data.options) ? data.options : [])
+    .filter(option => typeof option?.label === 'string' && /^(client|item:\d{1,2})$/.test(option?.slot || '') && uuid.test(option?.ref || ''))
+    .slice(0, 6).map(({ label, slot, ref }) => ({ label: label.slice(0, 200), slot, ref }));
+  const resumable = options.length && typeof data.action === 'string' && data.draft && typeof data.draft === 'object';
+  return { question: String(data.question).slice(0, 500), ...(resumable ? { options, action: data.action, draft: data.draft } : {}) };
+}
+
+// Contexto da prévia para o provedor: sem IDs. A OS aberta na tela vira o marcador do prompt.
+function providerContext(context, currentWorkOrder) {
+  if (!context || typeof context.action !== 'string') return null;
+  const input = { ...(context.input || {}) };
+  if (currentWorkOrder && input.workOrder === currentWorkOrder) input.workOrder = CURRENT_WORK_ORDER_TOKEN;
+  return anyUuid.test(JSON.stringify(input)) ? null : { action: context.action, input };
+}
+
 export function createAssistantHandler({ env = process.env, fetchImpl = fetch, resolveConfig = resolverSupabaseServidor, infer = inferAssistantPlan } = {}) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -29,10 +47,12 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
       const body = req.body;
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Pedido inválido.');
       if (Buffer.byteLength(JSON.stringify(body), 'utf8') > 32768) throw new HttpError(413, 'Pedido muito longo.');
-      const allowed = ['operation', 'companyId', 'requestId', 'text', 'currentWorkOrder', 'action', 'input', 'previewHash'];
+      const allowed = ['operation', 'companyId', 'requestId', 'text', 'currentWorkOrder', 'action', 'input', 'previewHash', 'contextRequestId'];
       if (Object.keys(body).some((key) => !allowed.includes(key))) throw new HttpError(400, 'Campo não permitido.');
       if (!uuid.test(body.companyId || '') || !uuid.test(body.requestId || '')) throw new HttpError(400, 'Empresa ou pedido inválido.');
       if (!['plan', 'preview', 'execute'].includes(body.operation)) throw new HttpError(400, 'Operação inválida.');
+      // Ajuste de prévia sempre gera outra solicitação; a anterior só é referência.
+      if (body.contextRequestId !== undefined && (body.operation === 'execute' || !uuid.test(body.contextRequestId) || body.contextRequestId === body.requestId)) throw new HttpError(400, 'Prévia de referência inválida.');
       const config = resolveConfig(env);
       // This candidate is for homologation; even a configured Production deployment cannot run it.
       if (!config.configurado || env.VERCEL_ENV === 'production' || /production/.test(config.origem || '')) throw new HttpError(503, 'Assistente indisponível neste ambiente.');
@@ -56,8 +76,16 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
           const status = response.status === 401 ? 401 : data?.code === '42501' ? 403 : data?.code === 'P0001' ? 429 : response.status === 404 ? 503 : 400;
           throw new HttpError(status, status === 503 ? 'Assistente ainda não habilitado neste ambiente.' : status === 403 ? 'Acesso não permitido.' : status === 429 ? 'Limite de IA atingido. Tente mais tarde.' : 'Não foi possível validar a ação. Verifique os dados e tente novamente.');
         }
-        if (data?.error) throw new HttpError(data.code === 'ACCESS_DENIED' ? 403 : data.code === 'REQUEST_CONFLICT' ? 409 : 422, String(data.error).slice(0, 500));
+        if (data?.error) throw new HttpError(data.code === 'ACCESS_DENIED' ? 403 : data.code === 'REQUEST_CONFLICT' ? 409 : 422, String(data.error).slice(0, 500), typeof data.code === 'string' ? data.code : undefined);
         return data;
+      };
+      // Interpretação livre: trava de custo, contexto mínimo da prévia, quota e só então o provedor.
+      const interpret = async () => {
+        if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY) throw new HttpError(503, FREE_INTERPRETATION_DISABLED_MESSAGE, 'FREE_INTERPRETATION_DISABLED');
+        const context = body.contextRequestId ? providerContext(await rpc('zt_assistant_plan_context', { p_company: body.companyId, p_request_id: body.contextRequestId }), body.currentWorkOrder) : null;
+        await rpc('zt_assistant_consume_ai_quota', { p_company: body.companyId });
+        const proposal = await infer({ text: body.text, role, currentWorkOrder: body.currentWorkOrder, context, env, fetchImpl });
+        return sanitizeProposal(proposal, { currentWorkOrder: body.currentWorkOrder });
       };
       if (body.operation === 'execute') {
         if (body.action !== undefined || body.input !== undefined || body.text !== undefined || body.currentWorkOrder !== undefined) throw new HttpError(400, 'Confirme somente o pedido revisado.');
@@ -66,16 +94,14 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
         return res.status(200).json(data);
       }
       if (body.previewHash !== undefined) throw new HttpError(400, 'Confirmação permitida somente na execução.');
-      let action = body.action, input = body.input;
+      let action = body.action, input = body.input, local = false;
       if (body.operation === 'plan') {
         if (body.action !== undefined || body.input !== undefined || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 10000) throw new HttpError(400, 'Descreva o que precisa em até 10.000 caracteres.');
         if (body.currentWorkOrder !== undefined && body.currentWorkOrder !== null && !uuid.test(body.currentWorkOrder)) throw new HttpError(400, 'OS atual inválida.');
+        // Fast path local só para consultas triviais; o resto é proposta do provedor.
         let plan = localReadIntent(body.text, role);
-        if (!plan) {
-          if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY) throw new HttpError(503, FREE_INTERPRETATION_DISABLED_MESSAGE, 'FREE_INTERPRETATION_DISABLED');
-          await rpc('zt_assistant_consume_ai_quota', { p_company: body.companyId });
-          plan = await infer({ text: body.text, role, currentWorkOrder: body.currentWorkOrder, env, fetchImpl });
-        }
+        local = Boolean(plan);
+        if (!plan) plan = await interpret();
         if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new HttpError(422, 'Não reconheci uma ação. Nada foi executado.');
         if (typeof plan.question === 'string' && !plan.action) return res.status(200).json({ question: plan.question.slice(0, 500) });
         ({ action, input } = plan);
@@ -85,7 +111,12 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
       let normalized;
       try { normalized = validateAssistantInput(action, input, role); }
       catch (error) { throw new HttpError(422, error.message); }
-      const data = await rpc('zt_assistant_plan', { p_company: body.companyId, p_action: action, p_input: normalized, p_request_id: body.requestId });
+      // Ajuste de uma escrita pendente: nova prévia/novo hash; o banco expira a anterior na mesma transação.
+      const revise = Boolean(body.contextRequestId) && !local && definition.confirmationRequired;
+      const data = revise
+        ? await rpc('zt_assistant_revise', { p_company: body.companyId, p_previous: body.contextRequestId, p_action: action, p_input: normalized, p_request_id: body.requestId })
+        : await rpc('zt_assistant_plan', { p_company: body.companyId, p_action: action, p_input: normalized, p_request_id: body.requestId });
+      if (typeof data?.question === 'string') return res.status(200).json(questionOutcome(data));
       // Só a linguagem natural pergunta; a busca manual (preview) mostra a lista que o usuário pediu.
       return res.status(200).json(body.operation === 'plan' && action === 'owner_find_client' ? clientLookupOutcome(data, normalized.query) : data);
     } catch (error) {

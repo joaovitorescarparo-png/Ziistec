@@ -115,14 +115,19 @@ test('paid inference remains opt-in with clear fallback and no provider or quota
 test('provider prompt uses São Paulo civil date and only current-role tools; invalid response cannot execute', async () => {
   const now = new Date('2026-10-11T01:00:00Z'); assert.equal(saoPauloDate(now), '2026-10-10');
   let request;
-  await inferAssistantPlan({ text: 'E depois desse?', role: 'technician', now, env: {}, fetchImpl: async (_, options) => {
+  const paidEnv = { ENABLE_PAID_AI: 'true', ANTHROPIC_API_KEY: 'test-placeholder' };
+  // O gateway repete a trava de custo: sem flag/chave nem chega a chamar o provedor.
+  let reached = false;
+  await assert.rejects(inferAssistantPlan({ text: 'x', role: 'owner', env: {}, fetchImpl: async () => { reached = true; } }), /Não foi possível interpretar/);
+  assert.equal(reached, false);
+  await inferAssistantPlan({ text: 'E depois desse?', role: 'technician', now, env: paidEnv, fetchImpl: async (_, options) => {
     request = JSON.parse(options.body); return { ok: true, json: async () => ({ content: [{ type: 'text', text: '{"question":"Qual OS?"}' }] }) };
   } });
   assert.match(request.system, /hoje 2026-10-10/); assert.match(request.system, /não invente contexto/);
   const registry = JSON.parse(request.system.split('Ferramentas: ')[1]);
   assert.ok(registry.some(t => t.name === 'technician_next_appointment'));
   assert.ok(registry.every(t => !t.name.startsWith('owner_')));
-  await assert.rejects(inferAssistantPlan({ text: 'x', role: 'owner', env: {}, fetchImpl: async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: 'not json' }] }) }) }), /Nada foi executado/);
+  await assert.rejects(inferAssistantPlan({ text: 'x', role: 'owner', env: paidEnv, fetchImpl: async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: 'not json' }] }) }) }), /Nada foi executado/);
 });
 
 test('variações naturais de telefone e agenda são consultas locais, sem IA paga nem confirmação', async () => {

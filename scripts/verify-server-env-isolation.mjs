@@ -68,11 +68,12 @@ const genericAi = fs.readFileSync(path.join(root, 'api/ai.js'), 'utf8');
 const genericOwnerIndex = genericAi.indexOf('/rest/v1/rpc/zt_is_owner');
 const genericPaidGateIndex = genericAi.indexOf('if (!paidAiAtivo)');
 const genericQuotaIndex = genericAi.indexOf('/rest/v1/rpc/zt_consume_ai_quota');
-const genericAnthropicIndex = genericAi.indexOf('https://api.anthropic.com/v1/messages');
+const genericAnthropicIndex = genericAi.indexOf('requestAnthropicText(');
 ok(genericOwnerIndex >= 0, 'api/ai.js: owner guard ausente.');
 ok(genericPaidGateIndex >= 0, 'api/ai.js: paid AI gate ausente.');
 ok(genericQuotaIndex >= 0, 'api/ai.js: quota RPC ausente.');
 ok(genericAnthropicIndex >= 0, 'api/ai.js: chamada Anthropic ausente.');
+ok(genericQuotaIndex >= 0 && genericAnthropicIndex >= 0 && genericQuotaIndex < genericAnthropicIndex, 'api/ai.js: quota precisa ocorrer antes da chamada ao provedor.');
 ok(genericOwnerIndex >= 0 && genericQuotaIndex >= 0 && genericOwnerIndex < genericQuotaIndex, 'api/ai.js: owner guard precisa ocorrer antes do consumo de quota.');
 ok(genericPaidGateIndex >= 0 && genericQuotaIndex >= 0 && genericPaidGateIndex < genericQuotaIndex, 'api/ai.js: paid AI gate precisa ocorrer antes do consumo de quota.');
 ok(genericPaidGateIndex >= 0 && genericAnthropicIndex >= 0 && genericPaidGateIndex < genericAnthropicIndex, 'api/ai.js: paid AI gate precisa ocorrer antes da chamada ao provedor.');
@@ -81,11 +82,31 @@ ok(genericAi.includes('Somente o proprietário pode usar a interpretação comer
 const financeAi = fs.readFileSync(path.join(root, 'api/finance-ai.js'), 'utf8');
 const financePaidGateIndex = financeAi.indexOf('if (!paidAiAtivo)');
 const financeQuotaIndex = financeAi.indexOf('/rest/v1/rpc/zt_consume_ai_quota');
-const financeAnthropicIndex = financeAi.indexOf('https://api.anthropic.com/v1/messages');
+const financeAnthropicIndex = financeAi.indexOf('requestAnthropicText(');
 ok(financeAi.includes("from './_paidFeatures.js'"), 'api/finance-ai.js: helper de feature paga ausente.');
 ok(financePaidGateIndex >= 0, 'api/finance-ai.js: paid AI gate ausente.');
 ok(financePaidGateIndex >= 0 && financeQuotaIndex >= 0 && financePaidGateIndex < financeQuotaIndex, 'api/finance-ai.js: paid AI gate precisa ocorrer antes da quota.');
 ok(financePaidGateIndex >= 0 && financeAnthropicIndex >= 0 && financePaidGateIndex < financeAnthropicIndex, 'api/finance-ai.js: paid AI gate precisa ocorrer antes da Anthropic.');
+ok(financeQuotaIndex >= 0 && financeAnthropicIndex >= 0 && financeQuotaIndex < financeAnthropicIndex, 'api/finance-ai.js: quota precisa ocorrer antes da Anthropic.');
+
+// Gateway único: só ele conhece a URL do provedor e repete a trava de custo antes do fetch.
+const gateway = fs.readFileSync(path.join(root, 'api/_anthropicGateway.js'), 'utf8');
+const gatewayPaidIndex = gateway.indexOf('if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY)');
+const gatewayFetchIndex = gateway.indexOf('fetchImpl(ANTHROPIC_MESSAGES_URL');
+ok(gateway.includes("'https://api.anthropic.com/v1/messages'"), 'api/_anthropicGateway.js: URL do provedor ausente.');
+ok(gatewayPaidIndex >= 0 && gatewayFetchIndex >= 0 && gatewayPaidIndex < gatewayFetchIndex, 'api/_anthropicGateway.js: trava paga precisa ocorrer antes da chamada ao provedor.');
+ok(gateway.includes('AbortSignal.timeout'), 'api/_anthropicGateway.js: timeout ausente.');
+for (const rel of fs.readdirSync(path.join(root, 'api')).filter((name) => name.endsWith('.js') && name !== '_anthropicGateway.js').map((name) => `api/${name}`)) {
+  const text = fs.readFileSync(path.join(root, rel), 'utf8');
+  ok(!text.includes('api.anthropic.com'), `${rel}: chama o provedor fora do gateway único.`);
+}
+for (const rel of ['api/ai.js', 'api/finance-ai.js', 'api/_assistantPlanner.js']) {
+  ok(fs.readFileSync(path.join(root, rel), 'utf8').includes("from './_anthropicGateway.js'"), `${rel}: não usa o gateway único de IA.`);
+}
+const assistantApi = fs.readFileSync(path.join(root, 'api/assistant.js'), 'utf8');
+const assistantPaidIndex = assistantApi.indexOf('if (!paidAiEnabled(env) || !env.ANTHROPIC_API_KEY)');
+const assistantQuotaIndex = assistantApi.indexOf("rpc('zt_assistant_consume_ai_quota'");
+ok(assistantPaidIndex >= 0 && assistantQuotaIndex >= 0 && assistantPaidIndex < assistantQuotaIndex, 'api/assistant.js: IA paga precisa falhar fechada antes da quota.');
 
 if (failures.length) {
   console.error('\nSERVER ENV ISOLATION CHECK: FAIL\n');
@@ -99,4 +120,5 @@ console.log('✓ Preview allowlisted aceita somente o staging autorizado');
 console.log('✓ Preview desconhecido e env parcial falham fechado');
 console.log('✓ AI, Finance AI e PDF usam o resolver compartilhado com body limit + timeout');
 console.log('✓ IA comercial valida owner antes de consumir quota ou chamar o provedor');
-console.log('✓ IA paga permanece fail-closed antes de quota/provedor em Orçamento e Financeiro');
+console.log('✓ IA paga permanece fail-closed antes de quota/provedor em Orçamento, Financeiro e Assistente');
+console.log('✓ Provedor de IA chamado somente pelo gateway único do servidor');

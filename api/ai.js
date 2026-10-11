@@ -1,5 +1,6 @@
 import { supabaseServidor } from './_supabaseServerConfig.js';
 import { paidAiAtivo } from './_paidFeatures.js';
+import { requestAnthropicText } from './_anthropicGateway.js';
 
 const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 
@@ -93,27 +94,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
-        max_tokens: 1200,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!upstream.ok) {
-      const body = await upstream.text();
-      console.error('Anthropic error', upstream.status, body.slice(0, 300));
-      return res.status(502).json({ error: 'Serviço de interpretação indisponível.' });
-    }
-    const data = await upstream.json();
-    const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    // Chamada ao provedor somente pelo gateway único do servidor (timeout e trava de custo inclusos).
+    const text = await requestAnthropicText({ maxTokens: 1200, messages: [{ role: 'user', content: prompt }], label: 'Anthropic' });
     return res.status(200).json({ text: String(text || '').slice(0, 20000) });
   } catch (error) {
     console.error('AI proxy error', error instanceof Error ? error.message : 'unknown');

@@ -40,10 +40,61 @@ export const ASSISTANT_TOOLS = Object.freeze([
 export const toolsForRole = (role) => ASSISTANT_TOOLS.filter((item) => item.roles.includes(role));
 export const findAssistantTool = (name) => ASSISTANT_TOOLS.find((item) => item.name === name);
 
+// Orçamento em linguagem natural: o provedor só repete nomes, quantidades e preços ditos pelo usuário.
+// IDs, preços do catálogo e escolha entre homônimos são resolvidos pelo banco (zt_assistant_plan).
+// O formulário manual continua com o formato simples de um item (inputSchema acima).
+export const QUOTE_ITEM_KINDS = Object.freeze(['product', 'service', 'free']);
+const quantity = { type: 'number', title: 'Quantidade', exclusiveMinimum: 0, maximum: 10000 };
+export const QUOTE_DRAFT_NATURAL_SCHEMA = Object.freeze({
+  type: 'object', additionalProperties: false, required: ['client', 'items'], properties: {
+    client: query('Cliente, como o usuário disse'),
+    items: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'object', additionalProperties: false, required: ['name', 'quantity'], properties: {
+      kind: { type: 'string', title: 'product (produto), service (serviço) ou free (item livre com preço dito)', enum: QUOTE_ITEM_KINDS },
+      name: text('Produto ou serviço como o usuário disse, no singular'), quantity, unit: text('Unidade', 50),
+      unitPrice: money('Preço unitário (R$) somente se o usuário disse o valor'),
+    } } },
+    discount: money('Desconto (R$)'), surcharge: money('Acréscimo (R$)'), notes: text('Observações', 2000, 0), servicePlace: text('Local do serviço', 500, 0),
+  },
+});
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const decimals = (value, places) => Math.abs(value * 10 ** places - Math.round(value * 10 ** places)) < 1e-6;
+const exactKeys = (value, keys) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error('Campo não permitido.'); };
+function quoteText(value, title, max, min = 1) {
+  if (typeof value !== 'string' || value.trim().length < min || value.trim().length > max) throw new Error(`Verifique: ${title}.`);
+  return value.trim();
+}
+function quoteNumber(value, title, { min = 0, max = 999999.99, places = 2, positive = false } = {}) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max || (positive && value <= 0) || !decimals(value, places)) throw new Error(`Valor fora do limite: ${title}.`);
+  return value;
+}
+// Espelha zt_private.assistant_validate_quote; refs só chegam de uma opção escolhida pelo usuário.
+function validateQuoteDraft(input) {
+  exactKeys(input, ['client', 'clientRef', 'items', 'discount', 'surcharge', 'notes', 'servicePlace']);
+  const out = { client: quoteText(input.client, 'Cliente', 120) };
+  if (input.clientRef !== undefined) { if (typeof input.clientRef !== 'string' || !UUID.test(input.clientRef)) throw new Error('Escolha inválida.'); out.clientRef = input.clientRef; }
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 30) throw new Error('Informe de 1 a 30 itens.');
+  out.items = input.items.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Item inválido.');
+    exactKeys(item, ['kind', 'name', 'quantity', 'unit', 'unitPrice', 'ref']);
+    const clean = { name: quoteText(item.name, 'Item', 200), quantity: quoteNumber(item.quantity, 'Quantidade', { max: 10000, places: 3, positive: true }) };
+    if (item.kind !== undefined) { if (!QUOTE_ITEM_KINDS.includes(item.kind)) throw new Error('Tipo de item inválido.'); clean.kind = item.kind; }
+    if (item.unit !== undefined) clean.unit = quoteText(item.unit, 'Unidade', 50);
+    if (item.unitPrice !== undefined) clean.unitPrice = quoteNumber(item.unitPrice, 'Preço unitário (R$)');
+    if (item.ref !== undefined) { if (typeof item.ref !== 'string' || !UUID.test(item.ref)) throw new Error('Escolha inválida.'); clean.ref = item.ref; }
+    return clean;
+  });
+  for (const key of ['discount', 'surcharge']) if (input[key] !== undefined) out[key] = quoteNumber(input[key], key === 'discount' ? 'Desconto' : 'Acréscimo');
+  for (const [key, max] of [['notes', 2000], ['servicePlace', 500]]) {
+    if (input[key] !== undefined) { const value = quoteText(input[key], key === 'notes' ? 'Observações' : 'Local do serviço', max, 0); if (value) out[key] = value; }
+  }
+  return out;
+}
+
 export function validateAssistantInput(action, input, role) {
   const item = findAssistantTool(action);
   if (!item || !item.roles.includes(role)) throw new Error('Ação não permitida para este acesso.');
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Informe os dados da ação.');
+  if (action === 'create_quote_draft' && Object.hasOwn(input, 'items')) return validateQuoteDraft(input);
   const { properties, required } = item.inputSchema;
   for (const key of Object.keys(input)) if (!Object.hasOwn(properties, key)) throw new Error('Campo não permitido.');
   for (const key of required) if (!Object.hasOwn(input, key)) throw new Error(`Informe: ${properties[key].title}.`);

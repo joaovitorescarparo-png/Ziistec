@@ -16,6 +16,7 @@
 - Vercel hospeda Preview/produção.
 - `src/legacy/ZiisTecApp.jsx` e as fontes V2 consolidadas são canônicas; build/verify normais são read-only. Reconstrução + codemods históricos só rodam explicitamente via `npm run materialize:legacy`.
 - Recursos V2 devem ser absorvidos pelo shell principal sem criar dois produtos paralelos.
+- Assistente: o provedor de IA só propõe nomes/quantidades/valores ditos; o banco (`zt_assistant_plan`) resolve cliente, catálogo, IDs e preço, e toda escrita passa por prévia + confirmação (`previewHash`). O provedor só é chamado por `api/_anthropicGateway.js`, atrás de `ENABLE_PAID_AI` + quota.
 
 ## Ambientes
 
@@ -50,6 +51,7 @@
 - `bash scripts/run-sql-rls-ci.sh` reproduz migrations e regressões em Supabase descartável.
 - CodeQL cobre PRs de integração.
 - Migrations de segurança/regra de negócio devem ganhar teste SQL/RLS rollback-safe quando aplicável.
+- Numeração: a branch do Assistente ocupa 0093 e 0094 (provisória). As migrations dos Blocos 3/4 (branch `blocks-3-4-os-history-receipt`, hoje 0093–0098) precisam ser renumeradas antes de integrar.
 - Mudança visual/UX relevante precisa de teste humano no Preview mesmo com CI verde.
 
 ## Dívidas conhecidas que não devem ser misturadas em feature pequena
