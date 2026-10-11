@@ -377,3 +377,34 @@ test('ClientLocationsV2 aplica initialClientId uma vez por valor; voltar para a 
   props.initialClientId = clientB; render(props); render(props);
   assert.notEqual(back().props.onClick, props.onClose, 'um novo cliente pedido abre normalmente');
 });
+
+test('Assistente reabre o mesmo cliente (e outro) com a tela de clientes já montada depois do Voltar da tela', async () => {
+  const rows = [{ id: clientA, name: 'Mauro Silva' }, { id: clientB, name: 'Mauro Souza' }];
+  const a = app('https://app.example/');
+  const open = (id) => { a.assistant().props.onOpenRecord({ id, entityType: 'client', title: 'Cliente' }); return a.lazyNode(a.render(), 'ClientLocationsV2').props; };
+  const render = harness('src/screens/v2/ClientLocationsV2.jsx', {
+    'lucide-react': new Proxy({}, { get: () => 'span' }),
+    '../../lib/clientLocationsV2Api': { buildGoogleMapsUrl: () => '', carregarClientesLocaisV2DB: async () => rows, salvarLocalClienteV2DB: async () => ({}), limparLocalClienteV2DB: async () => ({}) },
+  }, browserGlobals());
+  const onClose = () => {};
+  const back = (p) => nodes(render({ ...p, companyId, onClose })).find(n => n.type === 'button' && n.props['aria-label'] === 'Voltar');
+  const show = (p) => { render({ ...p, companyId, onClose }); render({ ...p, companyId, onClose }); };
+  const data = (p) => JSON.stringify(Object.entries(p).filter(([, v]) => typeof v !== 'function'));
+
+  const first = open(clientA);
+  render({ ...first, companyId, onClose }); await tick(); show(first);
+  assert.notEqual(back(first).props.onClick, onClose, 'cliente A aberto pelo Assistente');
+  back(first).props.onClick(); show(first);
+  assert.equal(back(first).props.onClick, onClose, 'Voltar da tela mostra a lista');
+
+  const again = open(clientA);
+  assert.notEqual(data(again), data(first), 'novo pedido do Assistente precisa chegar à tela como sinal novo');
+  show(again);
+  assert.notEqual(back(again).props.onClick, onClose, 'cliente A reaberto com a tela montada');
+
+  back(again).props.onClick(); show(again);
+  const other = open(clientB);
+  assert.notEqual(data(other), data(again));
+  show(other);
+  assert.notEqual(back(other).props.onClick, onClose, 'cliente B aberto com a tela montada');
+});

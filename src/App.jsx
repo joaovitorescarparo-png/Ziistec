@@ -146,6 +146,7 @@ export default function App() {
   const [quoteSeed, setQuoteSeed] = useState("");
   const [assistantRevision, setAssistantRevision] = useState(0);
   const [assistantWorkOrder, setAssistantWorkOrder] = useState(null);
+  const [assistantOpenSeq, setAssistantOpenSeq] = useState(0);
 
   const navegarV2 = (valor) => {
     setWorkspaceV2(valor || null);
@@ -238,6 +239,7 @@ export default function App() {
     // pushState (não replaceState): o registro aberto ganha uma entrada própria e Voltar retorna à origem.
     window.history.pushState({ [ASSISTANT_RECORD_STATE]: true }, '', `${url.pathname}${url.search}${url.hash}`);
     setWorkspaceV2(target[0]);
+    setAssistantOpenSeq((n) => n + 1);
   };
   const comConexao = (conteudo) => <><EstadoConexao />{conteudo}
     {assistantEnabled && <AssistantPanel key={contexto.chave} companyId={s.empresaId} role={s.membresiaAtual.role}
@@ -286,7 +288,7 @@ export default function App() {
   if (workspaceV2 === "home") return comConexao(<Suspense fallback={<Carregando texto="Abrindo o ZiisTec V2"/>}><WorkspaceV2Home companyName={companyName} owner={owner} onOpen={abrirWorkspaceV2} onClose={() => navegarV2(null)}/></Suspense>);
   if (workspaceV2 === "produtos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo produtos e estoque"/>}><ProductStockV2 {...workspaceProps} initialProductId={new URLSearchParams(window.location.search).get("product")}/></Suspense>);
   if (workspaceV2 === "compras" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo compras"/>}><PurchasesV2 {...workspaceProps}/></Suspense>);
-  if (workspaceV2 === "clientes-locais" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo clientes e locais"/>}><ClientLocationsV2 {...workspaceProps} initialClientId={new URLSearchParams(window.location.search).get("client")}/></Suspense>);
+  if (workspaceV2 === "clientes-locais" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo clientes e locais"/>}><ClientLocationsV2 {...workspaceProps} initialClientId={new URLSearchParams(window.location.search).get("client")} openRequest={assistantOpenSeq}/></Suspense>);
   if (workspaceV2 === "orcamentos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo gestão de orçamentos"/>}><QuotesManagementV2 {...workspaceProps} onNew={() => { setQuoteSeed(""); navegarV2("orcamento-ia"); }}/></Suspense>);
   if (workspaceV2 === "orcamento-ia" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo orçamento com IA"/>}><QuoteAIV2 {...workspaceProps} initialText={quoteSeed} onClose={() => { setQuoteSeed(""); navegarV2("orcamentos"); }}/></Suspense>);
   if (workspaceV2 === "garantias" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo garantias"/>}><ManualWarrantyV2 {...workspaceProps} onQuoteFromWarranty={abrirOrcamentoDaGarantia}/></Suspense>);

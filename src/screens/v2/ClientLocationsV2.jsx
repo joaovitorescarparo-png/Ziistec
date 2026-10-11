@@ -4,7 +4,7 @@ import {buildGoogleMapsUrl,carregarClientesLocaisV2DB,limparLocalClienteV2DB,sal
 
 const coord=(v)=>v==null||v===''?'':String(Number(v));
 
-export default function ClientLocationsV2({companyId,companyName='Sua empresa',onClose,initialClientId=null}){
+export default function ClientLocationsV2({companyId,companyName='Sua empresa',onClose,initialClientId=null,openRequest=0}){
   const [rows,setRows]=useState([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
@@ -36,8 +36,8 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
     setForm({address:client.address||'',mapsUrl:client.maps_url||'',latitude:coord(client.latitude),longitude:coord(client.longitude),googlePlaceId:client.google_place_id||''});
     setError('');
   };
-  // Cliente pedido pela URL é aberto uma vez por valor recebido; voltar para a lista não o reabre.
-  useEffect(()=>{if(!initialClientId||!rows.length||appliedInitialClient.current===initialClientId)return;const c=rows.find(x=>x.id===initialClientId);if(c){appliedInitialClient.current=initialClientId;select(c);}},[initialClientId,rows]);
+  // Cliente pedido pela URL é aberto uma vez por pedido (openRequest muda a cada abertura pelo Assistente); voltar para a lista não o reabre.
+  useEffect(()=>{const key=`${openRequest}:${initialClientId}`;if(!initialClientId||!rows.length||appliedInitialClient.current===key)return;const c=rows.find(x=>x.id===initialClientId);if(c){appliedInitialClient.current=key;select(c);}},[initialClientId,openRequest,rows]);
 
   const currentMap=useMemo(()=>buildGoogleMapsUrl({address:form.address,placeId:form.googlePlaceId,latitude:form.latitude,longitude:form.longitude})||form.mapsUrl||null,[form]);
 
