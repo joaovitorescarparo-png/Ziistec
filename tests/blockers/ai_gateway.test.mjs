@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ANTHROPIC_MESSAGES_URL, DEFAULT_GEMINI_MODEL, GEMINI_API_BASE, externalAiReady, requestAiText, resolveAiProvider } from '../../api/_aiGateway.js';
-import { inferAssistantPlan, PROVIDER_ID_QUESTION, AMOUNT_QUESTION } from '../../api/_assistantPlanner.js';
+import { inferAssistantPlan, sanitizeProposal, PROVIDER_ID_QUESTION, AMOUNT_QUESTION } from '../../api/_assistantPlanner.js';
 import { createAssistantHandler, FREE_INTERPRETATION_DISABLED_MESSAGE } from '../../api/assistant.js';
 
 // Gateway neutro de IA. Nenhum teste fala com a rede: o provedor é sempre um fetch simulado.
@@ -202,6 +202,53 @@ test('IDs, ferramentas arbitrárias e preços inventados pelo provedor não cheg
   assert.deepEqual(h.calls.at(-1).args.p_input, { client: 'Mauro', items: [{ kind: 'product', name: 'câmera', quantity: 2 }, { kind: 'service', name: 'instalação', quantity: 1, unitPrice: 180 }] });
   const amount = e2e({ gemini: { action: 'create_financial_entry', input: { description: 'Serviço', amount: 450, dueDate: '2026-10-11', paid: false } } });
   assert.deepEqual((await amount.run({ operation: 'plan', text: 'Lança uma receita do serviço de hoje' })).body, { question: AMOUNT_QUESTION });
+});
+
+test('valor monetário só com contexto explícito: R$, reais, custa/preço/valor; quantidade, hora, data, OS e telefone nunca autorizam', () => {
+  const kept = (text, value) => 'unitPrice' in sanitizeProposal({ action: 'create_quote_draft', input: { client: 'Mauro', items: [{ name: 'câmera', quantity: 1, unitPrice: value }] } }, { text }).input.items[0];
+  for (const [text, value] of [['R$ 180', 180], ['180 reais', 180], ['por 180 reais', 180], ['por R$ 180', 180], ['custa 180', 180], ['preço 180', 180],
+    ['valor 180', 180], ['a 180 reais', 180], ['R$1.250,50', 1250.5], ['preço unitário de 99,90', 99.9]]) assert.equal(kept(text, value), true, text);
+  for (const [text, value] of [['3 câmeras', 3], ['2 instalações', 2], ['amanhã às 14', 14], ['às 14h', 14], ['dia 12', 12], ['OS 123', 123],
+    ['cliente 25', 25], ['telefone 11 99999-0000', 11], ['telefone 11 99999-0000', 99999], ['por 180', 180], ['desconto de 50', 50]]) assert.equal(kept(text, value), false, text);
+});
+
+test('regressões do sanitizador monetário: só valor dito com contexto de dinheiro chega ao banco', async () => {
+  const camera = (quantity, unitPrice) => ({ kind: 'product', name: 'câmera', quantity, ...(unitPrice === undefined ? {} : { unitPrice }) });
+  const install = { kind: 'service', name: 'instalação', quantity: 1 };
+  const plan = async (text, input, action = 'create_quote_draft') => {
+    const h = e2e({ gemini: { action, input }, rpc: { zt_assistant_plan: preview } });
+    const r = await h.run({ operation: 'plan', text });
+    return { r, h, sent: h.rpcs().includes('zt_assistant_plan') ? h.calls.at(-1).args.p_input : undefined };
+  };
+  // 1. "3 câmeras": quantidade fica, preço 3 inventado sai (catálogo ou pergunta do banco).
+  let out = await plan('Faz um orçamento com 3 câmeras e instalação.', { client: 'Mauro', items: [camera(3, 3), install] });
+  assert.deepEqual(out.sent.items, [camera(3), install]);
+  // 2. "por 180 reais": quantidade 3 e preço 180 ficam.
+  out = await plan('Faz um orçamento com 3 câmeras por 180 reais.', { client: 'Mauro', items: [camera(3, 180)] });
+  assert.deepEqual(out.sent.items, [camera(3, 180)]);
+  // 3. "às 14h": horário não vira preço.
+  out = await plan('Faz um orçamento com 2 câmeras às 14h.', { client: 'Mauro', items: [camera(2, 14)] });
+  assert.deepEqual(out.sent.items, [camera(2)]);
+  // 6 e 7. Receita: "450 reais" vale; "dia 12" não vira valor e o Assistente pergunta.
+  out = await plan('Lança uma receita de 450 reais', { description: 'Receita', amount: 450, dueDate: '2026-10-11', paid: false }, 'create_financial_entry');
+  assert.equal(out.sent.amount, 450);
+  out = await plan('Lança uma receita do dia 12', { description: 'Receita', amount: 12, dueDate: '2026-10-12', paid: false }, 'create_financial_entry');
+  assert.deepEqual(out.r.body, { question: AMOUNT_QUESTION });
+  assert.equal(out.sent, undefined);
+
+  // 4 e 5. Revisão da prévia: valor já informado continua valendo; o número da troca não vira preço.
+  const context = { action: 'create_quote_draft', input: { client: 'Mauro Silva', items: [{ kind: 'product', name: 'Câmera Wi-Fi Intelbras', quantity: 2, unit: 'unidade', unitPrice: 180 }] } };
+  const revise = async (text, input) => {
+    const h = e2e({ gemini: { action: 'create_quote_draft', input }, rpc: { zt_assistant_plan_context: context, zt_assistant_revise: preview } });
+    await h.run({ operation: 'plan', contextRequestId: previousId, text });
+    assert.equal(h.calls.at(-1).name, 'zt_assistant_revise');
+    return h.calls.at(-1).args.p_input;
+  };
+  const item = (quantity, unitPrice) => ({ ...context.input.items[0], quantity, ...(unitPrice === undefined ? {} : { unitPrice }) });
+  const withoutPrice = ({ unitPrice, ...rest }) => rest;
+  assert.equal((await revise('Desconto de 50 reais.', { client: 'Mauro Silva', items: [item(2, 180)], discount: 50 })).discount, 50);
+  assert.deepEqual((await revise('troca para três câmeras', { client: 'Mauro Silva', items: [item(3, 180)] })).items, [item(3, 180)]);
+  assert.deepEqual((await revise('troca para 3 câmeras', { client: 'Mauro Silva', items: [item(3, 3)] })).items, [withoutPrice(item(3))]);
 });
 
 test('isolamento entre empresas continua antes de qualquer custo: sem vínculo ou negado pelo banco, nada é preparado', async () => {

@@ -156,7 +156,7 @@ test('provedor não consegue fornecer IDs nem campos fora do contrato; técnico 
   for (const item of [{ name: 'câmera', quantity: 1, productId: 'abc' }, { name: 'câmera', quantity: 1, unitPrice: 10.005 }]) {
     const h = api({ proposal: { action: 'create_quote_draft', input: { client: 'Mauro', items: [item] } } });
     // O valor aparece no texto (não é inventado), mas fora do contrato: a validação rejeita.
-    assert.equal((await h.run({ operation: 'plan', text: 'Orçamento pro Mauro, câmera a 10,005' })).status, 422);
+    assert.equal((await h.run({ operation: 'plan', text: 'Orçamento pro Mauro, câmera a 10,005 reais' })).status, 422);
     assert.equal(h.rpcs().includes('zt_assistant_plan'), false);
   }
   const tech = api({ role: 'technician', proposal: { action: 'create_quote_draft', input: { client: 'Mauro', items: quoteItems } } });

@@ -123,14 +123,25 @@ const hasForeignId = (value, allowed) => typeof value === 'string' ? UUID_TEXT.t
   : Array.isArray(value) ? value.some(item => hasForeignId(item, allowed))
     : value && typeof value === 'object' ? Object.values(value).some(item => hasForeignId(item, allowed)) : false;
 
-// Valores em reais que o usuário realmente disse: números do texto da conversa e preços já informados
-// na prévia em ajuste. Qualquer outro valor proposto pelo provedor é tratado como inventado.
+// Valores em reais que o usuário realmente disse: só números com contexto monetário explícito
+// ("R$ 180", "180 reais", "custa/preço/valor 180") e valores já informados na prévia em ajuste.
+// Quantidade, data, horário, número de OS, telefone ou qualquer outro número nunca autorizam valor;
+// na dúvida o valor do provedor sai e o banco/Assistente pergunta.
+// Número inteiro, nunca pedaço de outro maior; limites fixos mantêm a busca linear em texto longo.
+const AMOUNT = String.raw`(?<![\d.,])(\d{1,9}(?:[.,]\d{1,3}){0,3})(?![.,]?\d)`;
+const MONEY_MENTIONS = [
+  new RegExp(String.raw`r\$\s*` + AMOUNT, 'g'),
+  new RegExp(AMOUNT + String.raw`\s*(?:reais|real)\b`, 'g'),
+  new RegExp(String.raw`\b(?:custa|custam|custando|preco|valor)(?:\s+(?:unitario|de|do|da|e))*\s+(?:r\$\s*)?` + AMOUNT, 'g'),
+];
 function spokenAmounts(text, context) {
   const cents = new Set();
-  for (const raw of String(text ?? '').match(/\d[\d.,]*/g) || []) {
-    const token = raw.replace(/[.,]+$/, '');
-    for (const value of [Number(token.replace(/\./g, '').replace(',', '.')), Number(token.replace(/,/g, ''))]) {
-      if (Number.isFinite(value)) cents.add(Math.round(value * 100));
+  const folded = foldText(text);
+  for (const pattern of MONEY_MENTIONS) {
+    for (const [, token] of folded.matchAll(pattern)) {
+      for (const value of [Number(token.replace(/\./g, '').replace(',', '.')), Number(token.replace(/,/g, ''))]) {
+        if (Number.isFinite(value)) cents.add(Math.round(value * 100));
+      }
     }
   }
   const previous = context?.input || {};
