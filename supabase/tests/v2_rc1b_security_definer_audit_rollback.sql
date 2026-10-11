@@ -14,7 +14,8 @@ declare v_total int; v_anon int; v_missing_path int; v_private_auth int; v_dynam
 begin
   select count(*) into v_total from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private');
   -- 0092 adds nine definers; replacing the existing quota definer adds zero.
-  if v_total<>125 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=125 actual=%',v_total; end if;
+  -- 0094 adds two public definers (plan context and plan revision); its catalog helpers are invoker.
+  if v_total<>127 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=127 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;
@@ -56,7 +57,13 @@ begin
     ('public.zt_assistant_consume_ai_quota(uuid)',true,true),
     ('zt_private.zt_consume_ai_quota(uuid)',true,false),
     ('zt_private.assistant_validate(text,jsonb)',false,false),
-    ('zt_private.assistant_error_code(text)',false,false)
+    ('zt_private.assistant_error_code(text)',false,false),
+    ('public.zt_assistant_plan_context(uuid,uuid)',true,true),
+    ('public.zt_assistant_revise(uuid,uuid,text,jsonb,uuid)',true,true),
+    ('zt_private.assistant_match(uuid,text,text,uuid)',false,false),
+    ('zt_private.assistant_validate_quote(jsonb)',false,false),
+    ('zt_private.assistant_quote_resolve(uuid,jsonb)',false,false),
+    ('zt_private.assistant_quote_items(uuid,jsonb)',false,false)
   ) as expected(signature,is_definer,authenticated_execute) loop
     v_oid:=to_regprocedure(r.signature);
     if v_oid is null then raise exception 'ASSISTANT_FUNCTION_MISSING: %',r.signature; end if;
