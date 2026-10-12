@@ -103,6 +103,8 @@ Para mudança não trivial, revisar por lentes independentes quando ferramentas/
 
 Cada achado precisa de cenário concreto de falha. Deduplicar e priorizar CRITICAL/HIGH antes de aumentar a lista com estilo/opinião.
 
+Na frente do Assistente, Codex é o único implementador/integrador; agentes Claude atuam somente como revisores/análise (read-only): não fazem commit, merge ou cherry-pick nessa frente.
+
 ## 11. Critério de pronto
 
 Uma mudança só está pronta quando, conforme o risco:

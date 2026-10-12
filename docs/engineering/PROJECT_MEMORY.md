@@ -16,7 +16,7 @@
 - Vercel hospeda Preview/produção.
 - `src/legacy/ZiisTecApp.jsx` e as fontes V2 consolidadas são canônicas; build/verify normais são read-only. Reconstrução + codemods históricos só rodam explicitamente via `npm run materialize:legacy`.
 - Recursos V2 devem ser absorvidos pelo shell principal sem criar dois produtos paralelos.
-- Assistente: o provedor de IA só propõe nomes/quantidades/valores ditos; o banco (`zt_assistant_plan`) resolve cliente, catálogo, IDs e preço, e toda escrita passa por prévia + confirmação (`previewHash`). Provedores de IA só são chamados pelo gateway neutro `api/_aiGateway.js` (Gemini principal; Anthropic opcional), atrás de `ENABLE_EXTERNAL_AI` + `AI_PROVIDER` + chave + quota; frases simples usam fast-path local sem IA.
+- Assistente: o provedor de IA só propõe nomes/quantidades/valores ditos; o banco (`zt_assistant_plan`) resolve cliente, catálogo, IDs e preço, e toda escrita passa por prévia + confirmação (`previewHash`). Provedores de IA só são chamados pelo gateway neutro `api/_aiGateway.js` (Gemini principal; Anthropic opcional), atrás de `ENABLE_EXTERNAL_AI` + `AI_PROVIDER` + chave + quota; frases simples usam fast-path local sem IA. IA nunca é autoridade de banco (IDs, preço, permissões, exclusões). Contexto ativo ("esse orçamento") é só dica do navegador: `zt_assistant_reference` revalida empresa, papel, assinatura e estado e devolve contexto sem IDs nem custo.
 
 ## Ambientes
 
@@ -51,7 +51,7 @@
 - `bash scripts/run-sql-rls-ci.sh` reproduz migrations e regressões em Supabase descartável.
 - CodeQL cobre PRs de integração.
 - Migrations de segurança/regra de negócio devem ganhar teste SQL/RLS rollback-safe quando aplicável.
-- Numeração: a branch do Assistente ocupa 0093 e 0094 (provisória). As migrations dos Blocos 3/4 (branch `blocks-3-4-os-history-receipt`, hoje 0093–0098) precisam ser renumeradas antes de integrar.
+- Numeração: a frente do Assistente ocupa 0093–0095 (0094/0095 provisórias; 0095 = Wave 2). As migrations dos Blocos 3/4 (branch `blocks-3-4-os-history-receipt`, hoje 0093–0098) precisam ser renumeradas para depois da última usada pelo Assistente antes de integrar.
 - Mudança visual/UX relevante precisa de teste humano no Preview mesmo com CI verde.
 
 ## Dívidas conhecidas que não devem ser misturadas em feature pequena
