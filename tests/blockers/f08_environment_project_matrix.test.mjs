@@ -20,6 +20,8 @@ const RC1C_BRANCH = 'rc1c-mobile-ux-stabilization';
 const RC1C_HOST = 'ziistec-git-rc1c-mobile-ux-stabilization-js-connect.vercel.app';
 const ASSISTANT_BRANCH = 'codex/ziistec-assistant-mvp-v1';
 const ASSISTANT_HOST = 'ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app';
+const WAVE2_BRANCH = 'codex/ziistec-assistant-wave2';
+const WAVE2_HOST = 'ziistec-git-codex-ziistec-assistant-wave2-js-connect.vercel.app';
 
 const client = ({ deploymentEnv, host, envUrl = '', envKey = '' }) => resolverConfigSupabase({
   deploymentEnv,
@@ -235,5 +237,23 @@ test('F08 Assistant server: somente a branch exata do Assistant em Preview usa S
   ]) {
     mustFailClosed(server({ vercelEnv: 'preview', branch, url: STAGING_SUPABASE_URL, key: STAGING_KEY }), `preview server desconhecido ${branch} com staging`);
     mustFailClosed(server({ vercelEnv: 'preview', branch }), `preview server desconhecido ${branch} sem env`);
+  }
+});
+
+test('F08 Assistant Wave 2: branch e host exatos usam somente Staging; nomes parecidos falham fechado', () => {
+  assert.equal(STAGING_SUPABASE_HOSTS.filter((host) => host === WAVE2_HOST).length, 1, 'host da Wave 2 exato na allowlist de staging');
+  assert.equal(PROD_SUPABASE_HOSTS.includes(WAVE2_HOST), false, 'host da Wave 2 nunca na allowlist de produção');
+  assert.equal(STAGING_BRANCHES.filter((branch) => branch === WAVE2_BRANCH).length, 1, 'branch da Wave 2 exata na allowlist de staging');
+  assert.equal(STAGING_BRANCHES.some((branch) => branch.includes('*')), false, 'allowlist de branches sem wildcard');
+  mustConfigure(client({ deploymentEnv: 'preview', host: WAVE2_HOST }), STAGING_SUPABASE_URL, 'wave2 client fallback staging');
+  mustFailClosed(client({ deploymentEnv: 'preview', host: WAVE2_HOST, envUrl: PROD_SUPABASE_URL, envKey: PROD_KEY }), 'wave2 client recusa production no preview');
+  mustFailClosed(client({ deploymentEnv: 'production', host: WAVE2_HOST, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), 'wave2 client nunca vira production');
+  mustConfigure(server({ vercelEnv: 'preview', branch: WAVE2_BRANCH }), STAGING_SUPABASE_URL, 'wave2 server fallback staging');
+  mustFailClosed(server({ vercelEnv: 'preview', branch: WAVE2_BRANCH, url: PROD_SUPABASE_URL, key: PROD_KEY }), 'wave2 server recusa production no preview');
+  for (const branch of ['codex/ziistec-assistant-wave3', `${WAVE2_BRANCH}-extra`, 'codex/ziistec-assistant-wave', 'codex-ziistec-assistant-wave2']) {
+    mustFailClosed(server({ vercelEnv: 'preview', branch, url: STAGING_SUPABASE_URL, key: STAGING_KEY }), `preview server desconhecido ${branch}`);
+  }
+  for (const host of ['ziistec-git-codex-ziistec-assistant-wave3-js-connect.vercel.app', `${WAVE2_HOST}.example.com`]) {
+    mustFailClosed(client({ deploymentEnv: 'preview', host, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), `preview client desconhecido ${host}`);
   }
 });
