@@ -68,6 +68,7 @@ begin
     ('public.zt_assistant_reference(uuid,text,uuid)',true,true),
     ('zt_private.assistant_doc_find(uuid,text,text)',false,false),
     ('zt_private.assistant_validate_quote_change(text,jsonb)',false,false),
+    ('zt_private.assistant_quote_version(uuid,uuid)',false,false),
     ('zt_private.assistant_quote_block(uuid,uuid,text)',false,false),
     ('zt_private.assistant_quote_change(uuid,text,jsonb)',false,false),
     ('zt_private.assistant_quote_apply(uuid,text,uuid,uuid,jsonb)',false,false),

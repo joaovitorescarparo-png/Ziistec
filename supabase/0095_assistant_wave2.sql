@@ -89,6 +89,18 @@ begin
   return v_out;
 end $$;
 
+-- Versão do orçamento para a confirmação otimista: fingerprint do estado real (todas as colunas do
+-- cabeçalho, exceto timestamps, e todos os quote_items em ordem determinística). updated_at não serve:
+-- zt_touch grava now(), constante na transação, e mudanças só nos itens não tocam o cabeçalho.
+-- Uso exclusivo do backend: nunca vai ao provedor nem ao contexto da conversa.
+create or replace function zt_private.assistant_quote_version(p_company uuid,p_quote uuid)
+returns text language sql stable security invoker set search_path='' as $$
+  select encode(sha256(convert_to(jsonb_build_object('v',1,
+    'quote',(select to_jsonb(q)-'updated_at'-'created_at' from public.quotes q where q.id=p_quote and q.company_id=p_company),
+    'items',(select coalesce(jsonb_agg(to_jsonb(i) order by i.position,i.id),'[]'::jsonb) from public.quote_items i
+              where i.quote_id=p_quote and i.company_id=p_company))::text,'UTF8')),'hex');
+$$;
+
 -- Motivo para não alterar/arquivar o documento (null = permitido). Duplicar é sempre possível.
 create or replace function zt_private.assistant_quote_block(p_company uuid,p_quote uuid,p_action text)
 returns text language plpgsql stable security invoker set search_path='' as $$
@@ -128,7 +140,7 @@ begin
   select c.name into v_client_name from public.clients c where c.id=q.client_id and c.company_id=p_company;
 
   if p_action='owner_archive_quote' then
-    return jsonb_build_object('resolved',jsonb_build_object('quote',q.number,'quoteId',q.id,'version',q.updated_at::text),
+    return jsonb_build_object('resolved',jsonb_build_object('quote',q.number,'quoteId',q.id,'version',zt_private.assistant_quote_version(p_company,q.id)),
       'preview',jsonb_build_array(jsonb_build_object('label','Orçamento','value',q.number),
         jsonb_build_object('label','Cliente','value',v_client_name),
         jsonb_build_object('label','Situação','value',zt_private.assistant_quote_status(q.status::text)),
@@ -251,7 +263,7 @@ begin
   end if;
   return jsonb_build_object('preview',v_preview,'resolved',jsonb_strip_nulls(jsonb_build_object(
     'quote',q.number,'quoteId',case when p_action='owner_update_quote' then q.id end,
-    'sourceQuoteId',case when p_action='owner_duplicate_quote' then q.id end,'version',q.updated_at::text,
+    'sourceQuoteId',case when p_action='owner_duplicate_quote' then q.id end,'version',zt_private.assistant_quote_version(p_company,q.id),
     'client',v_client_name,'clientId',case when p_action='owner_duplicate_quote' then v_client_id end,'prices',case when p_action='owner_duplicate_quote' then v_prices end,
     'items',v_lines,'discount',v_discount,'surcharge',v_surcharge,'notes',p_input->>'notes','subtotal',v_subtotal,'total',v_total)));
 end $$;
@@ -269,7 +281,8 @@ begin
   if not found or q.deleted_at is not null then raise exception 'Orçamento indisponível' using errcode='42501'; end if;
   v_block:=zt_private.assistant_quote_block(p_company,q.id,p_action);
   if v_block is not null then raise exception '%',v_block using errcode='42501'; end if;
-  if q.updated_at::text is distinct from p_input->>'version' then
+  -- Depois do lock e antes de qualquer escrita: cabeçalho ou itens mudaram desde a prévia = recusa.
+  if zt_private.assistant_quote_version(p_company,q.id) is distinct from p_input->>'version' then
     raise exception 'O orçamento mudou depois da prévia' using errcode='22023';
   end if;
   if p_action='owner_archive_quote' then
@@ -905,6 +918,7 @@ revoke all on function zt_private.assistant_quote_status(text) from public,anon,
 revoke all on function zt_private.assistant_wo_status(text) from public,anon,authenticated;
 revoke all on function zt_private.assistant_doc_find(uuid,text,text) from public,anon,authenticated;
 revoke all on function zt_private.assistant_validate_quote_change(text,jsonb) from public,anon,authenticated;
+revoke all on function zt_private.assistant_quote_version(uuid,uuid) from public,anon,authenticated;
 revoke all on function zt_private.assistant_quote_block(uuid,uuid,text) from public,anon,authenticated;
 revoke all on function zt_private.assistant_quote_change(uuid,text,jsonb) from public,anon,authenticated;
 revoke all on function zt_private.assistant_quote_apply(uuid,text,uuid,uuid,jsonb) from public,anon,authenticated;

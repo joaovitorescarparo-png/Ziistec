@@ -8,7 +8,7 @@ begin;
 create temp table zt_w2 (
   owner_a uuid, tech_a uuid, owner_b uuid, company_a uuid, company_b uuid,
   mauro uuid, ana uuid, bruno uuid, cam uuid, dome uuid, lock_p uuid, svc uuid,
-  q1 uuid, q1_number text, q2 uuid, q2_number text, q3 uuid, q3_number text,
+  q1 uuid, q1_number text, q2 uuid, q2_number text, q3 uuid, q3_number text, q4 uuid, q4_number text,
   wo_sched uuid, wo_open uuid, wo_ana uuid, wo_done uuid, wo_tech uuid, wo_other uuid,
   req uuid, plan jsonb
 ) on commit drop;
@@ -208,6 +208,99 @@ begin
   perform pg_temp.record_result('15_versao_mudou_nao_grava', r ? 'error' and (select discount from public.quotes where id=t.q1)=50, r::text);
 end $$;
 
+-- Concorrência otimista: a versão é o fingerprint do cabeçalho e dos itens, então detecta mudança
+-- na mesma transação e com timestamps iguais. Mudou entre a prévia e a confirmação: nada é gravado.
+do $$
+declare t zt_w2%rowtype; r jsonb; v_req uuid:=gen_random_uuid();
+begin
+  select * into t from zt_w2;
+  r:=pg_temp.run(t.company_a,'create_quote_draft',jsonb_build_object('client','Ana Lima','items',jsonb_build_array(
+    jsonb_build_object('kind','product','name','fechadura','quantity',1),jsonb_build_object('kind','service','name','instalação','quantity',1))));
+  update zt_w2 set q4=(r#>>'{exec,result,id}')::uuid, q4_number=r#>>'{exec,result,number}';
+  r:=public.zt_assistant_plan(t.company_a,'owner_update_quote',jsonb_build_object('quote',r#>>'{exec,result,number}','discount',10),v_req);
+  update zt_w2 set req=v_req, plan=r;
+end $$;
+reset role;
+update public.quote_items set quantity=5 where quote_id=(select q4 from zt_w2) and product_id=(select lock_p from zt_w2);
+set local role authenticated;
+do $$
+declare t zt_w2%rowtype; r jsonb; v_req uuid:=gen_random_uuid();
+begin
+  select * into t from zt_w2;
+  r:=public.zt_assistant_execute(t.company_a,t.req,t.plan->>'previewHash');
+  perform pg_temp.record_result('15b_item_quantidade_mudou_nao_grava', r ? 'error' and (select discount from public.quotes where id=t.q4)=0
+    and exists(select 1 from public.quote_items where quote_id=t.q4 and product_id=t.lock_p and quantity=5), r::text);
+  r:=public.zt_assistant_plan(t.company_a,'owner_update_quote',jsonb_build_object('quote',t.q4_number,'discount',10),v_req);
+  update zt_w2 set req=v_req, plan=r;
+end $$;
+reset role;
+update public.quote_items set unit_price=199 where quote_id=(select q4 from zt_w2) and product_id=(select lock_p from zt_w2);
+set local role authenticated;
+do $$
+declare t zt_w2%rowtype; r jsonb; v_req uuid:=gen_random_uuid();
+begin
+  select * into t from zt_w2;
+  r:=public.zt_assistant_execute(t.company_a,t.req,t.plan->>'previewHash');
+  perform pg_temp.record_result('15c_item_preco_mudou_nao_grava', r ? 'error' and (select discount from public.quotes where id=t.q4)=0
+    and exists(select 1 from public.quote_items where quote_id=t.q4 and product_id=t.lock_p and unit_price=199), r::text);
+  r:=public.zt_assistant_plan(t.company_a,'owner_update_quote',jsonb_build_object('quote',t.q4_number,'discount',10),v_req);
+  update zt_w2 set req=v_req, plan=r;
+end $$;
+reset role;
+delete from public.quote_items where quote_id=(select q4 from zt_w2) and service_id=(select svc from zt_w2);
+set local role authenticated;
+do $$
+declare t zt_w2%rowtype; r jsonb; v_req uuid:=gen_random_uuid();
+begin
+  select * into t from zt_w2;
+  r:=public.zt_assistant_execute(t.company_a,t.req,t.plan->>'previewHash');
+  perform pg_temp.record_result('15d_item_removido_nao_grava', r ? 'error' and (select discount from public.quotes where id=t.q4)=0
+    and (select count(*) from public.quote_items where quote_id=t.q4)=1, r::text);
+  r:=public.zt_assistant_plan(t.company_a,'owner_update_quote',jsonb_build_object('quote',t.q4_number,'discount',10),v_req);
+  update zt_w2 set req=v_req, plan=r;
+end $$;
+reset role;
+insert into public.quote_items(quote_id,company_id,kind,name,unit,quantity,unit_price,unit_cost,position)
+select q4,company_a,'free','Item avulso','unidade',1,10,0,9 from zt_w2;
+set local role authenticated;
+do $$
+declare t zt_w2%rowtype; r jsonb; e jsonb; again jsonb; ctx jsonb; ref jsonb; n integer; v_req uuid:=gen_random_uuid();
+begin
+  select * into t from zt_w2;
+  r:=public.zt_assistant_execute(t.company_a,t.req,t.plan->>'previewHash');
+  perform pg_temp.record_result('15e_item_adicionado_nao_grava', r ? 'error' and (select discount from public.quotes where id=t.q4)=0
+    and (select count(*) from public.quote_items where quote_id=t.q4)=2, r::text);
+  -- Sem mudança entre prévia e confirmação: grava uma vez; a nova tentativa devolve o mesmo resultado.
+  n:=(select count(*) from public.quotes where company_id=t.company_a);
+  r:=public.zt_assistant_plan(t.company_a,'owner_update_quote',jsonb_build_object('quote',t.q4_number,'discount',10),v_req);
+  ctx:=public.zt_assistant_plan_context(t.company_a,v_req);
+  ref:=public.zt_assistant_reference(t.company_a,'quote',t.q4);
+  perform pg_temp.record_result('15g_versao_somente_no_backend', r#>>'{input,version}' ~ '^[0-9a-f]{64}$'
+    and not (ctx->'input') ? 'version' and ctx::text not like '%'||(r#>>'{input,version}')||'%'
+    and ref::text not like '%'||(r#>>'{input,version}')||'%' and ctx::text !~ '[0-9a-f]{8}-[0-9a-f]{4}-', ctx::text);
+  e:=public.zt_assistant_execute(t.company_a,v_req,r->>'previewHash');
+  again:=public.zt_assistant_execute(t.company_a,v_req,r->>'previewHash');
+  perform pg_temp.record_result('15f_sem_mudanca_confirma_uma_vez', e#>>'{result,entityType}'='quote' and e=again
+    and (select discount from public.quotes where id=t.q4)=10 and (select count(*) from public.quotes where company_id=t.company_a)=n
+    and (select count(*) from public.quote_items where quote_id=t.q4)=2, e::text);
+  -- Duplicação: a origem também é conferida pelo fingerprint.
+  v_req:=gen_random_uuid();
+  r:=public.zt_assistant_plan(t.company_a,'owner_duplicate_quote',jsonb_build_object('quote',t.q4_number),v_req);
+  update zt_w2 set req=v_req, plan=r;
+end $$;
+reset role;
+update public.quotes set notes='__W2_SOURCE_EDITED__' where id=(select q4 from zt_w2);
+set local role authenticated;
+do $$
+declare t zt_w2%rowtype; r jsonb; n integer;
+begin
+  select * into t from zt_w2;
+  n:=(select count(*) from public.quotes where company_id=t.company_a);
+  r:=public.zt_assistant_execute(t.company_a,t.req,t.plan->>'previewHash');
+  perform pg_temp.record_result('15h_duplicacao_com_origem_alterada_nao_grava', t.plan->>'confirmationRequired'='true' and r ? 'error'
+    and (select count(*) from public.quotes where company_id=t.company_a)=n, r::text||t.plan::text);
+end $$;
+
 -- Aprovado e com OS: não altera nem arquiva; duplicar continua possível.
 reset role;
 update public.quotes set status='approved' where id=(select q2 from zt_w2);
@@ -358,7 +451,7 @@ declare failures text;
 begin
   select string_agg(name||': '||coalesce(detail,''),E'\n' order by name) into failures from zt_w2_results where not ok;
   if failures is not null then raise exception 'ASSISTANT_0095_FAILED: %',failures; end if;
-  if (select count(*) from zt_w2_results)<>38 then raise exception 'ASSISTANT_0095_INCOMPLETE: % checks',(select count(*) from zt_w2_results); end if;
+  if (select count(*) from zt_w2_results)<>45 then raise exception 'ASSISTANT_0095_INCOMPLETE: % checks',(select count(*) from zt_w2_results); end if;
 end $$;
 select 'ASSISTANT_0095_WAVE2' as test,count(*) as checks,bool_and(ok) as all_ok from zt_w2_results;
 rollback;
