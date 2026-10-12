@@ -8,7 +8,12 @@ const button = 'min-h-11 rounded-xl px-4 py-2 text-sm font-medium focus-visible:
 // Pausas curtas dentro da frase não encerram o ditado; o envio automático só ocorre após este silêncio.
 const VOICE_SILENCE_MS = 1800;
 const FREE_INTERPRETATION_DISABLED = 'FREE_INTERPRETATION_DISABLED';
-const SENSITIVE = ['create_financial_entry', 'finalize_assigned_work_order'];
+const SENSITIVE = ['create_financial_entry', 'finalize_assigned_work_order', 'owner_archive_quote', 'owner_cancel_work_order'];
+// Entidades que viram "referência ativa": o navegador guarda só tipo + id; a API revalida tudo no banco.
+const REFERENCE_TYPES = ['quote', 'work_order', 'client', 'product', 'service'];
+const REFERENCE_FALLBACK = { quote: 'orçamento', work_order: 'OS', client: 'cliente cadastrado', product: 'produto cadastrado', service: 'serviço cadastrado' };
+const referenceOf = (record) => (record?.id && REFERENCE_TYPES.includes(record.entityType)
+  ? { type: record.entityType, id: record.id, label: record.number || record.title || REFERENCE_FALLBACK[record.entityType] } : null);
 const MAX_MESSAGES = 12;
 const fieldClass = 'w-full min-w-0 rounded-xl border border-slate-300 px-3 py-3 text-base';
 const suggestions = {
@@ -47,6 +52,7 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
   const [clarification, setClarification] = useState('');
   const [choices, setChoices] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [activeRef, setActiveRef] = useState(null);
   const conversation = useRef('');
   const lastRequest = useRef('');
   const [busy, setBusy] = useState(false);
@@ -63,7 +69,7 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
   const clearStatus = () => { setError(''); setNotice(''); setErrorKind(''); };
   const reset = () => { epoch.current += 1; abort.current?.abort(); locked.current = false; setBusy(false); requestId.current = null; previewRequest.current = null; setAnswer(null); setError(''); setNotice(''); setUncertain(false); setSensitiveConfirmed(false); };
   const edit = () => { reset(); conversation.current = ''; setClarification(''); setChoices(null); setErrorKind(''); };
-  const restart = () => { edit(); setText(''); setAction(''); setValues({}); setMessages([]); };
+  const restart = () => { edit(); setText(''); setAction(''); setValues({}); setMessages([]); setActiveRef(null); };
   const speech = useSpeechInput({ silenceMs: VOICE_SILENCE_MS,
     onText: ({ text: spoken, finalText, interimText }) => { if (voiceActive.current && (finalText || interimText) && spoken && !locked.current) { requestId.current = null; setText(spoken); } },
     onComplete: spoken => { if (voiceActive.current && open && !locked.current) { voiceActive.current = false; send('plan', spoken); } },
@@ -137,7 +143,7 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
       if (operation === 'plan') {
         const combined = clarification ? `${conversation.current}\nPergunta: ${clarification}\nResposta: ${prompt}` : prompt;
         if (combined.length > 10000) throw new Error('Solicitação longa demais. Inicie uma nova solicitação.');
-        Object.assign(payload, { text: combined, ...(currentWorkOrder ? { currentWorkOrder } : {}) });
+        Object.assign(payload, { text: combined, ...(currentWorkOrder ? { currentWorkOrder } : {}), ...(activeRef ? { activeReference: { type: activeRef.type, id: activeRef.id } } : {}) });
         if (!retry) say('user', prompt);
         lastRequest.current = prompt;
       }
@@ -145,6 +151,8 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
       if (operation === 'choose') { Object.assign(payload, { action: choices.action, input: applyChoice(choices.draft, option) }); say('user', option.label); }
       const result = await requestAssistant(payload, { signal: controller.signal });
       if (epoch.current !== generation) return;
+      // A API não conseguiu revalidar a referência (outra empresa, arquivada, sem acesso): esquecer.
+      if (result.referenceCleared) setActiveRef(null);
       if (typeof result.question === 'string' && result.question.trim()) {
         if (operation === 'execute') throw new Error('Resposta inesperada da API. Nada foi confirmado.');
         if (operation === 'plan') conversation.current = payload.text;
@@ -168,6 +176,10 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
         requestId.current = null;
         if (operation === 'execute') previewRequest.current = null;
         if (result.result?.message) say('assistant', `${result.result.message}${result.result.number ? ` ${result.result.number}` : ''}`);
+        // O registro recém-criado/alterado ou o único encontrado vira o assunto da conversa; arquivado sai.
+        const single = operation === 'execute' ? result.result : (result.result?.items?.length === 1 ? result.result.items[0] : null);
+        if (operation === 'execute' && pending?.action === 'owner_archive_quote') setActiveRef(null);
+        else if (referenceOf(single)) setActiveRef(referenceOf(single));
       }
       if (operation === 'execute' && result.result) await onChanged?.();
     } catch (failure) {
@@ -199,6 +211,7 @@ export default function AssistantPanel({ companyId, role, currentWorkOrder, onOp
       <section ref={panel} role="dialog" aria-modal="true" aria-labelledby="assistant-title" data-ziistec-assistant className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full min-w-0 flex-col rounded-t-3xl bg-white shadow-xl sm:max-w-xl sm:rounded-3xl">
         <header className="flex shrink-0 items-center justify-between gap-3 border-b p-4"><div><h2 id="assistant-title" className="font-semibold">Assistente ZiisTec</h2><p className="text-sm text-slate-600">{speech.listening ? 'Ouvindo… O que você precisa?' : 'O que você precisa? Fale ou digite.'}</p></div><button type="button" disabled={busy} onClick={close} className={button} aria-label="Fechar assistente"><X size={20} /></button></header>
         <div className="min-h-0 overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-4 [overflow-wrap:anywhere]">
+          {activeRef && <p className="flex flex-wrap items-center gap-2 text-sm text-slate-600">Falando sobre: <span className="font-medium text-slate-800">{activeRef.label}</span><button type="button" disabled={busy} onClick={() => setActiveRef(null)} className="min-h-11 rounded-lg px-2 text-teal-800 underline">Esquecer</button></p>}
           {messages.length > 0 && <ol role="log" aria-live="polite" aria-label="Conversa com o assistente" className="space-y-2">{messages.map((message, index) => <li key={index} className={message.from === 'user' ? 'ml-8 rounded-2xl bg-teal-50 p-3 text-right' : 'mr-8 rounded-2xl bg-slate-100 p-3'}><span className="sr-only">{message.from === 'user' ? 'Você: ' : 'Assistente: '}</span>{message.text}</li>)}</ol>}
           {answer && <><h3 className="font-medium">{pending ? 'Prévia aguardando confirmação' : allowed.find(item => item.name === answer.action)?.label || 'Resultado'}</h3><dl className="space-y-2">{(answer.preview || []).map((item, index) => <div key={index}><dt className="text-sm text-slate-500">{item.label}</dt><dd>{String(item.value ?? '')}</dd></div>)}</dl>{answer.result?.message && <p role="status">{answer.result.message}</p>}
             {records.map(record => record.entityType === 'client' && (record.phone || record.whatsapp)

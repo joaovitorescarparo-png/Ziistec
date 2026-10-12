@@ -15,6 +15,8 @@ export const ASSISTANT_TOOLS = Object.freeze([
   tool('owner_find_client', 'Buscar cliente', 'owner', { query: query('Nome do cliente') }, ['query']),
   tool('owner_find_quote', 'Buscar orçamento', 'owner', { query: query('Número do orçamento') }, ['query']),
   tool('owner_find_work_order', 'Buscar OS', 'owner', { query: query('Número da OS') }, ['query']),
+  tool('owner_find_product', 'Buscar produto', 'owner', { query: query('Nome do produto') }, ['query']),
+  tool('owner_find_service', 'Buscar serviço', 'owner', { query: query('Nome do serviço') }, ['query']),
   tool('create_client', 'Cadastre um cliente', 'owner', { name: text('Nome'), phone: text('Telefone', 40, 0), address: text('Endereço', 500, 0) }, ['name'], true),
   tool('create_quote_draft', 'Crie um orçamento', 'owner', {
     client: query('Cliente'), description: text('Serviço', 500), quantity: { type: 'number', title: 'Quantidade', exclusiveMinimum: 0, maximum: 10000 },
@@ -23,6 +25,14 @@ export const ASSISTANT_TOOLS = Object.freeze([
   tool('create_work_order', 'Crie uma OS', 'owner', { client: query('Cliente'), description: text('Serviço', 2000), address: text('Endereço', 500, 0), date: date('Data'), time: { type: 'string', title: 'Horário', format: 'time' } }, ['client', 'description'], true),
   tool('schedule_work_order', 'Agende uma visita', 'owner', { workOrder: query('Número da OS'), client: query('Cliente'), date: date('Data'), time: { type: 'string', title: 'Horário', format: 'time' } }, ['date', 'time'], true),
   tool('create_product', 'Cadastre um produto', 'owner', { name: text('Nome'), unit: text('Unidade', 50), price: money('Preço de venda (R$)') }, ['name', 'price'], true),
+  tool('create_service', 'Cadastre um serviço', 'owner', { name: text('Nome'), unit: text('Unidade', 50), price: money('Preço de venda (R$)') }, ['name', 'price'], true),
+  // Wave 2: documento citado pelo número; o banco revalida empresa, estado e vínculos.
+  tool('owner_update_quote', 'Altere um orçamento', 'owner', { quote: query('Número do orçamento'), discount: money('Desconto (R$)'), surcharge: money('Acréscimo (R$)'), notes: text('Observações', 2000, 0) }, ['quote'], true),
+  tool('owner_duplicate_quote', 'Duplique um orçamento', 'owner', { quote: query('Número do orçamento de origem'), client: query('Outro cliente (opcional)'),
+    prices: { type: 'string', title: 'Valores', enum: ['same', 'current'] }, discount: money('Desconto (R$)'), surcharge: money('Acréscimo (R$)'), notes: text('Observações', 2000, 0) }, ['quote'], true),
+  tool('owner_archive_quote', 'Arquive um orçamento', 'owner', { quote: query('Número do orçamento') }, ['quote'], true),
+  tool('owner_unschedule_work_order', 'Tire uma OS da agenda', 'owner', { workOrder: query('Número da OS'), client: query('Cliente'), date: date('Data agendada') }, [], true),
+  tool('owner_cancel_work_order', 'Cancele uma OS', 'owner', { workOrder: query('Número da OS'), client: query('Cliente'), date: date('Data agendada') }, [], true),
   tool('create_financial_entry', 'Lance uma receita', 'owner', {
     description: text('Descrição', 500), amount: money('Valor (R$)', 0.01, 999999999.99), dueDate: date('Vencimento'),
     paid: { type: 'boolean', title: 'Recebida' }, paidAt: date('Data do recebimento'),
@@ -67,13 +77,27 @@ function quoteNumber(value, title, { min = 0, max = 999999.99, places = 2, posit
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max || (positive && value <= 0) || !decimals(value, places)) throw new Error(`Valor fora do limite: ${title}.`);
   return value;
 }
-// Espelha zt_private.assistant_validate_quote; refs só chegam de uma opção escolhida pelo usuário.
-function validateQuoteDraft(input) {
-  exactKeys(input, ['client', 'clientRef', 'items', 'discount', 'surcharge', 'notes', 'servicePlace']);
-  const out = { client: quoteText(input.client, 'Cliente', 120) };
-  if (input.clientRef !== undefined) { if (typeof input.clientRef !== 'string' || !UUID.test(input.clientRef)) throw new Error('Escolha inválida.'); out.clientRef = input.clientRef; }
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 30) throw new Error('Informe de 1 a 30 itens.');
-  out.items = input.items.map((item) => {
+// Alterar/duplicar orçamento: o provedor recebe a lista final de itens; o banco casa cada item com a
+// linha do documento (mesmo valor) ou resolve no catálogo. Valores só quando ditos pelo usuário.
+const quoteItemsSchema = (title) => ({ type: 'array', minItems: 1, maxItems: 30, title, items: QUOTE_DRAFT_NATURAL_SCHEMA.properties.items.items });
+export const QUOTE_UPDATE_NATURAL_SCHEMA = Object.freeze({
+  type: 'object', additionalProperties: false, required: ['quote'], properties: {
+    quote: query('Número do orçamento (ex.: ORC-0003)'), items: quoteItemsSchema('Lista final completa de itens; omita se os itens não mudam'),
+    discount: money('Desconto (R$)'), surcharge: money('Acréscimo (R$)'), notes: text('Observações', 2000, 0),
+  },
+});
+export const QUOTE_DUPLICATE_NATURAL_SCHEMA = Object.freeze({
+  type: 'object', additionalProperties: false, required: ['quote'], properties: {
+    quote: query('Número do orçamento de origem'), client: query('Outro cliente, só se o usuário disser'),
+    prices: { type: 'string', title: 'same = mesmos valores do documento; current = preço atual do catálogo', enum: ['same', 'current'] },
+    items: quoteItemsSchema('Lista final de itens; omita para copiar todos'), discount: money('Desconto (R$)'), surcharge: money('Acréscimo (R$)'), notes: text('Observações', 2000, 0),
+  },
+});
+export const NATURAL_SCHEMAS = Object.freeze({ create_quote_draft: QUOTE_DRAFT_NATURAL_SCHEMA, owner_update_quote: QUOTE_UPDATE_NATURAL_SCHEMA, owner_duplicate_quote: QUOTE_DUPLICATE_NATURAL_SCHEMA });
+
+function validateQuoteItems(items) {
+  if (!Array.isArray(items) || items.length < 1 || items.length > 30) throw new Error('Informe de 1 a 30 itens.');
+  return items.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Item inválido.');
     exactKeys(item, ['kind', 'name', 'quantity', 'unit', 'unitPrice', 'ref']);
     const clean = { name: quoteText(item.name, 'Item', 200), quantity: quoteNumber(item.quantity, 'Quantidade', { max: 10000, places: 3, positive: true }) };
@@ -83,10 +107,35 @@ function validateQuoteDraft(input) {
     if (item.ref !== undefined) { if (typeof item.ref !== 'string' || !UUID.test(item.ref)) throw new Error('Escolha inválida.'); clean.ref = item.ref; }
     return clean;
   });
+}
+const validateRef = (value) => { if (typeof value !== 'string' || !UUID.test(value)) throw new Error('Escolha inválida.'); return value; };
+
+// Espelha zt_private.assistant_validate_quote; refs só chegam de uma opção escolhida pelo usuário.
+function validateQuoteDraft(input) {
+  exactKeys(input, ['client', 'clientRef', 'items', 'discount', 'surcharge', 'notes', 'servicePlace']);
+  const out = { client: quoteText(input.client, 'Cliente', 120) };
+  if (input.clientRef !== undefined) out.clientRef = validateRef(input.clientRef);
+  out.items = validateQuoteItems(input.items);
   for (const key of ['discount', 'surcharge']) if (input[key] !== undefined) out[key] = quoteNumber(input[key], key === 'discount' ? 'Desconto' : 'Acréscimo');
   for (const [key, max] of [['notes', 2000], ['servicePlace', 500]]) {
     if (input[key] !== undefined) { const value = quoteText(input[key], key === 'notes' ? 'Observações' : 'Local do serviço', max, 0); if (value) out[key] = value; }
   }
+  return out;
+}
+
+// Espelha zt_private.assistant_validate_quote_change.
+function validateQuoteChange(action, input) {
+  const duplicate = action === 'owner_duplicate_quote';
+  exactKeys(input, duplicate ? ['quote', 'client', 'clientRef', 'items', 'prices', 'discount', 'surcharge', 'notes'] : ['quote', 'items', 'discount', 'surcharge', 'notes']);
+  const out = { quote: quoteText(input.quote, 'Orçamento', 120) };
+  if (input.items !== undefined) out.items = validateQuoteItems(input.items);
+  for (const key of ['discount', 'surcharge']) if (input[key] !== undefined) out[key] = quoteNumber(input[key], key === 'discount' ? 'Desconto' : 'Acréscimo');
+  if (input.notes !== undefined) out.notes = quoteText(input.notes, 'Observações', 2000);
+  if (duplicate) {
+    if (input.client !== undefined) out.client = quoteText(input.client, 'Cliente', 120);
+    if (input.clientRef !== undefined) out.clientRef = validateRef(input.clientRef);
+    if (input.prices !== undefined) { if (!['same', 'current'].includes(input.prices)) throw new Error('Opção inválida: Valores.'); out.prices = input.prices; }
+  } else if (!['items', 'discount', 'surcharge', 'notes'].some((key) => key in out)) throw new Error('Diga o que deve mudar no orçamento.');
   return out;
 }
 
@@ -95,6 +144,7 @@ export function validateAssistantInput(action, input, role) {
   if (!item || !item.roles.includes(role)) throw new Error('Ação não permitida para este acesso.');
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Informe os dados da ação.');
   if (action === 'create_quote_draft' && Object.hasOwn(input, 'items')) return validateQuoteDraft(input);
+  if (action === 'owner_update_quote' || action === 'owner_duplicate_quote') return validateQuoteChange(action, input);
   const { properties, required } = item.inputSchema;
   for (const key of Object.keys(input)) if (!Object.hasOwn(properties, key)) throw new Error('Campo não permitido.');
   for (const key of required) if (!Object.hasOwn(input, key)) throw new Error(`Informe: ${properties[key].title}.`);
@@ -117,6 +167,6 @@ export function validateAssistantInput(action, input, role) {
     if (!normalized.paid && (normalized.paidAt || normalized.paymentMethod)) throw new Error('Uma receita pendente não pode ter recebimento informado.');
   }
   if (action === 'create_work_order' && Boolean(normalized.date) !== Boolean(normalized.time)) throw new Error('Informe data e horário juntos para agendar a OS.');
-  if (action === 'schedule_work_order' && Boolean(normalized.workOrder) === Boolean(normalized.client)) throw new Error('Informe o cliente ou o número da OS, somente um deles.');
+  if (['schedule_work_order', 'owner_unschedule_work_order', 'owner_cancel_work_order'].includes(action) && Boolean(normalized.workOrder) === Boolean(normalized.client)) throw new Error('Informe o cliente ou o número da OS, somente um deles.');
   return normalized;
 }
