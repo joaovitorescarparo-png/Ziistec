@@ -85,6 +85,28 @@ export const PROVIDER_ID_QUESTION = 'Não consigo usar identificadores internos.
 export const AMOUNT_QUESTION = 'Qual é o valor? Informe o número em reais.';
 const UUID_TEXT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+// Perguntas monetárias geradas pelo servidor: texto fixo por ação + campo. Só a resposta direta à
+// última delas pode ser um número isolado ("150"); qualquer outro número continua exigindo contexto
+// de dinheiro. A pergunta do banco para item livre do orçamento (0094) segue o mesmo papel.
+const quoted = value => String(value ?? '').replace(/["\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+export function priceQuestion(action, name) {
+  const kind = action === 'create_service' ? 'serviço' : 'produto';
+  return name && quoted(name) ? `Qual é o preço de venda do ${kind} "${quoted(name)}"? Informe o valor em reais.` : `Qual é o preço de venda do ${kind}? Informe o valor em reais.`;
+}
+export function entryAmountQuestion(description) {
+  return description && quoted(description) ? `Qual é o valor da receita "${quoted(description)}"? Informe o valor em reais.` : 'Qual é o valor da receita? Informe o valor em reais.';
+}
+const QUOTE_LIKE = ['create_quote_draft', 'owner_update_quote', 'owner_duplicate_quote'];
+const MONEY_QUESTIONS = [
+  [/^Qual é o preço de venda do (produto|serviço)(?: "([^"]{1,200})")?\? Informe o valor em reais\.$/, m => ({ actions: [m[1] === 'serviço' ? 'create_service' : 'create_product'], field: 'price', name: m[2] })],
+  [/^Qual é o valor da receita(?: "([^"]{1,200})")?\? Informe o valor em reais\.$/, m => ({ actions: ['create_financial_entry'], field: 'amount', name: m[1] })],
+  [/^Qual é o preço de "([^"]{1,200})"\? Itens livres não usam preço do catálogo\.$/, m => ({ actions: QUOTE_LIKE, field: 'item', name: m[1] })],
+  [/^Qual é o valor\? Informe o número em reais\.$/, () => ({ actions: ['create_quote_draft'], field: 'unitPrice' })],
+];
+const moneyQuestionOf = question => { for (const [pattern, map] of MONEY_QUESTIONS) { const m = pattern.exec(question); if (m) return map(m); } return null; };
+// O provedor não pode imitar uma pergunta monetária do servidor para liberar um número isolado.
+const PROVIDER_AMOUNT_QUESTION = 'Qual valor você quer usar? Diga o valor em reais, por exemplo "150 reais".';
+
 function plannerSystem({ role, currentWorkOrder, now }) {
   const tools = toolsForRole(role).map(({ name, label, inputSchema }) => ({ name, label, inputSchema: NATURAL_SCHEMAS[name] || inputSchema }));
   return [
@@ -102,6 +124,7 @@ function plannerSystem({ role, currentWorkOrder, now }) {
     '"Faz outro igual", "refaz" ou "usa os mesmos valores" de um orçamento usa owner_duplicate_quote com quote = número de origem; prices "same" para os mesmos valores e "current" para preço atual do catálogo; client só se for outro cliente; items só se algo mudar. Sem orçamento de origem claro, pergunte "De qual orçamento você quer reutilizar os valores?". Nunca copie valores de memória: o banco carrega o documento.',
     'Excluir, cancelar ou arquivar um orçamento usa owner_archive_quote (arquiva, nunca apaga).',
     'Cadastrar produto usa create_product; cadastrar serviço (instalação, manutenção, visita, mão de obra) usa create_service; preço somente se dito. Buscar produto ou serviço usa owner_find_product ou owner_find_service.',
+    'Sem preço ou valor dito (produto, serviço, receita, item livre), devolva a ação sem esse campo: o sistema pergunta o valor. Não faça você essa pergunta. Se a conversa trouxer "Pergunta:" do sistema pedindo preço ou valor e a "Resposta:" for só um número, use esse número no campo pedido, na mesma ação e com o mesmo nome.',
     'Se pedir "e depois desse?" sem referência anterior, peça a informação novamente; não invente contexto.',
     `Datas em São Paulo, hoje ${saoPauloDate(now)}; amanhã é o próximo dia civil; às duas da tarde é 14:00. Recebido hoje: paid=true e paidAt=hoje; vencimento hoje se não informado.`,
     currentWorkOrder ? `Há uma OS aberta na tela: para "esta OS" use workOrder "${CURRENT_WORK_ORDER_TOKEN}".` : 'Nenhuma OS aberta na tela.',
@@ -143,15 +166,15 @@ const MONEY_MENTIONS = [
   new RegExp(AMOUNT + String.raw`\s*(?:reais|real)\b`, 'g'),
   new RegExp(String.raw`\b(?:custa|custam|custando|preco|valor)(?:\s+(?:unitario|de|do|da|e))*\s+(?:r\$\s*)?` + AMOUNT, 'g'),
 ];
-function spokenAmounts(text, context, reference) {
+// "por 150" só é preço no cadastro de produto/serviço (um único campo de dinheiro), nunca "por 2 horas".
+const PRICE_ONLY_MENTION = new RegExp(String.raw`\bpor\s+(?:r\$\s*)?` + AMOUNT + String.raw`(?!\s*(?:h\b|hr|hora|min|dia|semana|mes|ano|unidade|peca|metro|m\b|x\b|%|vez|parcela))`, 'g');
+const centsOf = token => [Number(token.replace(/\./g, '').replace(',', '.')), Number(token.replace(/,/g, ''))]
+  .filter(Number.isFinite).map(value => Math.round(value * 100));
+function spokenAmounts(text, context, reference, action) {
   const cents = new Set();
   const folded = foldText(text);
-  for (const pattern of MONEY_MENTIONS) {
-    for (const [, token] of folded.matchAll(pattern)) {
-      for (const value of [Number(token.replace(/\./g, '').replace(',', '.')), Number(token.replace(/,/g, ''))]) {
-        if (Number.isFinite(value)) cents.add(Math.round(value * 100));
-      }
-    }
+  for (const pattern of [...MONEY_MENTIONS, ...(action === 'create_product' || action === 'create_service' ? [PRICE_ONLY_MENTION] : [])]) {
+    for (const [, token] of folded.matchAll(pattern)) centsOf(token).forEach(value => cents.add(value));
   }
   for (const previous of [context?.input || {}, reference || {}]) {
     for (const value of [previous.discount, previous.surcharge, previous.amount, previous.price, previous.unitPrice,
@@ -160,6 +183,46 @@ function spokenAmounts(text, context, reference) {
     }
   }
   return cents;
+}
+
+// Resposta direta à ÚLTIMA pergunta monetária do servidor na mesma conversa ("150", "R$ 150",
+// "por 150", "custa 150 reais"). Vale só para a ação e o campo que a pergunta pediu; qualquer outra
+// palavra na resposta ("150 câmeras", "OS 150") desfaz a exceção.
+const BARE_AMOUNT = new RegExp(String.raw`^(?:(?:e|eh|seria|fica|ficou|sao|por|custa|custam|vale|preco|valor|de|o|a)\s+)*(?:r\$\s*)?`
+  + AMOUNT + String.raw`(?:\s*(?:reais|real|contos?))?$`);
+export function clarifiedAmount(text) {
+  const lines = String(text ?? '').split('\n');
+  const answer = lines.at(-1) || '', question = lines.at(-2) || '';
+  if (lines.length < 3 || !answer.startsWith('Resposta: ') || !question.startsWith('Pergunta: ')) return null;
+  const target = moneyQuestionOf(question.slice('Pergunta: '.length).trim());
+  if (!target) return null;
+  const match = BARE_AMOUNT.exec(foldText(answer.slice('Resposta: '.length)).replace(/[!?.;]+$/, '').replace(/\s+/g, ' ').trim());
+  return match ? { ...target, cents: new Set(centsOf(match[1])) } : null;
+}
+const sameName = (a, b) => foldText(quoted(a)) === foldText(quoted(b));
+
+// Campo obrigatório que a linguagem natural não trouxe: pergunta curta em vez de erro.
+const FIELD_QUESTIONS = Object.freeze({
+  create_client: { name: 'Qual é o nome do cliente?' },
+  create_product: { name: 'Qual é o nome do produto?' },
+  create_service: { name: 'Qual é o nome do serviço?' },
+  create_quote_draft: { client: 'Para qual cliente é o orçamento?', items: 'Quais produtos ou serviços entram no orçamento?' },
+  create_work_order: { client: 'Para qual cliente é a OS?', description: 'Qual serviço deve ser feito na OS?' },
+  schedule_work_order: { date: 'Para qual data e horário devo agendar?', time: 'Para qual horário devo agendar?' },
+  create_financial_entry: { description: 'Qual é a descrição da receita?', dueDate: 'Qual é o vencimento da receita? Informe a data.', paid: 'A receita já foi recebida ou ainda está em aberto?' },
+});
+const blank = value => value === undefined || value === null || (typeof value === 'string' && !value.trim()) || (Array.isArray(value) && !value.length);
+export function missingFieldQuestion(action, input = {}) {
+  const tool = findAssistantTool(action);
+  if (!tool) return null;
+  const schema = NATURAL_SCHEMAS[action] || tool.inputSchema;
+  for (const key of schema.required || []) {
+    if (blank(input[key])) return FIELD_QUESTIONS[action]?.[key] || `Para continuar, informe: ${schema.properties?.[key]?.title || key}.`;
+  }
+  if (['schedule_work_order', 'owner_unschedule_work_order', 'owner_cancel_work_order'].includes(action) && blank(input.workOrder) && blank(input.client)) {
+    return 'Qual atendimento? Informe o número da OS ou o nome do cliente.';
+  }
+  return null;
 }
 
 // Normaliza a proposta antes de qualquer RPC: uma ação por vez, ferramenta conhecida, sem IDs nem
@@ -174,7 +237,11 @@ export function sanitizeProposal(plan, { currentWorkOrder, text, context, refere
     }
     if (actions.length === 1) plan = actions[0];
   }
-  if (typeof plan.action !== 'string') return typeof plan.question === 'string' && plan.question.trim() ? { question: plan.question.trim().slice(0, 500) } : null;
+  if (typeof plan.action !== 'string') {
+    if (typeof plan.question !== 'string' || !plan.question.trim()) return null;
+    const question = plan.question.trim().slice(0, 500);
+    return { question: moneyQuestionOf(question) ? PROVIDER_AMOUNT_QUESTION : question };
+  }
   if (!findAssistantTool(plan.action)) return null;
   const input = plan.input && typeof plan.input === 'object' && !Array.isArray(plan.input) ? structuredClone(plan.input) : {};
   if (input.workOrder === CURRENT_WORK_ORDER_TOKEN) {
@@ -182,22 +249,32 @@ export function sanitizeProposal(plan, { currentWorkOrder, text, context, refere
     input.workOrder = currentWorkOrder;
   }
   if (hasForeignId(input, input.workOrder === currentWorkOrder ? currentWorkOrder : undefined)) return { question: PROVIDER_ID_QUESTION };
-  const quoteLike = ['create_quote_draft', 'owner_update_quote', 'owner_duplicate_quote'].includes(plan.action);
+  const quoteLike = QUOTE_LIKE.includes(plan.action);
   if (quoteLike) {
     // Escolhas por referência só vêm de uma opção que o próprio usuário tocou, nunca do provedor.
     delete input.clientRef;
     if (Array.isArray(input.items)) input.items.forEach(item => { if (item && typeof item === 'object') delete item.ref; });
   }
-  const amounts = spokenAmounts(text, context, reference);
-  const spoken = value => typeof value !== 'number' || amounts.has(Math.round(value * 100));
+  const amounts = spokenAmounts(text, context, reference, plan.action);
+  const clarified = clarifiedAmount(text);
+  // Número isolado só como resposta à pergunta monetária do servidor: mesma ação, mesmo campo e,
+  // para produto, serviço ou item livre, o mesmo nome que a pergunta citou.
+  const answered = (value, field, name) => Boolean(clarified) && clarified.actions.includes(plan.action) && clarified.field === field
+    && (clarified.name === undefined || field === 'amount' || sameName(clarified.name, name)) && clarified.cents.has(Math.round(value * 100));
+  const spoken = (value, field, name) => typeof value !== 'number' || amounts.has(Math.round(value * 100)) || answered(value, field, name);
   if (quoteLike) {
     // Preço inventado sai: item de catálogo volta ao preço do banco; item livre faz o banco perguntar o preço.
-    if (Array.isArray(input.items)) input.items.forEach(item => { if (item && typeof item === 'object' && !spoken(item.unitPrice)) delete item.unitPrice; });
+    if (Array.isArray(input.items)) input.items.forEach(item => { if (item && typeof item === 'object' && !spoken(item.unitPrice, 'item', item.name)) delete item.unitPrice; });
     for (const key of ['discount', 'surcharge']) if (!spoken(input[key])) delete input[key];
-    if (!spoken(input.unitPrice)) return { question: AMOUNT_QUESTION };
+    if (!spoken(input.unitPrice, 'unitPrice')) return { question: AMOUNT_QUESTION };
   }
-  if ((['create_product', 'create_service'].includes(plan.action) && !spoken(input.price)) || (plan.action === 'create_financial_entry' && !spoken(input.amount))) {
-    return { question: AMOUNT_QUESTION };
+  // Produto, serviço e receita: sem valor dito (ou com valor inventado) o servidor pergunta o campo exato.
+  const moneyField = { create_product: 'price', create_service: 'price', create_financial_entry: 'amount' }[plan.action];
+  if (moneyField) {
+    if (moneyField === 'price' && blank(input.name)) return { question: FIELD_QUESTIONS[plan.action].name };
+    if (typeof input[moneyField] !== 'number' || !spoken(input[moneyField], moneyField, input.name)) {
+      return { question: moneyField === 'price' ? priceQuestion(plan.action, input.name) : entryAmountQuestion(input.description) };
+    }
   }
   return { action: plan.action, input };
 }

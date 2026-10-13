@@ -6,7 +6,7 @@ import React from 'react';
 import { transformSync } from 'esbuild';
 import * as toolRegistry from '../../src/lib/assistantTools.js';
 import { GEMINI_API_BASE } from '../../api/_aiGateway.js';
-import { AMOUNT_QUESTION, PROVIDER_ID_QUESTION } from '../../api/_assistantPlanner.js';
+import { PROVIDER_ID_QUESTION, priceQuestion } from '../../api/_assistantPlanner.js';
 import { createAssistantHandler, REFERENCE_TYPES } from '../../api/assistant.js';
 
 // Wave 2: contexto ativo + orçamentos + agenda + catálogo. Provedor e banco simulados; a autoridade
@@ -173,7 +173,7 @@ test('catálogo: produto e serviço por linguagem natural, preço só quando dit
     assert.deepEqual(h.last('zt_assistant_plan'), { p_company: companyId, p_action: proposal.action, p_input: proposal.input, p_request_id: requestId });
   }
   const invented = api({ gemini: { action: 'create_service', input: { name: 'Instalação de câmera', price: 180 } } });
-  assert.deepEqual((await invented.run({ operation: 'plan', text: 'cadastre instalação de câmera' })).body, { question: AMOUNT_QUESTION });
+  assert.deepEqual((await invented.run({ operation: 'plan', text: 'cadastre instalação de câmera' })).body, { question: priceQuestion('create_service', 'Instalação de câmera') });
   const find = api({ gemini: { action: 'owner_find_service', input: { query: 'instalação' } }, rpc: { zt_assistant_plan: { confirmationRequired: false, result: { items: [] } } } });
   await find.run({ operation: 'plan', text: 'tem serviço de instalação cadastrado?' });
   assert.equal(find.last('zt_assistant_plan').p_action, 'owner_find_service');

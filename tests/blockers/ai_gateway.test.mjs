@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ANTHROPIC_MESSAGES_URL, DEFAULT_GEMINI_MODEL, GEMINI_API_BASE, externalAiReady, requestAiText, resolveAiProvider } from '../../api/_aiGateway.js';
-import { inferAssistantPlan, sanitizeProposal, PROVIDER_ID_QUESTION, AMOUNT_QUESTION } from '../../api/_assistantPlanner.js';
+import { inferAssistantPlan, sanitizeProposal, PROVIDER_ID_QUESTION, AMOUNT_QUESTION, entryAmountQuestion } from '../../api/_assistantPlanner.js';
 import { createAssistantHandler, FREE_INTERPRETATION_DISABLED_MESSAGE } from '../../api/assistant.js';
 
 // Gateway neutro de IA. Nenhum teste fala com a rede: o provedor é sempre um fetch simulado.
@@ -201,7 +201,7 @@ test('IDs, ferramentas arbitrárias e preços inventados pelo provedor não cheg
   await h.run({ operation: 'plan', text: 'Faz um orçamento pro Mauro com duas câmeras e instalação por 180 reais' });
   assert.deepEqual(h.calls.at(-1).args.p_input, { client: 'Mauro', items: [{ kind: 'product', name: 'câmera', quantity: 2 }, { kind: 'service', name: 'instalação', quantity: 1, unitPrice: 180 }] });
   const amount = e2e({ gemini: { action: 'create_financial_entry', input: { description: 'Serviço', amount: 450, dueDate: '2026-10-11', paid: false } } });
-  assert.deepEqual((await amount.run({ operation: 'plan', text: 'Lança uma receita do serviço de hoje' })).body, { question: AMOUNT_QUESTION });
+  assert.deepEqual((await amount.run({ operation: 'plan', text: 'Lança uma receita do serviço de hoje' })).body, { question: entryAmountQuestion('Serviço') });
 });
 
 test('valor monetário só com contexto explícito: R$, reais, custa/preço/valor; quantidade, hora, data, OS e telefone nunca autorizam', () => {
@@ -233,7 +233,7 @@ test('regressões do sanitizador monetário: só valor dito com contexto de dinh
   out = await plan('Lança uma receita de 450 reais', { description: 'Receita', amount: 450, dueDate: '2026-10-11', paid: false }, 'create_financial_entry');
   assert.equal(out.sent.amount, 450);
   out = await plan('Lança uma receita do dia 12', { description: 'Receita', amount: 12, dueDate: '2026-10-12', paid: false }, 'create_financial_entry');
-  assert.deepEqual(out.r.body, { question: AMOUNT_QUESTION });
+  assert.deepEqual(out.r.body, { question: entryAmountQuestion('Receita') });
   assert.equal(out.sent, undefined);
 
   // 4 e 5. Revisão da prévia: valor já informado continua valendo; o número da troca não vira preço.

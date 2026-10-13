@@ -1,7 +1,7 @@
 import { resolverSupabaseServidor } from './_supabaseServerConfig.js';
 import { externalAiReady } from './_aiGateway.js';
 import { findAssistantTool, validateAssistantInput } from '../src/lib/assistantTools.js';
-import { CLIENT_AMBIGUITY_QUESTION, CURRENT_WORK_ORDER_TOKEN, foldText, inferAssistantPlan, localReadIntent, sanitizeProposal } from './_assistantPlanner.js';
+import { CLIENT_AMBIGUITY_QUESTION, CURRENT_WORK_ORDER_TOKEN, foldText, inferAssistantPlan, localReadIntent, missingFieldQuestion, sanitizeProposal } from './_assistantPlanner.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const anyUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -129,6 +129,11 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
       } else if (body.text !== undefined || body.currentWorkOrder !== undefined) throw new HttpError(400, 'Envie somente os campos da ação.');
       const definition = findAssistantTool(action);
       if (!definition || !definition.roles.includes(role)) throw new HttpError(403, 'Ação não permitida para este acesso.');
+      // Linguagem natural sem um dado que pode ser perguntado: conversa, não faixa de erro.
+      if (body.operation === 'plan' && !local) {
+        const missing = missingFieldQuestion(action, input);
+        if (missing) return reply({ question: missing });
+      }
       let normalized;
       try { normalized = validateAssistantInput(action, input, role); }
       catch (error) { throw new HttpError(422, error.message); }
