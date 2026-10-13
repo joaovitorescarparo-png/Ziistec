@@ -77,7 +77,20 @@ export const ASSISTANT_TOOLS = Object.freeze([
     ['owner_overdue_clients', 'Clientes em atraso'],
     ['owner_operational_report', 'Relatório operacional do mês', { month: month('Mês') }],
   ].map(([name, label, properties = {}, required = []]) => read(name, label, properties, required)),
+  // Universal Owner V1 · escritas que já têm RPC canônica (0097): prévia, confirmação e gravação única.
+  tool('owner_convert_quote_to_work_order', 'Gerar OS do orçamento aprovado', 'owner', { quote: query('Número do orçamento'), date: date('Data do atendimento'),
+    time: { type: 'string', title: 'Horário', format: 'time' } }, ['quote'], true),
+  tool('owner_adjust_stock', 'Ajustar estoque', 'owner', { product: query('Produto'), quantity: { type: 'number', title: 'Quantidade', exclusiveMinimum: 0, maximum: 100000 },
+    direction: { type: 'string', title: 'in = entrada; out = saída', enum: ['in', 'out'] }, notes: text('Observação', 1000, 0) }, ['product', 'quantity', 'direction'], true),
+  tool('owner_create_warranty', 'Registrar garantia manual', 'owner', { client: query('Cliente'), clientRef,
+    kind: { type: 'string', title: 'product = produto; service = serviço', enum: ['product', 'service'] }, description: text('Descrição', 500),
+    startsOn: date('Início (padrão: hoje)'), months: count('Prazo em meses', 120), endsOn: date('Fim'), servicePlace: text('Local', 500, 0), serial: text('Número de série', 200, 0) },
+    ['client', 'kind', 'description'], true),
+  tool('owner_update_post_sale', 'Concluir ou dispensar pós-venda', 'owner', { client: query('Cliente'), clientRef,
+    status: { type: 'string', title: 'done = concluído; dismissed = dispensado', enum: ['done', 'dismissed'] }, date: date('Data prevista'), note: text('Observação', 1000, 0) },
+    ['client', 'status'], true),
 ]);
+export const OWNER_WRITES = Object.freeze(['owner_convert_quote_to_work_order', 'owner_adjust_stock', 'owner_create_warranty', 'owner_update_post_sale']);
 export const toolsForRole = (role) => ASSISTANT_TOOLS.filter((item) => item.roles.includes(role));
 export const findAssistantTool = (name) => ASSISTANT_TOOLS.find((item) => item.name === name);
 
@@ -202,5 +215,11 @@ export function validateAssistantInput(action, input, role) {
   }
   if (action === 'create_work_order' && Boolean(normalized.date) !== Boolean(normalized.time)) throw new Error('Informe data e horário juntos para agendar a OS.');
   if (['schedule_work_order', 'owner_unschedule_work_order', 'owner_cancel_work_order'].includes(action) && Boolean(normalized.workOrder) === Boolean(normalized.client)) throw new Error('Informe o cliente ou o número da OS, somente um deles.');
+  if (OWNER_WRITES.includes(action)) {
+    for (const [key, value] of Object.entries(normalized)) if (value === '') delete normalized[key];
+    if (action === 'owner_convert_quote_to_work_order' && normalized.time && !normalized.date) throw new Error('Informe a data junto com o horário.');
+    if (action === 'owner_create_warranty' && normalized.months === undefined && !normalized.endsOn) throw new Error('Informe o prazo em meses ou a data final da garantia.');
+    if (action === 'owner_adjust_stock' && !decimals(normalized.quantity, 3)) throw new Error('Valor fora do limite: Quantidade.');
+  }
   return normalized;
 }

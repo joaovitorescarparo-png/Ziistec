@@ -11,7 +11,7 @@ export const VOICE_SILENCE_MS = 3500;
 // Pedido longo com pausas cabe no ditado; ao atingir o limite, o que foi dito é concluído, não descartado.
 export const VOICE_MAX_DURATION_MS = 60000;
 const FREE_INTERPRETATION_DISABLED = 'FREE_INTERPRETATION_DISABLED';
-const SENSITIVE = ['create_financial_entry', 'finalize_assigned_work_order', 'owner_archive_quote', 'owner_cancel_work_order'];
+const SENSITIVE = ['create_financial_entry', 'finalize_assigned_work_order', 'owner_adjust_stock', 'owner_archive_quote', 'owner_cancel_work_order'];
 // Entidades que viram "referência ativa": o navegador guarda só tipo + id; a API revalida tudo no banco.
 const REFERENCE_TYPES = ['quote', 'work_order', 'client', 'product', 'service'];
 const REFERENCE_FALLBACK = { quote: 'orçamento', work_order: 'OS', client: 'cliente cadastrado', product: 'produto cadastrado', service: 'serviço cadastrado' };

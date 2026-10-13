@@ -395,3 +395,79 @@ test('painel: histórico mostra os registros reais, mantém o cliente como assun
   assert.equal(findAll(view(), 'button', 'Abrir registro').length, 0, 'linha de relatório não tem botão de abrir');
   assert.match(content(view()), /Faturado/);
 });
+
+// ------------------------------------------------------------------ Fase F · escritas canônicas
+const WRITES = ['owner_convert_quote_to_work_order', 'owner_adjust_stock', 'owner_create_warranty', 'owner_update_post_sale'];
+
+test('escritas novas: só proprietário, sempre com prévia e confirmação, contrato fechado', () => {
+  assert.deepEqual([...toolRegistry.OWNER_WRITES], WRITES);
+  for (const name of WRITES) {
+    const tool = toolRegistry.findAssistantTool(name);
+    assert.deepEqual(tool.roles, ['owner'], name);
+    assert.equal(tool.confirmationRequired, true, name);
+    assert.equal(tool.executor, 'zt_assistant_plan -> zt_assistant_execute', name);
+    assert.equal(tool.inputSchema.additionalProperties, false, name);
+  }
+  const v = (action, input) => toolRegistry.validateAssistantInput(action, input, 'owner');
+  assert.deepEqual(v('owner_adjust_stock', { product: 'Câmera Dome', quantity: 2, direction: 'out', notes: '' }), { product: 'Câmera Dome', quantity: 2, direction: 'out' });
+  assert.throws(() => v('owner_adjust_stock', { product: 'Câmera Dome', quantity: 2, direction: 'sideways' }), /Opção inválida/);
+  assert.throws(() => v('owner_adjust_stock', { product: 'Câmera Dome', quantity: 0, direction: 'in' }), /fora do limite/);
+  assert.throws(() => v('owner_convert_quote_to_work_order', { quote: 'ORC-0003', time: '09:00' }), /data junto com o horário/);
+  assert.throws(() => v('owner_create_warranty', { client: 'Carmelo', kind: 'service', description: 'Instalação' }), /prazo em meses ou a data final/);
+  assert.throws(() => v('owner_update_post_sale', { client: 'Carmelo', status: 'reaberto' }), /Opção inválida/);
+  assert.throws(() => toolRegistry.validateAssistantInput('owner_adjust_stock', { product: 'x', quantity: 1, direction: 'in' }, 'technician'), /não permitida/);
+  assert.match(read('src/components/AssistantPanel.jsx'), /const SENSITIVE = \[[^\]]*'owner_adjust_stock'/);
+});
+
+test('linguagem natural das escritas: prévia sem execução, quantidade nunca vira valor e dado ausente vira pergunta', async () => {
+  for (const [text, proposal] of [
+    ['Gera a OS do ORC-0003 para amanhã às 9', { action: 'owner_convert_quote_to_work_order', input: { quote: 'ORC-0003', date: '2026-10-13', time: '09:00' } }],
+    ['Tira 2 câmeras dome do estoque', { action: 'owner_adjust_stock', input: { product: 'câmera dome', quantity: 2, direction: 'out' } }],
+    ['Registra garantia de 12 meses da instalação no Carmelo', { action: 'owner_create_warranty', input: { client: 'Carmelo', kind: 'service', description: 'Instalação', months: 12 } }],
+    ['Marca o pós-venda do Carmelo como feito', { action: 'owner_update_post_sale', input: { client: 'Carmelo', status: 'done' } }],
+  ]) {
+    const h = api({ gemini: proposal, rpc: { zt_assistant_plan: { ...preview, action: proposal.action } } });
+    const r = await h.run({ operation: 'plan', text });
+    assert.equal(r.body.confirmationRequired, true, text);
+    assert.deepEqual(h.last('zt_assistant_plan').p_input, proposal.input, text);
+    assert.equal(h.rpcs().includes('zt_assistant_execute'), false, text);
+  }
+  for (const [proposal, question] of [
+    [{ action: 'owner_adjust_stock', input: { product: 'câmera dome', quantity: 2 } }, 'É entrada ou saída de estoque?'],
+    [{ action: 'owner_create_warranty', input: { client: 'Carmelo', kind: 'service', description: 'Instalação' } }, 'Qual é o prazo da garantia? Informe em meses ou a data final.'],
+    [{ action: 'owner_update_post_sale', input: { client: 'Carmelo' } }, 'Devo concluir ou dispensar o pós-venda?'],
+  ]) {
+    const h = api({ gemini: proposal, rpc: { zt_assistant_plan: preview } });
+    assert.deepEqual((await h.run({ operation: 'plan', text: 'pedido incompleto' })).body, { question });
+    assert.equal(h.rpcs().includes('zt_assistant_plan'), false);
+  }
+  const tech = api({ role: 'technician', gemini: { action: 'owner_adjust_stock', input: { product: 'câmera dome', quantity: 2, direction: 'out' } } });
+  assert.equal((await tech.run({ operation: 'plan', text: 'tira 2 câmeras do estoque' })).status, 403);
+  assert.equal(tech.rpcs().includes('zt_assistant_plan'), false);
+  const h = api({ gemini: { question: 'x' } });
+  await h.run({ operation: 'plan', text: 'muda o telefone do Carmelo' });
+  assert.match(h.system(), /Editar cadastro de cliente, local, produto, serviço ou contrato, aprovar orçamento, lançar compra, dar baixa em recebimento e vender em campo ainda não são feitos pelo Assistente/);
+  assert.match(h.system(), /quantity é quantidade, nunca valor/);
+});
+
+test('painel: ajuste de estoque exige a confirmação reforçada; OS gerada vira a referência ativa', async () => {
+  const calls = [];
+  const view = panel(async payload => { calls.push(payload);
+    if (payload.operation === 'execute') return calls.filter(c => c.operation === 'execute').length === 1
+      ? { result: { entityType: 'product', id: '70000000-0000-4000-8000-000000000001', message: 'Ação concluída.' } }
+      : { result: { entityType: 'work_order', id: wo41, number: 'OS-0041', message: 'Ação concluída.' } };
+    return calls.length === 1 ? { ...preview, requestId: payload.requestId, action: 'owner_adjust_stock', preview: [{ label: 'Estoque após o ajuste', value: '7 unidade' }] }
+      : { ...preview, requestId: payload.requestId, action: 'owner_convert_quote_to_work_order', preview: [{ label: 'Orçamento', value: 'ORC-0003' }] };
+  });
+  await say(view, 'Tira 3 câmeras dome do estoque');
+  find(view(), 'button', 'Confirmar').props.onClick(); await tick();
+  assert.equal(calls.filter(c => c.operation === 'execute').length, 0, 'sem a marcação reforçada não confirma');
+  find(view(), 'input').props.onChange({ target: { checked: true } });
+  find(view(), 'button', 'Confirmar').props.onClick(); await tick();
+  assert.equal(calls.filter(c => c.operation === 'execute').length, 1);
+  find(view(), 'button', 'Nova solicitação').props.onClick();
+  await say(view, 'Gera a OS do ORC-0003');
+  find(view(), 'button', 'Confirmar').props.onClick(); await tick();
+  assert.equal(calls.filter(c => c.operation === 'execute').length, 2, 'gerar OS usa a confirmação normal');
+  assert.match(content(view()), /Falando sobre: OS-0041/);
+});

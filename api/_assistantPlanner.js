@@ -163,6 +163,8 @@ function plannerSystem({ role, currentWorkOrder, now }) {
     'Agenda da semana usa owner_week_schedule; um dia usa owner_day_schedule (date); OS sem data usa owner_unscheduled_work_orders. Estoque de um produto usa owner_stock_level; estoque baixo usa owner_low_stock; movimentações usam owner_stock_movements. Compras: owner_recent_purchases, owner_purchases_due (a pagar/vencendo), owner_product_purchases (query, month AAAA-MM). Contratos: owner_maintenance_contracts; contratos do mês ou visitas atrasadas usam owner_contracts_due (period month ou overdue). Pós-venda pendente usa owner_post_sale_due; clientes há meses sem atendimento usam owner_inactive_clients (months).',
     'Financeiro: resumo do mês (faturado, recebido, a receber, despesas, resultado de caixa, atraso) usa owner_finance_summary (month AAAA-MM; omita para o mês atual); "quanto tenho a receber" e "quanto o cliente X me deve" usam owner_receivables (client opcional; overdue true para só atrasados); clientes em atraso usam owner_overdue_clients. Relatório do mês (OS concluídas, clientes e serviços mais atendidos) usa owner_operational_report. Nunca calcule, some ou estime valores: o sistema calcula. Não misture faturado, recebido, a receber e resultado.',
     'Com REFERÊNCIA_ATIVA de OS, perguntas sobre o cliente dela (histórico, garantias) usam o cliente que a referência traz; perguntas sobre a própria OS usam owner_work_order_details com o número dela.',
+    'Escritas do proprietário com prévia e confirmação: "gera a OS do ORC-0003" (data e horário opcionais) usa owner_convert_quote_to_work_order, só para orçamento aprovado; aprovar orçamento não é feito pelo Assistente. "Dá entrada de 10 câmeras" ou "tira 2 do estoque" usa owner_adjust_stock (direction in ou out; quantity é quantidade, nunca valor). "Registra garantia de 12 meses..." usa owner_create_warranty (kind product ou service; months ou endsOn). "Marca o pós-venda do cliente como feito/dispensado" usa owner_update_post_sale (status done ou dismissed; date se houver mais de um).',
+    'Editar cadastro de cliente, local, produto, serviço ou contrato, aprovar orçamento, lançar compra, dar baixa em recebimento e vender em campo ainda não são feitos pelo Assistente: responda com uma pergunta curta explicando isso e indicando a tela correspondente.',
     'Agendar visita existente usa schedule_work_order com workOrder (número dito) ou client (nome), exatamente um deles; o banco resolve uma única OS aberta ou pede esclarecimento. Não confunda criar OS com reagendar uma OS existente.',
     'Reagendar ("muda para sexta às duas", "passa para amanhã às 14h") usa schedule_work_order. "Tira da agenda", "desmarca" ou "remove da agenda" usa owner_unschedule_work_order: a OS continua aberta. "Cancela a OS/o serviço" usa owner_cancel_work_order. Nunca troque um pelo outro; se não ficar claro se é desmarcar ou cancelar, pergunte.',
     'Alterar um orçamento existente usa owner_update_quote com quote = número do orçamento e items = lista final completa (mantidos, alterados e novos; o que sair fica de fora). Itens que já estão no orçamento mantêm o valor do documento: não repita unitPrice deles. Orçamento aprovado ou que já virou OS não é alterado: ofereça duplicar.',
@@ -255,6 +257,10 @@ const FIELD_QUESTIONS = Object.freeze({
   create_work_order: { client: 'Para qual cliente é a OS?', description: 'Qual serviço deve ser feito na OS?' },
   schedule_work_order: { date: 'Para qual data e horário devo agendar?', time: 'Para qual horário devo agendar?' },
   create_financial_entry: { description: 'Qual é a descrição da receita?', dueDate: 'Qual é o vencimento da receita? Informe a data.', paid: 'A receita já foi recebida ou ainda está em aberto?' },
+  owner_convert_quote_to_work_order: { quote: 'De qual orçamento aprovado devo gerar a OS? Informe o número.' },
+  owner_adjust_stock: { product: 'Qual produto devo ajustar no estoque?', quantity: 'Qual quantidade?', direction: 'É entrada ou saída de estoque?' },
+  owner_create_warranty: { client: 'Para qual cliente é a garantia?', kind: 'A garantia é de produto ou de serviço?', description: 'Qual é a descrição da garantia?' },
+  owner_update_post_sale: { client: 'De qual cliente é o pós-venda?', status: 'Devo concluir ou dispensar o pós-venda?' },
 });
 const blank = value => value === undefined || value === null || (typeof value === 'string' && !value.trim()) || (Array.isArray(value) && !value.length);
 export function missingFieldQuestion(action, input = {}) {
@@ -267,6 +273,7 @@ export function missingFieldQuestion(action, input = {}) {
   if (['schedule_work_order', 'owner_unschedule_work_order', 'owner_cancel_work_order'].includes(action) && blank(input.workOrder) && blank(input.client)) {
     return 'Qual atendimento? Informe o número da OS ou o nome do cliente.';
   }
+  if (action === 'owner_create_warranty' && blank(input.months) && blank(input.endsOn)) return 'Qual é o prazo da garantia? Informe em meses ou a data final.';
   return null;
 }
 
