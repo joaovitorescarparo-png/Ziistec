@@ -97,6 +97,7 @@ regressions=(
   supabase/tests/v2_assistant_conversation_rollback.sql
   supabase/tests/v2_assistant_catalog_quote_rollback.sql
   supabase/tests/v2_assistant_wave2_rollback.sql
+  supabase/tests/v2_assistant_owner_reads_rollback.sql
 )
 
 for sql in "${regressions[@]}"; do
