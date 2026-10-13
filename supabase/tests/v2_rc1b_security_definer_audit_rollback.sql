@@ -17,6 +17,7 @@ begin
   -- 0094 adds two public definers (plan context and plan revision); its catalog helpers are invoker.
   -- 0095 adds one public definer (active reference revalidation); its quote/agenda helpers are invoker.
   -- 0096 adds one public definer (owner read-only queries); its read helpers are invoker.
+  -- 0097 adds no definer (owner writes reuse plan/execute); its write helpers are invoker.
   if v_total<>129 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=129 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
@@ -81,7 +82,10 @@ begin
     ('zt_private.assistant_wo_card(uuid,uuid,boolean)',false,false),
     ('zt_private.assistant_agenda_card(uuid,uuid)',false,false),
     ('zt_private.assistant_read_validate(text,jsonb)',false,false),
-    ('zt_private.assistant_read_run(uuid,text,jsonb)',false,false)
+    ('zt_private.assistant_read_run(uuid,text,jsonb)',false,false),
+    ('zt_private.assistant_validate_owner_write(text,jsonb)',false,false),
+    ('zt_private.assistant_owner_write_plan(uuid,text,jsonb)',false,false),
+    ('zt_private.assistant_owner_write_apply(uuid,text,jsonb)',false,false)
   ) as expected(signature,is_definer,authenticated_execute) loop
     v_oid:=to_regprocedure(r.signature);
     if v_oid is null then raise exception 'ASSISTANT_FUNCTION_MISSING: %',r.signature; end if;
