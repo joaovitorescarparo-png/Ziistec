@@ -1,7 +1,7 @@
 import { resolverSupabaseServidor } from './_supabaseServerConfig.js';
 import { externalAiReady } from './_aiGateway.js';
 import { findAssistantTool, validateAssistantInput } from '../src/lib/assistantTools.js';
-import { CLIENT_AMBIGUITY_QUESTION, CURRENT_WORK_ORDER_TOKEN, foldText, inferAssistantPlan, localReadIntent, missingFieldQuestion, sanitizeProposal } from './_assistantPlanner.js';
+import { CLIENT_AMBIGUITY_QUESTION, CURRENT_WORK_ORDER_TOKEN, followUpPlan, foldText, inferAssistantPlan, localReadIntent, missingFieldQuestion, referenceFollowUp, sanitizeProposal } from './_assistantPlanner.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const anyUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -89,24 +89,25 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
       };
       // Referência revalidada (empresa, papel, assinatura, existência, estado) e devolvida sem IDs nem custo.
       // Indisponível: é descartada e o navegador é avisado para esquecê-la; o pedido segue sem ela.
-      let referenceCleared = false;
+      let referenceCleared = false, referenceContext;
       const activeReference = async () => {
+        if (referenceContext !== undefined) return referenceContext;
         try {
           const data = await rpc('zt_assistant_reference', { p_company: body.companyId, p_type: reference.type, p_id: reference.id });
-          if (data?.context && typeof data.context === 'object' && !anyUuid.test(JSON.stringify(data.context))) return data.context;
+          if (data?.context && typeof data.context === 'object' && !anyUuid.test(JSON.stringify(data.context))) return (referenceContext = data.context);
         } catch { /* referência indisponível para este usuário/empresa */ }
         referenceCleared = true;
-        return null;
+        return (referenceContext = null);
       };
       const reply = (payload) => res.status(200).json(referenceCleared ? { ...payload, referenceCleared: true } : payload);
       // Interpretação livre: IA externa configurada (fail-closed), contexto mínimo da prévia e da referência, quota e só então o gateway.
       const interpret = async () => {
         if (!externalAiReady(env)) throw new HttpError(503, FREE_INTERPRETATION_DISABLED_MESSAGE, 'FREE_INTERPRETATION_DISABLED');
         const context = body.contextRequestId ? providerContext(await rpc('zt_assistant_plan_context', { p_company: body.companyId, p_request_id: body.contextRequestId }), body.currentWorkOrder) : null;
-        const referenceContext = reference ? await activeReference() : null;
+        const revalidated = reference ? await activeReference() : null;
         await rpc('zt_assistant_consume_ai_quota', { p_company: body.companyId });
-        const proposal = await infer({ text: body.text, role, currentWorkOrder: body.currentWorkOrder, context, reference: referenceContext, env, fetchImpl });
-        return sanitizeProposal(proposal, { currentWorkOrder: body.currentWorkOrder, text: body.text, context, reference: referenceContext });
+        const proposal = await infer({ text: body.text, role, currentWorkOrder: body.currentWorkOrder, context, reference: revalidated, env, fetchImpl });
+        return sanitizeProposal(proposal, { currentWorkOrder: body.currentWorkOrder, text: body.text, context, reference: revalidated });
       };
       if (body.operation === 'execute') {
         if (body.action !== undefined || body.input !== undefined || body.text !== undefined || body.currentWorkOrder !== undefined) throw new HttpError(400, 'Confirme somente o pedido revisado.');
@@ -121,6 +122,14 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
         if (body.currentWorkOrder !== undefined && body.currentWorkOrder !== null && !uuid.test(body.currentWorkOrder)) throw new HttpError(400, 'OS atual inválida.');
         // Fast path local só para consultas triviais; o resto é proposta do provedor.
         let plan = localReadIntent(body.text, role);
+        // Continuação sobre a referência ativa ("puxe o histórico desse cliente", "quem foi o técnico?"):
+        // a referência é revalidada no banco e a consulta sai sem provedor. Inválida: é esquecida e perguntamos.
+        const followUp = !plan && role === 'owner' && reference ? referenceFollowUp(body.text) : null;
+        if (followUp) {
+          const context = await activeReference();
+          plan = followUpPlan(followUp, context, reference) || (context ? null
+            : { question: 'Não consegui usar a referência anterior. Qual cliente ou OS? Informe o nome do cliente ou o número da OS.' });
+        }
         local = Boolean(plan);
         if (!plan) plan = await interpret();
         if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new HttpError(422, 'Não reconheci uma ação. Nada foi executado.');
@@ -141,7 +150,7 @@ export function createAssistantHandler({ env = process.env, fetchImpl = fetch, r
       const revise = Boolean(body.contextRequestId) && !local && definition.confirmationRequired;
       const data = revise
         ? await rpc('zt_assistant_revise', { p_company: body.companyId, p_previous: body.contextRequestId, p_action: action, p_input: normalized, p_request_id: body.requestId })
-        : await rpc('zt_assistant_plan', { p_company: body.companyId, p_action: action, p_input: normalized, p_request_id: body.requestId });
+        : await rpc(definition.executor === 'zt_assistant_read' ? 'zt_assistant_read' : 'zt_assistant_plan', { p_company: body.companyId, p_action: action, p_input: normalized, p_request_id: body.requestId });
       if (typeof data?.question === 'string') return reply(questionOutcome(data));
       // Só a linguagem natural pergunta; a busca manual (preview) mostra a lista que o usuário pediu.
       return reply(body.operation === 'plan' && action === 'owner_find_client' ? clientLookupOutcome(data, normalized.query) : data);

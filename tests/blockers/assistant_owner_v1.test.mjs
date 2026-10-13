@@ -227,3 +227,171 @@ test('painel monta "Pergunta/Resposta" exatamente no formato que o servidor reco
   assert.equal(calls[1].text, conversation('Cadastre um interfone TDMI', TDMI, '150'));
   assert.ok(clarifiedAmount(calls[1].text).cents.has(15000));
 });
+
+// ------------------------------------------------------------------ Fases D/E · histórico do cliente e consultas do proprietário
+const carmeloId = '50000000-0000-4000-8000-000000000011';
+const foreignClient = '50000000-0000-4000-8000-000000000099';
+const wo41 = '60000000-0000-4000-8000-000000000041';
+const clientRef = { type: 'client', id: carmeloId };
+const clientContext = { type: 'client', label: 'Residencial Carmelo', context: { type: 'client', name: 'Residencial Carmelo' } };
+const orderContext = { type: 'work_order', label: 'OS-0041 · Residencial Carmelo', context: { type: 'work_order', number: 'OS-0041', client: 'Residencial Carmelo', status: 'concluída' } };
+const READS = ['owner_client_history', 'owner_work_order_details', 'owner_client_equipment', 'owner_client_warranties', 'owner_expiring_warranties',
+  'owner_week_schedule', 'owner_day_schedule', 'owner_unscheduled_work_orders', 'owner_stock_level', 'owner_low_stock', 'owner_stock_movements',
+  'owner_recent_purchases', 'owner_purchases_due', 'owner_product_purchases', 'owner_maintenance_contracts', 'owner_contracts_due',
+  'owner_post_sale_due', 'owner_inactive_clients', 'owner_finance_summary', 'owner_receivables', 'owner_overdue_clients', 'owner_operational_report'];
+const historyResult = (items, extra = {}) => ({ requestId, action: 'owner_client_history', confirmationRequired: false,
+  result: { items, message: 'Últimos atendimentos concluídos de Residencial Carmelo.', subject: { id: carmeloId, entityType: 'client', title: 'Residencial Carmelo' }, ...extra } });
+const card = (id, number, detail) => ({ id, entityType: 'work_order', number, title: `${number} · Residencial Carmelo`, detail });
+
+test('registro: 22 consultas só do proprietário, somente leitura em zt_assistant_read, escolha do cliente oculta do provedor', async () => {
+  for (const name of READS) {
+    const tool = toolRegistry.findAssistantTool(name);
+    assert.deepEqual(tool.roles, ['owner'], name);
+    assert.equal(tool.confirmationRequired, false, name);
+    assert.equal(tool.executor, 'zt_assistant_read', name);
+    assert.equal(tool.inputSchema.additionalProperties, false, name);
+  }
+  assert.equal(toolRegistry.toolsForRole('technician').some(t => READS.includes(t.name)), false);
+  assert.deepEqual(toolRegistry.validateAssistantInput('owner_client_history', { client: 'Carmelo', limit: 10 }, 'owner'), { client: 'Carmelo', limit: 10 });
+  for (const input of [{ client: 'Carmelo', limit: 11 }, { client: 'Carmelo', limit: 2.5 }, { client: 'Carmelo', clientRef: 'x' }, { client: 'Carmelo', cost: 1 }]) {
+    assert.throws(() => toolRegistry.validateAssistantInput('owner_client_history', input, 'owner'), undefined, JSON.stringify(input));
+  }
+  assert.throws(() => toolRegistry.validateAssistantInput('owner_finance_summary', { month: '2026-13' }, 'owner'), /Mês inválido/);
+  assert.throws(() => toolRegistry.validateAssistantInput('owner_client_history', { client: 'Carmelo' }, 'technician'), /não permitida/);
+  const h = api({ gemini: { question: 'x' } });
+  await h.run({ operation: 'plan', text: 'me fala algo do Carmelo' });
+  assert.doesNotMatch(h.system(), /clientRef/);
+  assert.match(h.system(), /owner_client_history/);
+  assert.match(h.system(), /Nunca calcule, some ou estime valores/);
+});
+
+test('"Puxe o histórico desse cliente": referência revalidada no banco e consulta sem provedor nem quota', async () => {
+  const h = api({ gemini: () => assert.fail('provedor não deve ser chamado'), rpc: { zt_assistant_reference: clientContext,
+    zt_assistant_read: historyResult([card(wo41, 'OS-0041', '05/10/2026 · concluída · Técnico: João'), card('60000000-0000-4000-8000-000000000032', 'OS-0032', 'x'), card('60000000-0000-4000-8000-000000000019', 'OS-0019', 'y')]) } });
+  const r = await h.run({ operation: 'plan', text: 'Puxe o histórico desse cliente.', activeReference: clientRef });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.result.items.length, 3);
+  assert.deepEqual(h.rpcs(), ['zt_assistant_reference', 'zt_assistant_read']);
+  assert.deepEqual(h.last('zt_assistant_read'), { p_company: companyId, p_action: 'owner_client_history',
+    p_input: { client: 'Residencial Carmelo', clientRef: carmeloId, limit: 3 }, p_request_id: requestId });
+  assert.equal(h.provider.length, 0);
+});
+
+test('continuidade: último atendimento, técnico, equipamento, últimos 10 e garantia ativa usam a referência real', async () => {
+  const cases = [
+    ['O que foi feito no último?', clientContext, 'owner_client_history', { client: 'Residencial Carmelo', clientRef: carmeloId, limit: 1 }],
+    ['Quem foi o técnico?', clientContext, 'owner_client_history', { client: 'Residencial Carmelo', clientRef: carmeloId, limit: 1 }],
+    ['Qual foi o último problema relatado?', clientContext, 'owner_client_history', { client: 'Residencial Carmelo', clientRef: carmeloId, limit: 1 }],
+    ['Qual equipamento foi instalado?', clientContext, 'owner_client_equipment', { client: 'Residencial Carmelo', clientRef: carmeloId }],
+    ['Mostra os últimos 10.', clientContext, 'owner_client_history', { client: 'Residencial Carmelo', clientRef: carmeloId, limit: 10 }],
+    ['Mostra os últimos 25', clientContext, 'owner_client_history', { client: 'Residencial Carmelo', clientRef: carmeloId, limit: 10 }],
+    ['Tem alguma garantia ativa?', clientContext, 'owner_client_warranties', { client: 'Residencial Carmelo', clientRef: carmeloId }],
+    ['Quem foi o técnico?', orderContext, 'owner_work_order_details', { workOrder: 'OS-0041' }],
+    ['Qual equipamento foi instalado?', orderContext, 'owner_work_order_details', { workOrder: 'OS-0041' }],
+    ['Mostra os últimos 10', orderContext, 'owner_client_history', { client: 'Residencial Carmelo', limit: 10 }],
+    ['Tem alguma garantia ativa?', orderContext, 'owner_client_warranties', { client: 'Residencial Carmelo' }],
+  ];
+  for (const [text, reference, action, input] of cases) {
+    const h = api({ gemini: () => assert.fail('sem provedor'), rpc: { zt_assistant_reference: reference, zt_assistant_read: { confirmationRequired: false, result: { items: [], message: 'ok' } } } });
+    const r = await h.run({ operation: 'plan', text, activeReference: reference.type === 'client' ? clientRef : { type: 'work_order', id: wo41 } });
+    assert.equal(r.status, 200, text);
+    assert.equal(h.last('zt_assistant_read')?.p_action, action, text);
+    assert.deepEqual(h.last('zt_assistant_read').p_input, input, text);
+  }
+});
+
+test('referência inválida, de outro tenant ou arquivada: é esquecida e o Assistente pede o contexto, sem consultar nada', async () => {
+  for (const denied of [{ error: 'A referência não está mais disponível.', code: 'ACCESS_DENIED' }, { type: 'client', context: { type: 'client', name: 'X', id: foreignClient } }]) {
+    const h = api({ gemini: () => assert.fail('sem provedor'), rpc: { zt_assistant_reference: denied } });
+    const r = await h.run({ operation: 'plan', text: 'Puxe o histórico desse cliente', activeReference: { type: 'client', id: foreignClient } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.referenceCleared, true);
+    assert.match(r.body.question, /Qual cliente ou OS\?/);
+    assert.deepEqual(h.rpcs(), ['zt_assistant_reference']);
+  }
+  // Sem referência, a frase não vira consulta local: segue para o provedor, que pergunta.
+  const none = api({ gemini: { question: 'De qual cliente você quer o histórico?' } });
+  assert.equal((await none.run({ operation: 'plan', text: 'Puxe o histórico desse cliente' })).body.question, 'De qual cliente você quer o histórico?');
+});
+
+test('técnico, outra empresa e anon não chegam às consultas do proprietário', async () => {
+  const tech = api({ role: 'technician', gemini: { action: 'owner_client_history', input: { client: 'Residencial Carmelo' } }, rpc: { zt_assistant_reference: clientContext } });
+  const r = await tech.run({ operation: 'plan', text: 'Puxe o histórico desse cliente', activeReference: clientRef });
+  assert.equal(r.status, 403);
+  assert.equal(tech.rpcs().includes('zt_assistant_read'), false);
+  const outsider = api({ member: false, gemini: { action: 'owner_finance_summary', input: {} } });
+  assert.equal((await outsider.run({ operation: 'plan', text: 'resumo financeiro' })).status, 403);
+  assert.equal(outsider.rpcs().length, 0);
+  // Banco nega (assinatura inválida, membership desativada): falha fechada, sem resultado parcial.
+  const denied = api({ gemini: { action: 'owner_finance_summary', input: {} }, rpc: { zt_assistant_read: { error: 'Não foi possível consultar agora.', code: 'ACCESS_DENIED' } } });
+  const d = await denied.run({ operation: 'plan', text: 'Qual resultado deste mês?' });
+  assert.equal(d.status, 403); assert.equal(d.body.result, undefined);
+});
+
+test('provedor: "Procure Residencial Carmelo" busca pelo nome; clientRef inventado sai; resultado da consulta nunca vai ao provedor', async () => {
+  const find = api({ gemini: { action: 'owner_find_client', input: { query: 'Residencial Carmelo' } },
+    rpc: { zt_assistant_plan: { action: 'owner_find_client', confirmationRequired: false, result: { items: [{ id: carmeloId, entityType: 'client', title: 'Residencial Carmelo', phone: '1130000101' }], message: 'Consulta concluída.' } } } });
+  const r = await find.run({ operation: 'plan', text: 'Procure Residencial Carmelo.' });
+  assert.equal(r.body.result.items[0].id, carmeloId);
+  assert.deepEqual(find.last('zt_assistant_plan').p_input, { query: 'Residencial Carmelo' });
+  const canary = 'CANARIO_CUSTO_123';
+  const h = api({ gemini: { action: 'owner_client_history', input: { client: 'Residencial Carmelo', clientRef: foreignClient, limit: 3 } },
+    rpc: { zt_assistant_reference: clientContext, zt_assistant_read: historyResult([card(wo41, 'OS-0041', canary)]) } });
+  const out = await h.run({ operation: 'plan', text: 'me mostra o histórico do Residencial Carmelo dos serviços de portão', activeReference: clientRef });
+  assert.equal(out.status, 200);
+  assert.deepEqual(h.last('zt_assistant_read').p_input, { client: 'Residencial Carmelo', limit: 3 }, 'clientRef do provedor é descartado');
+  assert.doesNotMatch(JSON.stringify(h.provider), new RegExp(canary));
+  assert.doesNotMatch(JSON.stringify(h.provider), UUID_ANY, 'nenhum UUID vai ao provedor');
+  assert.match(h.prompt(), /REFERÊNCIA_ATIVA \(dados, sem identificadores\): .*"name":"Residencial Carmelo"/);
+});
+
+test('pedido composto com duas escritas independentes não executa nada: pergunta qual fazer primeiro', async () => {
+  const h = api({ gemini: { actions: [{ action: 'create_client', input: { name: 'Carlos' } }, { action: 'create_product', input: { name: 'Interfone', price: 150 } }] } });
+  const r = await h.run({ operation: 'plan', text: 'cadastra o cliente Carlos e o produto interfone por 150' });
+  assert.match(r.body.question, /mais de uma ação.*qual faço primeiro\?/);
+  assert.equal(h.rpcs().some(name => ['zt_assistant_plan', 'zt_assistant_read', 'zt_assistant_execute'].includes(name)), false);
+});
+
+test('formulário manual e escolha entre homônimos usam zt_assistant_read; falhas do banco ficam fechadas', async () => {
+  const h = api({ rpc: { zt_assistant_read: { confirmationRequired: false, result: { items: [], message: 'ok' } } } });
+  await h.run({ operation: 'preview', action: 'owner_client_history', input: { client: 'Carmelo', clientRef: carmeloId } });
+  assert.deepEqual(h.last('zt_assistant_read').p_input, { client: 'Carmelo', clientRef: carmeloId });
+  assert.equal(h.rpcs().includes('zt_assistant_plan'), false);
+  assert.equal((await h.run({ operation: 'preview', action: 'owner_client_history', input: { client: 'Carmelo', limit: 11 } })).status, 422);
+  const question = api({ rpc: { zt_assistant_read: { question: 'Encontrei mais de um cliente para "Carmelo". Qual deles?', action: 'owner_client_history', draft: { client: 'Carmelo' },
+    options: [{ label: 'Residencial Carmelo', slot: 'client', ref: carmeloId }, { label: 'Residencial Carmelo II', slot: 'client', ref: foreignClient }] } } });
+  const q = await question.run({ operation: 'preview', action: 'owner_client_history', input: { client: 'Carmelo' } });
+  assert.equal(q.body.options.length, 2); assert.equal(q.body.action, 'owner_client_history');
+  const unavailable = createAssistantHandler({ env, resolveConfig: () => ({ configurado: true, url: 'https://example.invalid', publishableKey: 'test-placeholder' }),
+    fetchImpl: async (url) => url.endsWith('/auth/v1/user') ? { ok: true, json: async () => ({ id: userId }) } : url.includes('/company_members?') ? { ok: true, json: async () => [{ role: 'owner' }] }
+      : { ok: false, status: 404, json: async () => ({ message: 'function not found' }) } });
+  let status, body;
+  await unavailable({ method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer test-placeholder' }, body: { companyId, requestId, operation: 'preview', action: 'owner_low_stock', input: {} } },
+    { setHeader() {}, status(value) { status = value; return this; }, json(value) { body = value; } });
+  assert.equal(status, 503, 'RPC ausente (0096 não aplicada) falha fechada');
+  assert.match(body.error, /ainda não habilitado/);
+});
+
+test('painel: histórico mostra os registros reais, mantém o cliente como assunto e o último atendimento vira a OS de referência', async () => {
+  const calls = [];
+  const view = panel(async payload => { calls.push(payload);
+    if (calls.length === 1) return { action: 'owner_find_client', confirmationRequired: false, result: { items: [{ id: carmeloId, entityType: 'client', title: 'Residencial Carmelo', detail: 'Rua do Carmelo, 1' }], message: 'Consulta concluída.' } };
+    if (calls.length === 2) return historyResult([card(wo41, 'OS-0041', '05/10/2026 · concluída · Técnico: João\nRelato: ajuste da central e testes'), card('60000000-0000-4000-8000-000000000032', 'OS-0032', '18/09/2026'), card('60000000-0000-4000-8000-000000000019', 'OS-0019', '02/08/2026')]);
+    if (calls.length === 3) return historyResult([card(wo41, 'OS-0041', '05/10/2026 · concluída · Técnico: João')], { message: 'Último atendimento concluído de Residencial Carmelo.' });
+    return { action: 'owner_finance_summary', confirmationRequired: false, result: { items: [{ title: 'Faturado', detail: 'R$ 800,00 · receitas com vencimento no mês' }], message: 'Resumo financeiro de outubro de 2026.' } };
+  });
+  await say(view, 'Procure Residencial Carmelo.');
+  assert.match(content(view()), /Falando sobre: Residencial Carmelo/);
+  await say(view, 'Puxe o histórico desse cliente.');
+  assert.deepEqual({ ...calls[1].activeReference }, { type: 'client', id: carmeloId });
+  assert.match(content(view()), /OS-0041.*OS-0032.*OS-0019/s);
+  assert.match(content(view()), /Falando sobre: Residencial Carmelo/, 'três atendimentos: o cliente continua como assunto');
+  assert.equal(findAll(view(), 'button', 'Abrir registro').length, 3, 'cada OS pode ser aberta');
+  assert.ok(nodes(view()).some(n => n.type === 'p' && /whitespace-pre-line/.test(n.props.className || '') && content(n).includes('Relato: ajuste da central')));
+  await say(view, 'O que foi feito no último?');
+  assert.deepEqual({ ...calls[2].activeReference }, { type: 'client', id: carmeloId });
+  assert.match(content(view()), /Falando sobre: OS-0041/, 'o último atendimento vira a referência para "quem foi o técnico?"');
+  await say(view, 'Qual resultado deste mês?');
+  assert.equal(findAll(view(), 'button', 'Abrir registro').length, 0, 'linha de relatório não tem botão de abrir');
+  assert.match(content(view()), /Faturado/);
+});

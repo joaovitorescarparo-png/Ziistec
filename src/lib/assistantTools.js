@@ -9,6 +9,11 @@ const tool = (name, label, role, properties = {}, required = [], mutation = fals
   idempotencyPolicy: mutation ? 'actor-company-request; persisted preview; atomic once' : 'read-only',
   executor: mutation ? 'zt_assistant_plan -> zt_assistant_execute' : 'zt_assistant_plan',
 });
+const read = (name, label, properties, required) => Object.freeze({ ...tool(name, label, 'owner', properties, required), executor: 'zt_assistant_read' });
+const count = (title, maximum) => ({ type: 'integer', title, minimum: 1, maximum });
+const month = (title) => ({ type: 'string', title, format: 'month' });
+// Escolha feita pelo usuário numa pergunta do banco (opção tocada); nunca preenchida pelo provedor.
+const clientRef = Object.freeze({ type: 'string', title: 'Cliente escolhido', format: 'uuid', hidden: true });
 export const ASSISTANT_TOOLS = Object.freeze([
   tool('owner_today_schedule', 'O que tenho hoje?', 'owner'),
   tool('owner_next_appointment', 'Próximo atendimento', 'owner'),
@@ -46,6 +51,32 @@ export const ASSISTANT_TOOLS = Object.freeze([
   tool('mark_assigned_order_pending', 'Registrar pendência', 'technician', { workOrder: query('Número da OS'), note: text('Pendência', 3000) }, ['workOrder', 'note'], true),
   tool('mark_assigned_order_return', 'Marcar retorno', 'technician', { workOrder: query('Número da OS'), reason: text('Motivo do retorno', 3000) }, ['workOrder', 'reason'], true),
   tool('finalize_assigned_work_order', 'Finalizar esta OS', 'technician', { workOrder: query('Número da OS'), report: text('Relato final', 10000, 0) }, ['workOrder'], true),
+  // Universal Owner V1: consultas do proprietário em public.zt_assistant_read (0096). Somente leitura;
+  // o resultado vai só para a tela, nunca para o provedor de IA.
+  ...[
+    ['owner_client_history', 'Histórico do cliente', { client: query('Cliente'), clientRef, limit: count('Quantos atendimentos (1 a 10)', 10), query: query('Assunto, ex.: portão') }, ['client']],
+    ['owner_work_order_details', 'Detalhes de uma OS', { workOrder: query('Número da OS') }, ['workOrder']],
+    ['owner_client_equipment', 'Equipamentos instalados do cliente', { client: query('Cliente'), clientRef }, ['client']],
+    ['owner_client_warranties', 'Garantias do cliente', { client: query('Cliente'), clientRef, active: { type: 'boolean', title: 'Somente garantias ativas' } }, ['client']],
+    ['owner_expiring_warranties', 'Garantias vencendo', { days: count('Próximos dias', 365) }],
+    ['owner_week_schedule', 'Agenda da semana'],
+    ['owner_day_schedule', 'Agenda de um dia', { date: date('Data') }, ['date']],
+    ['owner_unscheduled_work_orders', 'OS sem agenda'],
+    ['owner_stock_level', 'Estoque de um produto', { query: query('Produto') }, ['query']],
+    ['owner_low_stock', 'Produtos com estoque baixo'],
+    ['owner_stock_movements', 'Movimentações de estoque', { query: query('Produto'), limit: count('Quantas movimentações (1 a 10)', 10) }, ['query']],
+    ['owner_recent_purchases', 'Últimas compras', { limit: count('Quantas compras (1 a 10)', 10) }],
+    ['owner_purchases_due', 'Compras a pagar', { days: count('Próximos dias', 365) }],
+    ['owner_product_purchases', 'Compras de um produto no mês', { query: query('Produto'), month: month('Mês') }, ['query']],
+    ['owner_maintenance_contracts', 'Contratos de manutenção', { client: query('Cliente (opcional)'), clientRef }],
+    ['owner_contracts_due', 'Contratos com visita ou cobrança', { period: { type: 'string', title: 'month = este mês; overdue = visitas atrasadas', enum: ['month', 'overdue'] } }],
+    ['owner_post_sale_due', 'Pós-venda pendente', { days: count('Próximos dias', 365) }],
+    ['owner_inactive_clients', 'Clientes sem atendimento', { months: count('Meses sem atendimento', 36) }],
+    ['owner_finance_summary', 'Resumo financeiro do mês', { month: month('Mês') }],
+    ['owner_receivables', 'Contas a receber', { client: query('Cliente (opcional)'), clientRef, overdue: { type: 'boolean', title: 'Somente em atraso' } }],
+    ['owner_overdue_clients', 'Clientes em atraso'],
+    ['owner_operational_report', 'Relatório operacional do mês', { month: month('Mês') }],
+  ].map(([name, label, properties = {}, required = []]) => read(name, label, properties, required)),
 ]);
 export const toolsForRole = (role) => ASSISTANT_TOOLS.filter((item) => item.roles.includes(role));
 export const findAssistantTool = (name) => ASSISTANT_TOOLS.find((item) => item.name === name);
@@ -151,15 +182,18 @@ export function validateAssistantInput(action, input, role) {
   const normalized = {};
   for (const [key, value] of Object.entries(input)) {
     const rule = properties[key];
-    if (typeof value !== rule.type || (rule.type === 'number' && !Number.isFinite(value))) throw new Error(`Valor inválido: ${rule.title}.`);
+    const jsType = rule.type === 'integer' ? 'number' : rule.type;
+    if (typeof value !== jsType || (jsType === 'number' && !Number.isFinite(value)) || (rule.type === 'integer' && !Number.isInteger(value))) throw new Error(`Valor inválido: ${rule.title}.`);
     const clean = typeof value === 'string' ? value.trim() : value;
     if (rule.type === 'string') {
       if (clean.length < (rule.minLength ?? 0) || clean.length > (rule.maxLength ?? 10000)) throw new Error(`Verifique: ${rule.title}.`);
       if (rule.enum && !rule.enum.includes(clean)) throw new Error(`Opção inválida: ${rule.title}.`);
       if (rule.format === 'date' && (!/^\d{4}-\d{2}-\d{2}$/.test(clean) || !Number.isFinite(Date.parse(`${clean}T12:00:00Z`)) || new Date(`${clean}T12:00:00Z`).toISOString().slice(0, 10) !== clean)) throw new Error('Data inválida.');
       if (rule.format === 'time' && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clean)) throw new Error('Horário inválido.');
+      if (rule.format === 'month' && !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(clean)) throw new Error('Mês inválido.');
+      if (rule.format === 'uuid' && !UUID.test(clean)) throw new Error('Escolha inválida.');
     }
-    if (rule.type === 'number' && (clean < (rule.minimum ?? -Infinity) || clean > (rule.maximum ?? Infinity) || (rule.exclusiveMinimum !== undefined && clean <= rule.exclusiveMinimum))) throw new Error(`Valor fora do limite: ${rule.title}.`);
+    if (jsType === 'number' && (clean < (rule.minimum ?? -Infinity) || clean > (rule.maximum ?? Infinity) || (rule.exclusiveMinimum !== undefined && clean <= rule.exclusiveMinimum))) throw new Error(`Valor fora do limite: ${rule.title}.`);
     normalized[key] = clean;
   }
   if (action === 'create_financial_entry') {

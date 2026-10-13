@@ -74,7 +74,7 @@ export function localReadIntent(text, role) {
     return { action: role === 'owner' ? 'owner_next_appointment' : 'technician_next_appointment', input: {} };
   }
   if (role === 'owner' && /^(quanto tenho (?:para|a) receber (?:esta|nessa|nesta) semana|a receber nesta semana)$/.test(core)) {
-    return { question: 'A consulta de valores a receber nesta semana ainda não está disponível no Assistant.' };
+    return { question: 'A consulta de valores a receber por semana ainda não está disponível no Assistant. Peça "quanto tenho a receber" para ver tudo em aberto por vencimento.' };
   }
   return role === 'owner' ? phoneLookup(value) : null;
 }
@@ -107,8 +107,49 @@ const moneyQuestionOf = question => { for (const [pattern, map] of MONEY_QUESTIO
 // O provedor não pode imitar uma pergunta monetária do servidor para liberar um número isolado.
 const PROVIDER_AMOUNT_QUESTION = 'Qual valor você quer usar? Diga o valor em reais, por exemplo "150 reais".';
 
+// Continuação sobre a referência ativa revalidada ("puxe o histórico desse cliente", "quem foi o
+// técnico?", "mostra os últimos 10"): consulta determinística, sem provedor de IA. O banco ainda
+// revalida o cliente (clientRef só vale dentro da empresa) e a OS pelo número.
+const SMALL_NUMBERS = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10 };
+const LAST = String.raw`(?:ultim[oa]|mais recente)(?: (?:atendimento|servico|visita|os|ordem de servico))?`;
+const FOLLOW_UPS = [
+  [/^(?:(?:me )?(?:puxe|puxa|puxar|mostre|mostra|mostrar|traga|traz|trazer|veja|ver|abra|abre|qual e|qual|quero ver) )?(?:o )?historico(?: completo)?(?: (?:dele|dela|desse cliente|deste cliente|dessa cliente|desse condominio|deste condominio|desse residencial|do cliente))?$/, () => ({ kind: 'history', limit: 3 })],
+  [/^(?:(?:me )?(?:mostra|mostre|lista|liste|traz|traga|veja|ver|quero ver) )?(?:os |as )?ultim[oa]s (\d{1,2}|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)(?: (?:atendimentos|servicos|visitas|os|ordens de servico))?$/, m => ({ kind: 'history', limit: Math.min(10, Number(m[1]) || SMALL_NUMBERS[m[1]] || 3) })],
+  [new RegExp(String.raw`^(?:e )?o que (?:foi feito|foi realizado|fizemos|ele fez|o tecnico fez|aconteceu) (?:no|na) ${LAST}$`), () => ({ kind: 'last' })],
+  [new RegExp(String.raw`^(?:e )?quem (?:foi|era) o tecnico(?: (?:do|da|no|na) ${LAST})?$`), () => ({ kind: 'last' })],
+  [new RegExp(String.raw`^(?:e )?qual (?:foi )?o ultimo problema(?: relatado| reportado)?$`), () => ({ kind: 'last' })],
+  [/^(?:e )?(?:qual|quais) (?:o |os )?equipamentos? (?:foi |foram |esta |estao )?instalad[oa]s?(?: la| ali)?$/, () => ({ kind: 'equipment' })],
+  [/^(?:e )?(?:tem|ha|existe|possui|ele tem|ela tem) (?:alguma |algum )?garantias?(?: ativas?| validas?| vigentes?| em vigor)?$/, () => ({ kind: 'warranties' })],
+];
+export function referenceFollowUp(text) {
+  const value = String(text ?? '');
+  if (value.includes('\n')) return null;
+  const { core } = prepare(value);
+  for (const [pattern, build] of FOLLOW_UPS) { const m = pattern.exec(core); if (m) return build(m); }
+  return null;
+}
+// Plano da continuação conforme o tipo da referência revalidada; outro tipo segue para o provedor.
+export function followUpPlan(intent, context, reference) {
+  if (!intent || !context) return null;
+  if (context.type === 'client' && context.name) {
+    const client = { client: context.name, clientRef: reference.id };
+    if (intent.kind === 'equipment') return { action: 'owner_client_equipment', input: client };
+    if (intent.kind === 'warranties') return { action: 'owner_client_warranties', input: client };
+    return { action: 'owner_client_history', input: { ...client, limit: intent.kind === 'last' ? 1 : intent.limit } };
+  }
+  if (context.type === 'work_order' && context.number) {
+    if (intent.kind === 'history' && context.client) return { action: 'owner_client_history', input: { client: context.client, limit: intent.limit } };
+    if (intent.kind === 'warranties' && context.client) return { action: 'owner_client_warranties', input: { client: context.client } };
+    return { action: 'owner_work_order_details', input: { workOrder: context.number } };
+  }
+  return null;
+}
+
+// Campos escolhidos pelo usuário (clientRef) não aparecem para o provedor.
+const providerSchema = schema => ({ ...schema, properties: Object.fromEntries(Object.entries(schema.properties || {}).filter(([, field]) => !field.hidden)) });
+
 function plannerSystem({ role, currentWorkOrder, now }) {
-  const tools = toolsForRole(role).map(({ name, label, inputSchema }) => ({ name, label, inputSchema: NATURAL_SCHEMAS[name] || inputSchema }));
+  const tools = toolsForRole(role).map(({ name, label, inputSchema }) => ({ name, label, inputSchema: providerSchema(NATURAL_SCHEMAS[name] || inputSchema) }));
   return [
     'Você interpreta pedidos em linguagem natural para o Assistente ZiisTec e propõe UMA ação, sem executá-la.',
     'Retorne somente JSON: {"action":"nome","input":{}} ou {"question":"pergunta curta"}; use {"actions":[{"action":"nome","input":{}}]} somente quando o usuário pedir coisas independentes.',
@@ -117,7 +158,11 @@ function plannerSystem({ role, currentWorkOrder, now }) {
     'Orçamento usa create_quote_draft com items: cada produto ou serviço é um item com o nome no singular e a quantidade dita ("duas câmeras" = name "câmera", quantity 2; "e instalação" = kind service, quantity 1). Use kind product ou service quando estiver claro e omita quando não estiver. unitPrice somente se o usuário disse o valor; sem valor dito o preço vem do catálogo. Item fora do catálogo só como kind free com o preço dito.',
     'Pedido composto coerente vira uma única ação: criar OS com data e horário usa create_work_order com date e time juntos, sem segunda confirmação de agenda; vários itens vão no mesmo orçamento. Pedidos que misturam ações diferentes (por exemplo orçamento e agendamento) voltam como actions ou como pergunta sobre o que fazer primeiro.',
     'Se faltar dado obrigatório ou o pedido for ambíguo, pergunte somente pelo que falta.',
-    'Próximo atendimento usa next_appointment; telefone de cliente usa owner_find_client; valores a receber nesta semana ainda estão indisponíveis: explique isso sem propor ferramenta.',
+    'Próximo atendimento usa next_appointment; telefone de cliente usa owner_find_client; valores a receber de uma semana específica ainda não existem: explique isso sem propor ferramenta.',
+    'Consultas do proprietário são só leitura: o sistema mostra o resultado na tela e você nunca vê os dados. Histórico do cliente usa owner_client_history (client; limit de 1 a 10, padrão 3; query para um assunto, como "portão"). "O que foi feito no último", "quem foi o técnico" e "qual foi o último problema" usam owner_client_history com limit 1, ou owner_work_order_details (workOrder) quando houver uma OS. Equipamentos instalados do cliente usam owner_client_equipment; garantias do cliente usam owner_client_warranties; garantias vencendo usam owner_expiring_warranties.',
+    'Agenda da semana usa owner_week_schedule; um dia usa owner_day_schedule (date); OS sem data usa owner_unscheduled_work_orders. Estoque de um produto usa owner_stock_level; estoque baixo usa owner_low_stock; movimentações usam owner_stock_movements. Compras: owner_recent_purchases, owner_purchases_due (a pagar/vencendo), owner_product_purchases (query, month AAAA-MM). Contratos: owner_maintenance_contracts; contratos do mês ou visitas atrasadas usam owner_contracts_due (period month ou overdue). Pós-venda pendente usa owner_post_sale_due; clientes há meses sem atendimento usam owner_inactive_clients (months).',
+    'Financeiro: resumo do mês (faturado, recebido, a receber, despesas, resultado de caixa, atraso) usa owner_finance_summary (month AAAA-MM; omita para o mês atual); "quanto tenho a receber" e "quanto o cliente X me deve" usam owner_receivables (client opcional; overdue true para só atrasados); clientes em atraso usam owner_overdue_clients. Relatório do mês (OS concluídas, clientes e serviços mais atendidos) usa owner_operational_report. Nunca calcule, some ou estime valores: o sistema calcula. Não misture faturado, recebido, a receber e resultado.',
+    'Com REFERÊNCIA_ATIVA de OS, perguntas sobre o cliente dela (histórico, garantias) usam o cliente que a referência traz; perguntas sobre a própria OS usam owner_work_order_details com o número dela.',
     'Agendar visita existente usa schedule_work_order com workOrder (número dito) ou client (nome), exatamente um deles; o banco resolve uma única OS aberta ou pede esclarecimento. Não confunda criar OS com reagendar uma OS existente.',
     'Reagendar ("muda para sexta às duas", "passa para amanhã às 14h") usa schedule_work_order. "Tira da agenda", "desmarca" ou "remove da agenda" usa owner_unschedule_work_order: a OS continua aberta. "Cancela a OS/o serviço" usa owner_cancel_work_order. Nunca troque um pelo outro; se não ficar claro se é desmarcar ou cancelar, pergunte.',
     'Alterar um orçamento existente usa owner_update_quote com quote = número do orçamento e items = lista final completa (mantidos, alterados e novos; o que sair fica de fora). Itens que já estão no orçamento mantêm o valor do documento: não repita unitPrice deles. Orçamento aprovado ou que já virou OS não é alterado: ofereça duplicar.',
@@ -244,6 +289,8 @@ export function sanitizeProposal(plan, { currentWorkOrder, text, context, refere
   }
   if (!findAssistantTool(plan.action)) return null;
   const input = plan.input && typeof plan.input === 'object' && !Array.isArray(plan.input) ? structuredClone(plan.input) : {};
+  // Escolhas do usuário (clientRef) nunca vêm do provedor.
+  for (const [key, field] of Object.entries(findAssistantTool(plan.action).inputSchema.properties)) if (field.hidden) delete input[key];
   if (input.workOrder === CURRENT_WORK_ORDER_TOKEN) {
     if (!currentWorkOrder) return { question: 'Qual OS? Informe o número.' };
     input.workOrder = currentWorkOrder;
