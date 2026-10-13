@@ -74,7 +74,7 @@ select loc,company_a,carmelo,'Portaria','portaria','Rua do Carmelo, 1' from zt_w
 insert into public.products(id,company_id,name,brand,model,unit,cost,price,active,track_stock,stock_qty,low_stock_threshold)
 select cam,company_a,'Câmera Wi-Fi Intelbras','Intelbras','IM5','unidade',120,250,true,true,2,5 from zt_w3
 union all select dome,company_a,'Câmera Dome Hikvision','Hikvision','DS2','unidade',140,300,true,true,10,3 from zt_w3
-union all select intf,company_a,'Interfone TDMI','HDL','TDMI','unidade',70,150,true,false,0,null from zt_w3;
+union all select intf,company_a,'Interfone TDMI','HDL','TDMI','unidade',70,150,true,false,0,0 from zt_w3;
 insert into public.services(id,company_id,name,unit,price,cost,active)
 select svc_portao,company_a,'Manutenção do portão','serviço',200,60,true from zt_w3
 union all select svc_intf,company_a,'Troca de interfone','serviço',180,50,true from zt_w3;
