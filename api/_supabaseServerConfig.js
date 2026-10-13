@@ -11,6 +11,7 @@ const STAGING_BRANCHES = Object.freeze([
   'rc1c-mobile-ux-stabilization',
   'codex/ziistec-assistant-mvp-v1',
   'codex/ziistec-assistant-wave2',
+  'claude/assistant-universal-owner-v1',
 ]);
 
 const clean = (value) => String(value || '').trim();
