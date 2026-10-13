@@ -102,7 +102,7 @@ reset role;
 select set_config('request.jwt.claim.sub',(select owner_a::text from zt_w3),true);
 
 do $$
-declare t zt_w3%rowtype; d date:=(now() at time zone 'America/Sao_Paulo')::date;
+declare t zt_w3%rowtype; d date:=(now() at time zone 'America/Sao_Paulo')::date; v_intf_item uuid;
 begin
   select * into t from zt_w3;
   update public.work_orders set scheduled_date=d-60,scheduled_time='09:00',status='scheduled' where id=t.wo1;
@@ -118,8 +118,12 @@ begin
   insert into public.work_order_reports(work_order_id,company_id,entry_type,body,author_id)
   values (t.wo4,t.company_a,'report','Ajuste da central e testes do portão',t.tech_a),
          (t.wo1,t.company_a,'report','Fechadura digital instalada na entrada',t.tech_a);
-  insert into public.installed_equipment(company_id,client_id,client_location_id,work_order_id,product_id,name,brand,model,serial_number,installed_at,registration_key,created_by)
-  values (t.company_a,t.carmelo,t.loc,t.wo2,t.intf,'Interfone TDMI','HDL','TDMI','SN-W3-1',now()-interval '30 days','w3-intf-1',t.owner_a);
+  -- Equipamento instalado tem exatamente uma origem (0083): o item de produto da própria OS.
+  insert into public.work_order_items(work_order_id,company_id,kind,product_id,name,unit,quantity,unit_price,unit_cost)
+  values (t.wo2,t.company_a,'product',t.intf,'Interfone TDMI','unidade',1,150,70)
+  returning id into v_intf_item;
+  insert into public.installed_equipment(company_id,client_id,client_location_id,work_order_id,product_id,name,brand,model,serial_number,installed_at,registration_key,source_item_id,created_by)
+  values (t.company_a,t.carmelo,t.loc,t.wo2,t.intf,'Interfone TDMI','HDL','TDMI','SN-W3-1',now()-interval '30 days','w3-intf-1',v_intf_item,t.owner_a);
   insert into public.warranties(company_id,client_id,work_order_id,kind,service_id,description,starts_on,ends_on,source)
   values (t.company_a,t.carmelo,t.wo2,'service',t.svc_intf,'Garantia da troca de interfone',d-30,d+300,'manual'),
          (t.company_a,t.carmelo,t.wo1,'service',null,'Garantia da fechadura',d-60,d-10,'manual'),
