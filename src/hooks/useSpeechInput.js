@@ -7,8 +7,10 @@ const getSpeechCtor=()=>{
 };
 const currentUserAgent=()=>typeof navigator==='undefined'?'':navigator.userAgent;
 
-// Limite de reinícios quando o motor encerra sozinho numa pausa curta (Android ignora `continuous`).
-const MAX_ENGINE_RESTARTS=3;
+// Limite de reinícios quando o motor encerra sozinho numa pausa (Android ignora `continuous` e
+// encerra a cada frase). Um ditado com várias pausas reinicia várias vezes; a duração máxima do
+// ditado continua limitando a sessão inteira.
+const MAX_ENGINE_RESTARTS=8;
 const comparable=(value)=>String(value||'').toLowerCase().replace(/[.,!?;:]+/g,' ').replace(/\s+/g,' ').trim();
 
 // Junta um trecho final sem duplicar: o Chrome reenvia finais já entregues e, no Android,
@@ -22,6 +24,18 @@ function mergeSpeechText(current,next){
   if(b===a||b.startsWith(`${a} `)) return right;
   if(a.endsWith(` ${b}`)) return left;
   return `${left} ${right}`;
+}
+
+// Junta o texto anterior a um reinício com a nova sessão: além das repetições inteiras, remove a
+// sobreposição de palavras no ponto do corte ("… com dois" + "dois interfones").
+function joinAfterRestart(base,session){
+  const merged=mergeSpeechText(base,session);
+  if(!base||!session||merged!==`${String(base).trim()} ${String(session).trim()}`) return merged;
+  const left=comparable(base).split(' '),rightWords=String(session).trim().split(/\s+/),right=comparable(session).split(' ');
+  for(let k=Math.min(4,left.length,right.length-1);k>=1;k-=1){
+    if(left.slice(-k).join(' ')===right.slice(0,k).join(' ')&&rightWords.length===right.length) return `${String(base).trim()} ${rightWords.slice(k).join(' ')}`;
+  }
+  return merged;
 }
 
 export default function useSpeechInput({language='pt-BR',onText,onComplete,continuous,maxDurationMs=30000,processingTimeoutMs=5000,silenceMs=0}={}){
@@ -120,7 +134,8 @@ export default function useSpeechInput({language='pt-BR',onText,onComplete,conti
       sessionRef.current=mergeSpeechText(sessionRef.current,sessionText);
       interimRef.current=interimText.trim();
       const previous=finalRef.current;
-      finalRef.current=[baseRef.current,sessionRef.current].filter(Boolean).join(' ').trim();
+      // Depois de um reinício, a nova sessão pode repetir o que já foi reconhecido: junta sem duplicar.
+      finalRef.current=joinAfterRestart(baseRef.current,sessionRef.current);
       const added=finalRef.current===previous?'':finalRef.current.startsWith(previous)?finalRef.current.slice(previous.length):'';
       emit(added,interimText);
       if(graceMode&&!stoppingRef.current&&(sessionText||interimRef.current)){

@@ -249,7 +249,9 @@ test('interpretação livre desligada aparece como aviso neutro, mantém o texto
 test('ditado do Assistant usa janela de silêncio e não força sessão curta do motor', () => {
   const render = panel(async () => ({}));
   const options = render.speechOptions();
-  assert.ok(options.silenceMs >= 1000 && options.silenceMs <= 3000, String(options.silenceMs));
+  // Wave 2.1: pausas naturais de 2–3 s não podem encerrar o pedido; o envio vem após ~3,5 s de silêncio.
+  assert.ok(options.silenceMs >= 3000 && options.silenceMs <= 4000, String(options.silenceMs));
+  assert.equal(options.maxDurationMs, 60000);
   assert.equal('continuous' in options, false);
   assert.equal(typeof options.onComplete, 'function');
 });

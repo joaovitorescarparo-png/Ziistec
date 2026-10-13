@@ -11,7 +11,7 @@ const source = fs.readFileSync(new URL('../../src/hooks/useSpeechInput.js', impo
 
 function mount(options = {}, { ua = 'Chrome Linux', supported = true } = {}) {
   const slots = [], effects = [], timers = new Map(), recognitions = [];
-  let cursor = 0, dirty = false, result, nextTimer = 0;
+  let cursor = 0, dirty = false, result, nextTimer = 0, clock = 0;
   const changed = (before, after) => !before || !after || before.length !== after.length || after.some((value, i) => !Object.is(value, before[i]));
   const hooks = {
     useRef(value) { const i = cursor++; return slots[i] ??= { current: value }; },
@@ -58,7 +58,7 @@ function mount(options = {}, { ua = 'Chrome Linux', supported = true } = {}) {
   }
   const context = vm.createContext({ ...hooks, ...speech,
     window: supported ? { SpeechRecognition: Recognition } : {}, navigator: { userAgent: ua },
-    setTimeout(fn, ms) { const id = ++nextTimer; timers.set(id, { fn, ms }); return id; },
+    setTimeout(fn, ms) { const id = ++nextTimer; timers.set(id, { fn, ms, due: clock + ms }); return id; },
     clearTimeout(id) { timers.delete(id); },
   });
   const useSpeechInput = vm.runInContext(`${source}\nuseSpeechInput`, context);
@@ -76,6 +76,16 @@ function mount(options = {}, { ua = 'Chrome Linux', supported = true } = {}) {
     get current() { return result; }, recognitions, timers,
     act(fn) { const value = fn(); render(); return value; },
     timer(ms) { const entry = [...timers].find(([, timer]) => timer.ms === ms); assert.ok(entry, `timer ${ms} exists`); timers.delete(entry[0]); this.act(entry[1].fn); },
+    // Relógio virtual: dispara, em ordem, só os timers que vencem dentro do intervalo.
+    advance(ms) {
+      const target = clock + ms;
+      for (;;) {
+        const next = [...timers].filter(([, t]) => t.due <= target).sort((a, b) => a[1].due - b[1].due)[0];
+        if (!next) break;
+        clock = next[1].due; timers.delete(next[0]); this.act(next[1].fn);
+      }
+      clock = target;
+    },
     unmount() { slots.forEach(slot => slot.cleanup?.()); },
   };
 }
@@ -330,13 +340,14 @@ test('reinícios do motor são limitados e a sessão conclui com todas as partes
   const completed = [];
   const host = mount({ silenceMs: 1800, onComplete: text => completed.push(text) }, { ua: ANDROID });
   host.act(() => host.current.start());
-  for (let i = 0; i < 4; i += 1) {
+  // Oito reinícios cobrem um pedido com várias pausas; o nono encerramento conclui o que foi dito.
+  for (let i = 0; i < 9; i += 1) {
     const rec = host.recognitions[i];
     host.act(() => rec.result(`parte ${i}`));
     host.act(() => rec.end());
   }
-  assert.equal(host.recognitions.length, 4);
-  assert.deepEqual(completed, ['parte 0 parte 1 parte 2 parte 3']);
+  assert.equal(host.recognitions.length, 9);
+  assert.deepEqual(completed, [Array.from({ length: 9 }, (_, i) => `parte ${i}`).join(' ')]);
 });
 
 test('silêncio sem fala após frase reconhecida conclui; iOS mantém sessão única sem reinício', () => {
@@ -361,4 +372,151 @@ test('silêncio sem fala após frase reconhecida conclui; iOS mantém sessão ú
     assert.equal(ios.recognitions.length, 1, ua);
     assert.deepEqual(done, ['Qual meu próximo atendimento'], ua);
   }
+});
+
+// Wave 2.1 · voz natural: valores reais do painel do Assistente, com relógio virtual.
+const panelSource = fs.readFileSync(new URL('../../src/components/AssistantPanel.jsx', import.meta.url), 'utf8');
+const SILENCE = Number(panelSource.match(/export const VOICE_SILENCE_MS = (\d+);/)?.[1]);
+const MAX_DICTATION = Number(panelSource.match(/export const VOICE_MAX_DURATION_MS = (\d+);/)?.[1]);
+const voice = (completed, ua = ANDROID) => mount({ silenceMs: SILENCE, maxDurationMs: MAX_DICTATION, onComplete: text => completed.push(text) }, { ua });
+
+test('painel usa janela de silêncio de ~3,5 s e ditado de até 60 s, ligados ao hook', () => {
+  assert.equal(SILENCE, 3500);
+  assert.equal(MAX_DICTATION, 60000);
+  assert.match(panelSource, /useSpeechInput\(\{ silenceMs: VOICE_SILENCE_MS, maxDurationMs: VOICE_MAX_DURATION_MS,/);
+});
+
+test('pausa de ~2,5 s no meio do pedido não envia: "Faz um orçamento para o Mauro…" + "…com dois interfones e instalação" vira um pedido', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const first = host.recognitions[0];
+  host.act(() => first.result('Faz um orçamento para o Mauro'));
+  host.advance(1000);
+  // Android encerra o motor na pausa; a janela de silêncio continua aberta e o ditado é retomado.
+  host.act(() => first.end());
+  assert.equal(host.recognitions.length, 2);
+  host.advance(1500);
+  assert.deepEqual(completed, [], '2,5 s de pausa não envia');
+  assert.equal(host.current.listening, true);
+  const second = host.recognitions[1];
+  host.act(() => second.result('com dois interfones', false));
+  host.act(() => second.result('com dois interfones e instalação'));
+  host.advance(SILENCE - 1);
+  assert.equal(second.stops, 0, 'fala recente mantém a janela aberta');
+  host.advance(1);
+  assert.equal(second.stops, 1);
+  host.act(() => second.end());
+  host.act(() => second.end());
+  assert.deepEqual(completed, ['Faz um orçamento para o Mauro com dois interfones e instalação']);
+});
+
+test('silêncio maior que o limite envia uma única vez; hipótese recente adia o envio', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const rec = host.recognitions[0];
+  host.act(() => rec.result('Qual meu próximo atendimento'));
+  host.advance(3000);
+  host.act(() => rec.result('amanhã', false));
+  host.advance(3000);
+  assert.equal(rec.stops, 0, 'hipótese nova reinicia a janela');
+  host.advance(500);
+  assert.equal(rec.stops, 1);
+  host.act(() => rec.end());
+  host.advance(10000);
+  assert.deepEqual(completed, ['Qual meu próximo atendimento amanhã']);
+});
+
+test('botão Parar envia imediatamente, sem esperar a janela de silêncio', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const rec = host.recognitions[0];
+  host.act(() => rec.result('Minhas OS de hoje'));
+  assert.equal(host.act(() => host.current.stop()), true);
+  assert.equal(rec.stops, 1);
+  assert.equal([...host.timers.values()].some(t => t.ms === SILENCE), false, 'janela cancelada');
+  host.act(() => rec.end());
+  assert.deepEqual(completed, ['Minhas OS de hoje']);
+});
+
+test('Android: reinício no meio da palavra, eco da frase inteira e reentrega cumulativa não duplicam texto', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const first = host.recognitions[0];
+  host.act(() => first.result('Faz um orçamento para o Mauro'));
+  host.act(() => first.result('com dois', false));
+  // O motor encerra no meio da fala: a hipótese "com dois" é guardada antes do reinício.
+  host.act(() => first.end());
+  const second = host.recognitions[1];
+  // A nova sessão ouve de novo a última palavra cortada: "dois" não pode aparecer duas vezes.
+  host.act(() => second.results([['dois interfones', true]]));
+  host.act(() => second.results([['dois interfones', true]]));
+  host.act(() => second.end());
+  const third = host.recognitions[2];
+  // Algumas versões ecoam a frase inteira no primeiro resultado da sessão nova.
+  host.act(() => third.results([['Faz um orçamento para o Mauro com dois interfones', true]]));
+  host.act(() => third.results([['Faz um orçamento para o Mauro com dois interfones', true], ['e instalação', true]]));
+  host.advance(SILENCE);
+  host.act(() => third.end());
+  assert.deepEqual(completed, ['Faz um orçamento para o Mauro com dois interfones e instalação']);
+});
+
+test('palavras repetidas de propósito dentro da mesma sessão continuam no texto', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const rec = host.recognitions[0];
+  host.act(() => rec.results([['duas câmeras e duas', true], ['fechaduras', true]]));
+  host.advance(SILENCE);
+  host.act(() => rec.end());
+  assert.deepEqual(completed, ['duas câmeras e duas fechaduras']);
+});
+
+test('cancelamento durante a pausa não envia nem retoma o motor', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const rec = host.recognitions[0];
+  host.act(() => rec.result('Cancela a OS do Mauro'));
+  host.advance(2000);
+  host.act(() => host.current.cancel());
+  host.act(() => { rec.result('tardio'); rec.end(); });
+  host.advance(SILENCE * 2);
+  assert.deepEqual(completed, []);
+  assert.equal(host.recognitions.length, 1);
+  assert.equal(host.timers.size, 0);
+});
+
+test('transcrição final conclui uma vez mesmo com encerramentos e erros tardios', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const rec = host.recognitions[0];
+  host.act(() => rec.result('Procure Residencial Carmelo'));
+  host.advance(SILENCE);
+  host.act(() => { rec.end(); rec.end(); rec.error('no-speech'); rec.result('eco tardio'); });
+  host.advance(SILENCE * 2);
+  assert.deepEqual(completed, ['Procure Residencial Carmelo']);
+});
+
+test('limite de 60 s conclui o que foi dito; iOS continua com sessão única', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const rec = host.recognitions[0];
+  for (let i = 0; i < 25; i += 1) { host.act(() => rec.result(`parte ${i}`, false)); host.advance(2400); }
+  assert.equal(rec.stops, 1, 'fala contínua termina no limite máximo');
+  host.act(() => rec.end());
+  assert.equal(completed.length, 0, 'só hipóteses: nada final para enviar');
+  const done = [];
+  const ios = voice(done, 'iPhone');
+  ios.act(() => ios.current.start());
+  const r = ios.recognitions[0];
+  ios.act(() => r.result('Qual meu próximo atendimento'));
+  ios.act(() => r.end());
+  assert.equal(ios.recognitions.length, 1);
+  assert.deepEqual(done, ['Qual meu próximo atendimento']);
 });
