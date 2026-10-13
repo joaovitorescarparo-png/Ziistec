@@ -21,7 +21,7 @@ Legenda: **L** leitura, **E** escrita, **O** owner, **T** technician. RPC canôn
 | Fornecedores | — | `suppliers` (sem tela) | — | — | — | — | — | nome do fornecedor nas compras | **GAP**: não há tela nem RPC |
 | Garantias | ManualWarrantyV2 | `warranties`, `zt_create_manual_warranty` | ✔ | RPC | ✔ | atribuídas | — | garantias do cliente, a vencer, garantia manual | `zt_create_manual_warranty` |
 | Retornos | legado/mobile | `work_order_returns`, `zt_mark_work_order_needs_return` | ✔ | RPC | ✔ | atribuídas | técnico marca retorno | retornos no histórico/detalhe | leitura |
-| Financeiro | FinanceV2 | `financial_entries`, `zt_save_manual_financial_entry`, `zt_set_financial_paid` | ✔ | RPC | ✔ | — | lançar receita | + resumo do mês, a receber, em atraso, saldo do cliente, dar baixa | `zt_assistant_read`; `zt_set_financial_paid` |
+| Financeiro | FinanceV2 | `financial_entries`, `zt_save_manual_financial_entry`, `zt_set_financial_paid` | ✔ | RPC | ✔ | — | lançar receita | + resumo do mês, a receber, em atraso, saldo do cliente | `zt_assistant_read`; dar baixa: **GAP** nesta versão (a RPC existe, mas a escrita financeira ainda depende de homologação própria) |
 | Despesas | legado | `financial_entries` (expense) | ✔ | RPC | ✔ | — | — | despesas no resumo, compras a vencer | lançar despesa: **GAP** (ferramenta só de receita hoje) |
 | Contratos/preventivas | MaintenanceContractsV2 | `maintenance_contracts` (upsert direto), `zt_generate_maintenance_contract_cycle` | ✔ | direto + RPC | ✔ | — | — | contratos ativos, próximas visitas/cobranças, visitas atrasadas | criar/editar contrato: **GAP** (gravado direto) |
 | Pós-venda | PostSaleV2 | `post_sale_followups`, `zt_list_post_sale_followups`, `zt_update_post_sale_followup` | ✔ | RPC | ✔ | — | — | pendências da semana, clientes inativos, concluir/dispensar | `zt_update_post_sale_followup` |
@@ -29,6 +29,31 @@ Legenda: **L** leitura, **E** escrita, **O** owner, **T** technician. RPC canôn
 | Configurações | SettingsV2 | `companies` (update direto), assinatura | ✔ | direto | ✔ | — | — | — | **GAP** proposital: configuração não é operação por voz |
 | Equipe | legado | `company_members`, `zt_update_team_member`, convites diretos | ✔ | RPC/direto | ✔ | — | — | — | **GAP**: convite e permissão exigem fluxo próprio |
 | Vendas em campo | TechnicianSalesV2, WorkOrderSaleV2 | `field_sales`, `zt_sell_product_direct`, `zt_sell_product_on_work_order` | ✔ | RPC | ✔ | ✔ | — | — | **GAP** nesta versão: pagamento + estoque + Pix pedem a tela própria |
+
+## Implementado nesta versão (0096/0097, sem aplicar no Staging)
+
+- **Consultas do proprietário** (`zt_assistant_read`, só leitura):
+  - clientes e OS: histórico do cliente, detalhes da OS, equipamentos do cliente, garantias do cliente e garantias a vencer;
+  - agenda: semana, dia e OS sem agenda;
+  - estoque: saldo, estoque baixo e movimentações;
+  - compras: últimas, a pagar e compras de um produto no mês;
+  - contratos (ativos e com visita atrasada), pós-venda pendente e clientes inativos;
+  - financeiro: resumo do mês, a receber e clientes em atraso;
+  - relatório operacional do mês.
+- **Escritas com prévia e confirmação** (`zt_assistant_plan` → `zt_assistant_execute`):
+  - gerar a OS de um orçamento aprovado;
+  - ajustar estoque, com confirmação reforçada;
+  - registrar garantia manual;
+  - concluir ou dispensar um pós-venda.
+- **Continuidade sem IA** pela referência ativa: "puxe o histórico desse cliente", "o que foi feito no último", "quem foi o técnico", "qual equipamento foi instalado", "mostra os últimos 10" e "tem alguma garantia ativa".
+- **Fica de fora (GAP):**
+  - aprovar orçamento;
+  - editar cliente, local, produto, serviço ou contrato;
+  - lançar compra ou despesa;
+  - dar baixa em recebimento;
+  - venda em campo;
+  - evidência por voz;
+  - equipe e configurações.
 
 ## Regras que o Assistente segue
 
