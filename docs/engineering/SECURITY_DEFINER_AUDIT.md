@@ -63,6 +63,7 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 | `zt_mark_work_order_needs_return(p_wo uuid, p_reason text, p_material_needed text, p_notes text, p_priority text, p_expected_return_date date, p_request_id uuid)` | 0084 | authenticated, service_role | `""` | direct | OS/company/assigned role | protected write | no | SAFE |
 | `zt_next_number(comp uuid, doc text, prefix text)` | baseline/redefined | service_role | `zt_private` | delegated | company | protected write | no | SAFE |
 | `zt_platform_set_subscription_status(p_company uuid, p_status zt_sub_status)` | baseline/redefined | authenticated, service_role | `""` | delegated | platform-admin guard | subscription admin | no | SAFE |
+| `zt_platform_renew_subscription(p_company uuid, p_period_end date, p_status zt_sub_status, p_reason text)` | 0098 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | subscription admin, audited | no | SAFE |
 | `zt_quote_seed_from_work_order(p_work_order uuid)` | 0085 | authenticated, service_role | `""` | delegated | owner/company | read | no | SAFE |
 | `zt_reactivate_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
 | `zt_refresh_subscription_status(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
