@@ -41,7 +41,7 @@ test('0098: ACL sem PUBLIC/anon; regressão SQL no CI; inventário RC1B atualiza
 
 test('runbook do beta: domínio, Auth com redirect exato, SMTP, renovação e onboarding somente do proprietário', () => {
   for (const text of ['beta.ziistec.com', 'claude/assistant-universal-owner-v1', 'Site URL', '`https://beta.ziistec.com/`',
-    'SMTP', 'zt_platform_renew_subscription', 'Confirm email', 'não convide técnicos']) {
+    'SMTP', 'zt_platform_renew_subscription', 'Confirm email', 'não convide técnicos', 'Deployment Protection Exceptions']) {
     assert.ok(doc.includes(text), text);
   }
 });

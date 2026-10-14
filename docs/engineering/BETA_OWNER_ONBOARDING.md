@@ -18,7 +18,11 @@ Cada passo abaixo marcado **(João)** é manual e não é feito por agente: DNS,
    - Git branch: **`claude/assistant-universal-owner-v1`**.
    - Nunca ligar o domínio a Production.
 2. **DNS** de `ziistec.com`: crie o registro que a Vercel mostrar, em geral `CNAME beta → cname.vercel-dns.com`. Aguarde "Valid Configuration" e o certificado HTTPS.
-3. A proteção da Vercel (`all_except_custom_domains`) não vale para o domínio próprio. `https://beta.ziistec.com` abre sem login da Vercel, e os aliases `*.vercel.app` continuam protegidos. O acesso aos dados continua exigindo login do Supabase e a RLS.
+3. **Liberar só esse domínio:** Settings → Deployment Protection → **Deployment Protection Exceptions** → adicionar `beta.ziistec.com`. Está disponível em todos os planos.
+   - A Standard Protection do projeto protege todos os domínios, menos os de produção. Um domínio de Preview ligado a uma branch continua pedindo login da Vercel até entrar nessa exceção.
+   - Não troque a proteção do projeto: os aliases `*.vercel.app` e as outras previews continuam protegidos.
+   - O acesso aos dados continua exigindo login do Supabase e a RLS.
+   - Para reverter, remova o domínio da exceção.
 4. As variáveis do Gemini já valem para o domínio, porque estão na mesma branch: `ENABLE_EXTERNAL_AI`, `AI_PROVIDER`, `GEMINI_MODEL` e `GEMINI_API_KEY`.
 
 **Código:** o cliente só usa Staging em hosts listados em `STAGING_SUPABASE_HOSTS` (`src/lib/supabaseConfig.js`), e `beta.ziistec.com` está lá. Qualquer outro host falha fechado: `www`, `app`, apex, sufixos, `.com.br`. O mesmo vale para o domínio ligado por engano a um deploy de produção. O servidor (`api/_supabaseServerConfig.js`) resolve pela branch (`VERCEL_GIT_COMMIT_REF`), que já está em `STAGING_BRANCHES`. Se o beta passar para outra branch, ela precisa entrar nessa lista no mesmo commit. Testes: `tests/blockers/f08_environment_project_matrix.test.mjs`.
@@ -123,6 +127,6 @@ Regressão: `supabase/tests/v2_platform_subscription_renewal_rollback.sql`, no C
 
 ## 6. Reverter
 
-- Remova o domínio na Vercel. O app deixa de ficar público.
+- Tire `beta.ziistec.com` de Deployment Protection Exceptions, para voltar a exigir login da Vercel, ou remova o domínio. O app deixa de ficar público.
 - Volte o Site URL para a preview `hardening`.
 - Os dados permanecem no Staging.
