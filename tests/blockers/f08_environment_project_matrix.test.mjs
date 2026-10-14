@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PROD_SUPABASE_HOSTS, STAGING_SUPABASE_HOSTS, resolverConfigSupabase } from '../../src/lib/supabaseConfig.js';
+import { resolverRedirectAuth } from '../../src/lib/authRedirect.js';
 import {
   PROD_SUPABASE_URL,
   STAGING_SUPABASE_URL,
@@ -24,6 +25,7 @@ const WAVE2_BRANCH = 'codex/ziistec-assistant-wave2';
 const WAVE2_HOST = 'ziistec-git-codex-ziistec-assistant-wave2-js-connect.vercel.app';
 const OWNER_V1_BRANCH = 'claude/assistant-universal-owner-v1';
 const OWNER_V1_HOST = 'ziistec-git-claude-assistant-universal-owner-v1-js-connect.vercel.app';
+const BETA_HOST = 'beta.ziistec.com';
 
 const client = ({ deploymentEnv, host, envUrl = '', envKey = '' }) => resolverConfigSupabase({
   deploymentEnv,
@@ -277,4 +279,51 @@ test('F08 Assistant Universal Owner V1: branch e host exatos usam somente Stagin
   for (const host of ['ziistec-git-claude-assistant-universal-owner-v2-js-connect.vercel.app', `${OWNER_V1_HOST}.example.com`]) {
     mustFailClosed(client({ deploymentEnv: 'preview', host, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), `preview client desconhecido ${host}`);
   }
+});
+
+test('F08 beta.ziistec.com: domínio beta usa somente Staging; Production isolada; nomes parecidos falham fechado', () => {
+  assert.equal(STAGING_SUPABASE_HOSTS.filter((host) => host === BETA_HOST).length, 1, 'domínio beta exato na allowlist de staging');
+  assert.equal(PROD_SUPABASE_HOSTS.includes(BETA_HOST), false, 'domínio beta nunca na allowlist de produção');
+  assert.equal(PROD_SUPABASE_HOSTS.some((host) => host.endsWith('ziistec.com')), false, 'nenhum domínio próprio aponta para produção');
+  assert.equal([...PROD_SUPABASE_HOSTS, ...STAGING_SUPABASE_HOSTS].some((host) => host.includes('*')), false, 'allowlists sem wildcard');
+
+  for (const deploymentEnv of ['preview', '']) {
+    const label = deploymentEnv || 'env inferido';
+    const fallback = client({ deploymentEnv, host: BETA_HOST });
+    mustConfigure(fallback, STAGING_SUPABASE_URL, `beta fallback (${label})`);
+    assert.equal(fallback.anonKey, STAGING_KEY, `beta fallback (${label}): key de staging`);
+    assert.equal(fallback.origem, 'staging-fallback', `beta fallback (${label}): contexto de preview staging`);
+    mustConfigure(client({ deploymentEnv, host: BETA_HOST, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), STAGING_SUPABASE_URL, `beta staging explícito (${label})`);
+    for (const [envUrl, envKey] of [[PROD_SUPABASE_URL, PROD_KEY], [STAGING_SUPABASE_URL, INVALID_KEY], [INVALID_URL, INVALID_KEY]]) {
+      mustFailClosed(client({ deploymentEnv, host: BETA_HOST, envUrl, envKey }), `beta recusa ${envUrl} (${label})`);
+    }
+    mustFailClosed(client({ deploymentEnv, host: BETA_HOST, envUrl: STAGING_SUPABASE_URL }), `beta env parcial (${label})`);
+  }
+  // Se o domínio for ligado por engano a um deploy de produção, o cliente falha fechado em vez de usar qualquer projeto.
+  for (const [envUrl, envKey] of [['', ''], [PROD_SUPABASE_URL, PROD_KEY], [STAGING_SUPABASE_URL, STAGING_KEY]]) {
+    mustFailClosed(client({ deploymentEnv: 'production', host: BETA_HOST, envUrl, envKey }), `beta em deploy de produção ${envUrl || 'sem env'}`);
+  }
+  for (const host of PROD_SUPABASE_HOSTS) {
+    mustConfigure(client({ deploymentEnv: 'production', host }), PROD_SUPABASE_URL, `produção continua em ${host}`);
+  }
+  for (const host of STAGING_SUPABASE_HOSTS) {
+    mustConfigure(client({ deploymentEnv: 'preview', host }), STAGING_SUPABASE_URL, `preview continua em staging: ${host}`);
+  }
+  // O servidor resolve pela branch à qual a Vercel liga o domínio: a branch beta usa Staging e nunca produção.
+  mustConfigure(server({ vercelEnv: 'preview', branch: OWNER_V1_BRANCH }), STAGING_SUPABASE_URL, 'servidor da branch do domínio beta');
+  mustFailClosed(server({ vercelEnv: 'preview', branch: OWNER_V1_BRANCH, url: PROD_SUPABASE_URL, key: PROD_KEY }), 'servidor beta recusa produção');
+
+  for (const host of ['ziistec.com', 'www.ziistec.com', 'app.ziistec.com', 'beta2.ziistec.com', 'beta.ziistec.com.br', 'beta.ziistec.co',
+    `${BETA_HOST}.evil.com`, `evil.${BETA_HOST}`, 'beta-ziistec.com', `${BETA_HOST}.vercel.app`]) {
+    mustFailClosed(client({ deploymentEnv: 'preview', host, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), `host desconhecido ${host} com staging`);
+    mustFailClosed(client({ deploymentEnv: 'preview', host }), `host desconhecido ${host} sem env`);
+    mustFailClosed(client({ deploymentEnv: '', host }), `host desconhecido ${host} com env inferido`);
+    mustFailClosed(client({ deploymentEnv: 'production', host }), `host desconhecido ${host} em produção`);
+  }
+
+  // Auth: confirmação de cadastro e recuperação de senha voltam para a raiz exata do domínio beta, só em HTTPS.
+  assert.equal(resolverRedirectAuth({ origin: `https://${BETA_HOST}`, hostname: BETA_HOST }), `https://${BETA_HOST}/`);
+  assert.equal(resolverRedirectAuth({ origin: `http://${BETA_HOST}`, hostname: BETA_HOST }), '');
+  assert.equal(resolverRedirectAuth({ origin: `https://${BETA_HOST}.evil.com`, hostname: `${BETA_HOST}.evil.com` }), '');
+  assert.equal(resolverRedirectAuth({ origin: 'https://www.ziistec.com', hostname: 'www.ziistec.com' }), '');
 });

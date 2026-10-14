@@ -13,6 +13,8 @@ export const STAGING_SUPABASE_HOSTS = Object.freeze([
   "ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app",
   "ziistec-git-codex-ziistec-assistant-wave2-js-connect.vercel.app",
   "ziistec-git-claude-assistant-universal-owner-v1-js-connect.vercel.app",
+  // Domínio próprio do beta (somente proprietário): ligado na Vercel à branch do Assistant Universal; usa só Staging.
+  "beta.ziistec.com",
 ]);
 
 export function resolverConfigSupabase({
