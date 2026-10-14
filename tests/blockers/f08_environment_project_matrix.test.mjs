@@ -283,8 +283,9 @@ test('F08 Assistant Universal Owner V1: branch e host exatos usam somente Stagin
 
 test('F08 beta.ziistec.com: domínio beta usa somente Staging; Production isolada; nomes parecidos falham fechado', () => {
   assert.equal(STAGING_SUPABASE_HOSTS.filter((host) => host === BETA_HOST).length, 1, 'domínio beta exato na allowlist de staging');
-  assert.equal(PROD_SUPABASE_HOSTS.includes(BETA_HOST), false, 'domínio beta nunca na allowlist de produção');
-  assert.equal(PROD_SUPABASE_HOSTS.some((host) => host.endsWith('ziistec.com')), false, 'nenhum domínio próprio aponta para produção');
+  // Comparações exatas (sem busca por substring de host).
+  assert.equal(PROD_SUPABASE_HOSTS.some((host) => host === BETA_HOST), false, 'domínio beta nunca na allowlist de produção');
+  assert.equal(PROD_SUPABASE_HOSTS.some((host) => host.split('.').slice(-2).join('.') === 'ziistec.com'), false, 'nenhum domínio próprio aponta para produção');
   assert.equal([...PROD_SUPABASE_HOSTS, ...STAGING_SUPABASE_HOSTS].some((host) => host.includes('*')), false, 'allowlists sem wildcard');
 
   for (const deploymentEnv of ['preview', '']) {
