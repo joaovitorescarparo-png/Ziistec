@@ -5,9 +5,9 @@ import { toolsForRole } from '../lib/assistantTools';
 import { requestAssistant, createAssistantRequestId, assistantFormInput } from '../lib/assistantApi';
 
 const button = 'min-h-11 rounded-xl px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600 disabled:opacity-50';
-// Pausas de fala natural ("Faz um orçamento para o Mauro…" … "com dois interfones") não encerram o
-// ditado: o envio automático só ocorre após este silêncio sem fala nem hipótese nova. Parar envia na hora.
-export const VOICE_SILENCE_MS = 3500;
+// Pausas de fala natural de até ~5 s ("procure o cliente Mauro e me mostre o…" … "histórico dele") não
+// encerram o ditado: o envio automático só ocorre após este silêncio sem fala nem hipótese nova. Parar envia na hora.
+export const VOICE_SILENCE_MS = 5500;
 // Pedido longo com pausas cabe no ditado; ao atingir o limite, o que foi dito é concluído, não descartado.
 export const VOICE_MAX_DURATION_MS = 60000;
 const FREE_INTERPRETATION_DISABLED = 'FREE_INTERPRETATION_DISABLED';

@@ -380,8 +380,9 @@ const SILENCE = Number(panelSource.match(/export const VOICE_SILENCE_MS = (\d+);
 const MAX_DICTATION = Number(panelSource.match(/export const VOICE_MAX_DURATION_MS = (\d+);/)?.[1]);
 const voice = (completed, ua = ANDROID) => mount({ silenceMs: SILENCE, maxDurationMs: MAX_DICTATION, onComplete: text => completed.push(text) }, { ua });
 
-test('painel usa janela de silêncio de ~3,5 s e ditado de até 60 s, ligados ao hook', () => {
-  assert.equal(SILENCE, 3500);
+test('painel usa janela de silêncio de ~5,5 s (pausa natural de até 5 s) e ditado de até 60 s, ligados ao hook', () => {
+  assert.equal(SILENCE, 5500);
+  assert.ok(SILENCE > 5000, 'pausa de 5 s não pode encerrar o ditado');
   assert.equal(MAX_DICTATION, 60000);
   assert.match(panelSource, /useSpeechInput\(\{ silenceMs: VOICE_SILENCE_MS, maxDurationMs: VOICE_MAX_DURATION_MS,/);
 });
@@ -417,9 +418,9 @@ test('silêncio maior que o limite envia uma única vez; hipótese recente adia 
   host.act(() => host.current.start());
   const rec = host.recognitions[0];
   host.act(() => rec.result('Qual meu próximo atendimento'));
-  host.advance(3000);
+  host.advance(SILENCE - 500);
   host.act(() => rec.result('amanhã', false));
-  host.advance(3000);
+  host.advance(SILENCE - 500);
   assert.equal(rec.stops, 0, 'hipótese nova reinicia a janela');
   host.advance(500);
   assert.equal(rec.stops, 1);
@@ -519,4 +520,87 @@ test('limite de 60 s conclui o que foi dito; iOS continua com sessão única', (
   ios.act(() => r.end());
   assert.equal(ios.recognitions.length, 1);
   assert.deepEqual(done, ['Qual meu próximo atendimento']);
+});
+
+// Homologação Universal Owner V1: pausa natural de até ~5 s no meio da frase não envia metade do pedido.
+const MAURO = 'procure o cliente Mauro e me mostre o histórico dele';
+
+test('pausas de 2, 3, 4 e 5 s no meio do pedido não enviam; a frase chega inteira ao onComplete uma única vez', () => {
+  for (const pause of [2000, 3000, 4000, 5000]) {
+    const completed = [];
+    const host = voice(completed);
+    host.act(() => host.current.start());
+    const rec = host.recognitions[0];
+    host.act(() => rec.result('procure o cliente Mauro e me mostre o'));
+    host.advance(pause);
+    assert.equal(rec.stops, 0, pause + ' ms de pausa não encerra o ditado');
+    assert.deepEqual(completed, [], pause + ' ms de pausa não envia');
+    assert.equal(host.current.listening, true, pause + ' ms');
+    host.act(() => rec.result('histórico dele'));
+    host.advance(SILENCE - 1);
+    assert.equal(rec.stops, 0, 'fala retomada reabre a janela inteira');
+    host.advance(1);
+    assert.equal(rec.stops, 1, 'passado o limite, encerra');
+    host.act(() => rec.end());
+    host.act(() => rec.end());
+    host.advance(SILENCE * 2);
+    assert.deepEqual(completed, [MAURO], pause + ' ms');
+  }
+});
+
+test('silêncio acima do novo limite envia exatamente uma vez o que foi dito', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const rec = host.recognitions[0];
+  host.act(() => rec.result(MAURO));
+  host.advance(5000);
+  assert.equal(rec.stops, 0, '5 s de silêncio ainda é pausa');
+  host.advance(SILENCE - 5000);
+  assert.equal(rec.stops, 1);
+  host.act(() => { rec.end(); rec.end(); rec.error('no-speech'); });
+  host.advance(SILENCE * 2);
+  assert.equal(rec.stops, 1);
+  assert.deepEqual(completed, [MAURO]);
+});
+
+test('Parar durante a pausa envia na hora, sem esperar o restante da janela', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const rec = host.recognitions[0];
+  host.act(() => rec.result('procure o cliente Mauro'));
+  host.advance(4000);
+  assert.equal(host.act(() => host.current.stop()), true);
+  assert.equal(rec.stops, 1);
+  assert.equal([...host.timers.values()].some(t => t.ms === SILENCE), false, 'janela cancelada');
+  host.act(() => rec.end());
+  assert.deepEqual(completed, ['procure o cliente Mauro']);
+});
+
+test('Android: reinícios do motor durante a pausa de 5 s mantêm o texto, não enviam antes e não duplicam', () => {
+  const completed = [];
+  const host = voice(completed);
+  host.act(() => host.current.start());
+  const first = host.recognitions[0];
+  host.act(() => first.result('procure o cliente Mauro e me mostre o'));
+  host.advance(1000);
+  // Android encerra o motor no início da pausa; a sessão nova sem fala também encerra (no-speech).
+  host.act(() => first.end());
+  assert.equal(host.recognitions.length, 2);
+  host.advance(2500);
+  const second = host.recognitions[1];
+  host.act(() => { second.error('no-speech'); second.end(); });
+  assert.equal(host.recognitions.length, 3);
+  host.advance(1500);
+  assert.deepEqual(completed, [], '5 s de pausa com dois reinícios não envia');
+  assert.equal(host.current.listening, true);
+  const third = host.recognitions[2];
+  // A sessão retomada repete o trecho cortado antes de continuar: "me mostre o" não pode duplicar.
+  host.act(() => third.results([['me mostre o histórico dele', true]]));
+  host.act(() => third.results([['me mostre o histórico dele', true]]));
+  host.advance(SILENCE);
+  assert.equal(third.stops, 1);
+  host.act(() => third.end());
+  assert.deepEqual(completed, [MAURO]);
 });
