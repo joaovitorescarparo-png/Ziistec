@@ -74,21 +74,25 @@ O trial é de 14 dias, um por usuário (`zt_create_company`). Depois disso, escr
 - Período vencido ou assinatura parada recomeça hoje (reativação). Período vigente só é estendido.
 - O motivo é obrigatório. Cada mudança grava `platform_audit_logs` (`subscription_renewed`). Repetir a mesma renovação não muda nada.
 
-**Preparação única (João, SQL Editor do Staging):**
+**Não marque um perfil de uso como admin de forma permanente.** Com `profiles.is_platform_admin = true`, o app manda o usuário só para a tela de plataforma, que exige MFA (`src/App.jsx`, `ehPlataforma`). Ele perde o app de proprietário e o Assistente.
 
-```sql
-update public.profiles set is_platform_admin = true where email = '<email do João>';
-```
-
-**Uso (João, SQL Editor do Staging).** O SQL Editor roda como `postgres`. As duas primeiras linhas atribuem a ação ao perfil admin para a auditoria. Só use dentro do Dashboard.
+**Uso (João, SQL Editor do Staging).** O SQL Editor roda como `postgres`, o único papel que o trigger deixa alterar `is_platform_admin`.
+- A flag fica ligada só dentro da transação e volta a `false` antes do `commit`.
+- A auditoria grava o seu perfil como autor.
+- Só use dentro do Dashboard.
+- Se qualquer comando falhar, rode `rollback;`.
 
 ```sql
 begin;
-select set_config('request.jwt.claim.sub', '<UUID_DO_PERFIL_ADMIN>', true);
-select set_config('request.jwt.claims', json_build_object('sub','<UUID_DO_PERFIL_ADMIN>','role','authenticated','aal','aal2')::text, true);
+update public.profiles set is_platform_admin = true where id = '<UUID_DO_SEU_PERFIL>';
+select set_config('request.jwt.claim.sub', '<UUID_DO_SEU_PERFIL>', true);
+select set_config('request.jwt.claims', json_build_object('sub','<UUID_DO_SEU_PERFIL>','role','authenticated','aal','aal2')::text, true);
 select public.zt_platform_renew_subscription('<UUID_DA_EMPRESA>'::uuid, date '2026-11-30', 'trial', 'Beta: extensão do teste');
+update public.profiles set is_platform_admin = false where id = '<UUID_DO_SEU_PERFIL>';
 commit;
 ```
+
+Para usar a tela de plataforma no app, que tem MFA, crie uma conta dedicada só para admin. Não use a conta de proprietário.
 
 Para encontrar a empresa e conferir o resultado:
 
