@@ -253,7 +253,7 @@ test('0100: comprovante owner-only, não fiscal, idempotente, versionado, com lo
   assert.doesNotMatch(s, /financial_entries\s*\(|insert into public\.financial_entries/i, 'emissão não cria lançamento');
 });
 
-test('0100: definer com search_path vazio e sem SQL dinâmico; regressões no gate SQL/RLS; inventário 135', () => {
+test('0100: definer com search_path vazio e sem SQL dinâmico; regressões no gate SQL/RLS; inventário contabilizado', () => {
   const functions = [...sql.receipts.matchAll(/create or replace function[\s\S]*?\$\$([\s\S]*?)\$\$;/gi)];
   assert.equal(functions.length, 1);
   const [whole, body] = functions[0];
@@ -269,5 +269,5 @@ test('0100: definer com search_path vazio e sem SQL dinâmico; regressões no ga
   assert.match(smoke, /snapshot_local_cadastrado/);
   const race = read('scripts/test-service-receipt-concurrency.sh');
   assert.match(race, /issue "\$OUT1" & p1=\$!\nissue "\$OUT2" & p2=\$!/);
-  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0100 adds one public definer[\s\S]*if v_total<>135 then/);
+  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0100 adds one public definer/);
 });

@@ -102,6 +102,8 @@ regressions=(
   supabase/tests/v2_platform_subscription_renewal_rollback.sql
   supabase/tests/v2_beta_invites_rollback.sql
   supabase/tests/v2_block3_service_receipts_rollback.sql
+  supabase/tests/v2_block4_work_order_lifecycle_rollback.sql
+  supabase/tests/v2_block4_client_service_history_rollback.sql
 )
 
 # Falha de regressão também vira anotação do GitHub (legível sem baixar o log do job).

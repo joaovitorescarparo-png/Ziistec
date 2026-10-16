@@ -69,6 +69,9 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 | `zt_platform_create_beta_invite(p_email text, p_valid_days integer)` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin, audited | no | SAFE |
 | `zt_platform_revoke_beta_invite(p_invite uuid)` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin, audited | no | SAFE |
 | `zt_issue_service_receipt(p_wo uuid, p_request uuid, p_notes text, p_reissue_reason text)` | 0100 | authenticated, service_role | `""` | direct | owner/company + subscription | service receipt issue/reissue, idempotent | no | SAFE |
+| `zt_save_work_order_report(p_wo uuid, p_body text, p_request uuid)` | 0102 | authenticated, service_role | `""` | direct | owner or assigned + open OS | technical report, idempotent | no | SAFE |
+| `zt_client_service_history(p_client uuid, p_location uuid, p_limit integer)` | 0104 | authenticated, service_role | `""` | direct | owner/company | read, owner-only | no | SAFE |
+| `zt_work_order_history_detail(p_wo uuid)` | 0104 | authenticated, service_role | `""` | direct | owner or assigned OS | read; prices/financial owner-only | no | SAFE |
 | `zt_quote_seed_from_work_order(p_work_order uuid)` | 0085 | authenticated, service_role | `""` | delegated | owner/company | read | no | SAFE |
 | `zt_reactivate_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
 | `zt_refresh_subscription_status(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |

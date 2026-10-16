@@ -44,6 +44,7 @@ export default function WorkOrderMemoryV2({companyId,companyName='Sua empresa',u
   const [reportBusy,setReportBusy]=useState(false);
   const [reportPreview,setReportPreview]=useState(false);
   const fileRef=useRef(null);
+  const reportRequestRef=useRef(null);
 
   const load=useCallback(async()=>{
     setLoading(true);setError('');
@@ -91,11 +92,18 @@ export default function WorkOrderMemoryV2({companyId,companyName='Sua empresa',u
   const snapshot=serviceReport?.snapshot||null;
 
   const saveReport=async()=>{
-    if(!detail?.workOrder||!report.trim()) return;
+    if(savingReport||!detail?.workOrder||!report.trim()) return;
     setSavingReport(true);setError('');
     try{
-      const created=await salvarRelatoTecnicoV2DB({workOrder:detail.workOrder,body:report,userId});
-      setDetail(d=>({...d,reports:[...(d?.reports||[]),created]}));
+      // Mesmo texto reaproveita o mesmo requestId; texto editado gera um envio novo.
+      const text=report.trim();
+      if(reportRequestRef.current?.woId!==detail.workOrder.id||reportRequestRef.current?.text!==text){
+        if(!globalThis.crypto?.randomUUID) throw new Error('Atualize o navegador para salvar o relato com segurança.');
+        reportRequestRef.current={woId:detail.workOrder.id,text,id:globalThis.crypto.randomUUID()};
+      }
+      const created=await salvarRelatoTecnicoV2DB({workOrder:detail.workOrder,body:text,userId,requestId:reportRequestRef.current.id});
+      setDetail(d=>({...d,reports:[...(d?.reports||[]).filter(r=>r.id!==created?.id),created]}));
+      reportRequestRef.current=null;
       setReport('');setInterim('');
       await load();
     }catch(e){setError(e?.message||'Não consegui salvar o relato técnico.');}
