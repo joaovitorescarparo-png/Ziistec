@@ -204,6 +204,9 @@ update zt_bi set company_a=(pg_temp.call('company_a')->>'company')::uuid;
 -- Assinatura como nasceu (antes do teste de vencimento mais abaixo).
 insert into zt_bi_calls select 'sub_a_created',(select jsonb_build_object('status',s.status,'plan',s.plan,'amount',s.amount,
   'start',s.current_period_start,'end',s.current_period_end) from public.subscriptions s where s.company_id=zt_bi.company_a) from zt_bi;
+-- Trial consumido logo após a criação (o teste de reutilização abaixo zera o campo de propósito).
+insert into zt_bi_calls select 'onboarding_a_created',jsonb_build_object('trial_consumed',
+  (select p.onboarding_company_created_at is not null from public.profiles p where p.id=pg_temp.uid('a')));
 
 -- Convite de equipe: técnico sem convite beta entra na empresa existente X.
 insert into public.company_invites(company_id,email,role,job_title,name)
@@ -351,8 +354,8 @@ begin
     t.company_a is not null
     and (select count(*) from public.company_members m where m.company_id=t.company_a and m.user_id=pg_temp.uid('a') and m.role='owner' and m.status='active')=1
     and pg_temp.call('sub_a_created') = jsonb_build_object('status','trial','plan','Profissional','amount',79.90,'start',current_date,'end',current_date+14)
-    and (select p.onboarding_company_created_at is not null from public.profiles p where p.id=pg_temp.uid('a')),
-    pg_temp.call('sub_a_created')::text);
+    and pg_temp.call('onboarding_a_created') = '{"trial_consumed":true}'::jsonb,
+    pg_temp.call('sub_a_created')::text||' / '||coalesce(pg_temp.call('onboarding_a_created')::text,'sem snapshot'));
   perform pg_temp.record_result('17_convite_marcado_usado',
     pg_temp.invite(t.invite_a) = jsonb_build_object('status','used','email',lower((select email from zt_bi_users where key='a')),
       'used_by',pg_temp.uid('a'),'company_id',t.company_a,'used',true),
