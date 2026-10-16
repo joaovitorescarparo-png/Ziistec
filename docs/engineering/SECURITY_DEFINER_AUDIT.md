@@ -64,6 +64,10 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 | `zt_next_number(comp uuid, doc text, prefix text)` | baseline/redefined | service_role | `zt_private` | delegated | company | protected write | no | SAFE |
 | `zt_platform_set_subscription_status(p_company uuid, p_status zt_sub_status)` | baseline/redefined | authenticated, service_role | `""` | delegated | platform-admin guard | subscription admin | no | SAFE |
 | `zt_platform_renew_subscription(p_company uuid, p_period_end date, p_status zt_sub_status, p_reason text)` | 0098 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | subscription admin, audited | no | SAFE |
+| `zt_beta_invite_status()` | 0099 | authenticated, service_role | `""` | direct | own confirmed Auth e-mail | read own beta invite | no | SAFE |
+| `zt_platform_list_beta_invites()` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin read | no | SAFE |
+| `zt_platform_create_beta_invite(p_email text, p_valid_days integer)` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin, audited | no | SAFE |
+| `zt_platform_revoke_beta_invite(p_invite uuid)` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin, audited | no | SAFE |
 | `zt_quote_seed_from_work_order(p_work_order uuid)` | 0085 | authenticated, service_role | `""` | delegated | owner/company | read | no | SAFE |
 | `zt_reactivate_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
 | `zt_refresh_subscription_status(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
@@ -124,7 +128,7 @@ All functions below are owned by `postgres`, `service_role`-only at function ACL
 | `zt_complete_work_order(p_wo uuid, p_report text, p_pending text, p_extra_cost numeric, p_due_days integer)` | compatibility | `""` | auth/company/role + subscription | no | SAFE |
 | `zt_consume_ai_quota(p_company uuid)` | baseline/redefined | `public` | auth + owner/company + subscription/quota | no | SAFE |
 | `zt_consume_quote_pdf_quota(p_company uuid)` | baseline/redefined | `public` | auth + owner/company + subscription/quota | no | SAFE |
-| `zt_create_company(p_name text, p_activity text, p_has_team boolean, p_owner_name text, p_phone text)` | baseline/redefined | `public` | auth creator + membership bootstrap | no | SAFE |
+| `zt_create_company(p_name text, p_activity text, p_has_team boolean, p_owner_name text, p_phone text)` | baseline/redefined (0099) | `""` | auth creator + confirmed e-mail + valid beta invite, consumed atomically | no | SAFE |
 | `zt_create_initial_service_report(p_wo uuid)` | 0082 | `""` | OS/company context | no | SAFE |
 | `zt_finalize_work_order_atomic(p_wo uuid, p_report text, p_pending text, p_extra_cost numeric, p_due_days integer, p_materials jsonb, p_additions jsonb)` | 0050–0060 | `""` | auth + OS/company/role + subscription | no | SAFE |
 | `zt_finalize_work_order_with_warranty_overrides(p_wo uuid, p_report text, p_pending text, p_extra_cost numeric, p_due_days integer, p_materials jsonb, p_additions jsonb, p_warranty_overrides jsonb)` | 0063–0069 | `""` | auth + OS/company/role + subscription | no | SAFE |

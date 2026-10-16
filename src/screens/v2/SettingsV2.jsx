@@ -4,13 +4,11 @@ import {
   Save,ShieldCheck,Upload,X,
 } from 'lucide-react';
 import {
-  cancelarAssinaturaSettingsV2DB,carregarSettingsV2DB,reativarAssinaturaSettingsV2DB,
-  salvarLogoSettingsV2DB,salvarSettingsEmpresaV2DB,
+  carregarSettingsV2DB,salvarLogoSettingsV2DB,salvarSettingsEmpresaV2DB,
 } from '../../lib/settingsV2Api';
 import { mensagemErro } from '../../lib/supabase';
+import { resumoAssinatura } from '../../lib/subscriptionDisplay';
 
-const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-const dataBR=(v)=>v?String(v).slice(0,10).split('-').reverse().join('/'):'—';
 const STATUS={trial:['Período de teste','bg-sky-50 text-sky-700'],active:['Ativa','bg-emerald-50 text-emerald-700'],past_due:['Pagamento pendente','bg-amber-50 text-amber-700'],suspended:['Suspensa','bg-rose-50 text-rose-700'],canceled:['Cancelada','bg-slate-100 text-slate-600']};
 const input='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
 
@@ -21,12 +19,10 @@ export default function SettingsV2({companyId,companyName='Sua empresa',onClose}
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [logoSaving,setLogoSaving]=useState(false);
-  const [subscriptionSaving,setSubscriptionSaving]=useState(false);
   const [error,setError]=useState('');
   const [success,setSuccess]=useState('');
   const [form,setForm]=useState(null);
   const [subscription,setSubscription]=useState(null);
-  const [confirmAction,setConfirmAction]=useState(null);
   const logoRef=useRef(null);
 
   const load=async()=>{
@@ -51,22 +47,11 @@ export default function SettingsV2({companyId,companyName='Sua empresa',onClose}
     catch(err){setError(mensagemErro(err));}
     finally{setLogoSaving(false);if(logoRef.current)logoRef.current.value='';}
   };
-  const runSubscription=async(action)=>{
-    setConfirmAction(null);setSubscriptionSaving(true);setError('');setSuccess('');
-    try{
-      const status=action==='cancel'?await cancelarAssinaturaSettingsV2DB(companyId):await reativarAssinaturaSettingsV2DB(companyId);
-      setSuccess(action==='cancel'?'Assinatura cancelada sem apagar os dados.':'Assinatura reativada.');
-      await load();
-      return status;
-    }catch(err){setError(mensagemErro(err));}
-    finally{setSubscriptionSaving(false);}
-  };
 
   if(loading&&!form)return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500"><Loader2 className="mr-2 animate-spin" size={20}/>Carregando configurações...</div>;
 
-  const [statusLabel,statusClass]=STATUS[subscription?.status]||[subscription?.status||'Sem assinatura','bg-slate-100 text-slate-600'];
-  const canCancel=subscription&&['trial','active'].includes(subscription.status);
-  const canReactivate=subscription&&['canceled','suspended','past_due'].includes(subscription.status);
+  const resumo=resumoAssinatura(subscription);
+  const [statusLabel,statusClass]=resumo?[resumo.titulo,STATUS[resumo.encerrado&&resumo.status==='trial'?'suspended':resumo.status]?.[1]||'bg-slate-100 text-slate-600']:['Sem assinatura','bg-slate-100 text-slate-600'];
 
   return <div className="min-h-screen bg-slate-50 text-slate-900">
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6"><div className="flex min-w-0 items-center gap-3"><button onClick={onClose} className="rounded-xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50" aria-label="Voltar"><ArrowLeft size={19}/></button><div className="min-w-0"><div className="flex items-center gap-2"><h1 className="truncate text-base font-bold">Configurações</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">V2</span></div><p className="truncate text-xs text-slate-500">{companyName}</p></div></div><Btn variant="secondary" onClick={load} disabled={loading}><RefreshCcw size={16}/><span className="hidden sm:inline">Atualizar</span></Btn></div></header>
@@ -85,11 +70,11 @@ export default function SettingsV2({companyId,companyName='Sua empresa',onClose}
 
         <div className="space-y-5"><section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center gap-3"><div className="rounded-2xl bg-slate-100 p-3 text-slate-600"><Image size={20}/></div><div><h2 className="text-sm font-bold">Logo da empresa</h2><p className="mt-1 text-xs text-slate-500">JPG, PNG ou WEBP · até 2 MB.</p></div></div><div className="mt-5 flex items-center gap-4"><div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">{form.logoUrl?<img src={form.logoUrl} alt="Logo da empresa" className="h-full w-full object-contain"/>:<Building2 className="text-slate-300" size={30}/>}</div><div className="min-w-0"><input ref={logoRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e=>uploadLogo(e.target.files?.[0])}/><Btn variant="secondary" onClick={()=>logoRef.current?.click()} disabled={logoSaving}>{logoSaving?<Loader2 className="animate-spin" size={16}/>:<Upload size={16}/>}Trocar logo</Btn><p className="mt-2 text-[11px] text-slate-400">A imagem fica no bucket privado de branding da empresa.</p></div></div></section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className="rounded-2xl bg-slate-100 p-3 text-slate-600"><CreditCard size={20}/></div><div><h2 className="text-sm font-bold">Assinatura</h2><p className="mt-1 text-xs text-slate-500">Status real da conta.</p></div></div><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${statusClass}`}>{statusLabel}</span></div>{subscription?<div className="mt-5 space-y-3 rounded-2xl bg-slate-50 p-4 text-sm"><div className="flex justify-between gap-3"><span className="text-slate-500">Plano</span><strong>{subscription.plano||'—'}</strong></div><div className="flex justify-between gap-3"><span className="text-slate-500">Valor cadastrado</span><strong>{brl(subscription.valor)}</strong></div><div className="flex justify-between gap-3"><span className="text-slate-500">Período atual</span><strong className="text-right">{dataBR(subscription.inicio)} — {dataBR(subscription.fim)}</strong></div></div>:<div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Nenhum registro de assinatura foi encontrado.</div>}<p className="mt-4 text-xs leading-relaxed text-slate-500">Checkout e troca de forma de pagamento só serão exibidos quando um provedor de pagamento real estiver integrado. Cancelar não apaga seus dados.</p><div className="mt-4">{canCancel&&<Btn variant="danger" className="w-full" disabled={subscriptionSaving} onClick={()=>setConfirmAction('cancel')}>Cancelar assinatura</Btn>}{canReactivate&&<Btn className="w-full" disabled={subscriptionSaving} onClick={()=>setConfirmAction('reactivate')}>{subscriptionSaving?<Loader2 className="animate-spin" size={16}/>:<ShieldCheck size={16}/>}Reativar assinatura</Btn>}</div></section>
+          {/* BETA ACCESS · sem checkout: status real, valor depois do teste e contato com a ZiisTec; sem cancelar/reativar pelo proprietário. */}
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className="rounded-2xl bg-slate-100 p-3 text-slate-600"><CreditCard size={20}/></div><div><h2 className="text-sm font-bold">Assinatura</h2><p className="mt-1 text-xs text-slate-500">Status real da conta.</p></div></div><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${statusClass}`}>{statusLabel}</span></div>{resumo?<div className="mt-5 space-y-3 rounded-2xl bg-slate-50 p-4 text-sm"><div className="flex justify-between gap-3"><span className="text-slate-500">Plano</span><strong>{resumo.plano}</strong></div>{resumo.destaque&&<div className="flex justify-between gap-3"><span className="text-slate-500">{resumo.status==='trial'?'Teste grátis':'Valor'}</span><strong className="tabular-nums">{resumo.destaque}</strong></div>}{resumo.linhas.map(([rotulo,valor])=><div key={rotulo} className="flex justify-between gap-3"><span className="text-slate-500">{rotulo}</span><strong className="text-right tabular-nums">{valor}</strong></div>)}</div>:<div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Nenhum registro de assinatura foi encontrado.</div>}{resumo&&(resumo.aviso||resumo.mensagem)&&<p className="mt-4 text-xs leading-relaxed text-slate-500">{resumo.aviso||resumo.mensagem}</p>}<p className="mt-3 text-xs font-medium leading-relaxed text-slate-700">Entre em contato com a ZiisTec para renovar o acesso.</p><p className="mt-1 text-xs leading-relaxed text-slate-500">Durante o beta, renovação, cancelamento e mudança de plano são feitos pela equipe ZiisTec. Seus dados nunca são apagados.</p></section>
         </div>
       </div>}
     </main>
 
-    {confirmAction&&<div className="fixed inset-0 z-[16000] flex items-end justify-center bg-slate-950/50 sm:items-center sm:p-5" onMouseDown={e=>{if(e.target===e.currentTarget&&!subscriptionSaving)setConfirmAction(null);}}><div className="w-full rounded-t-3xl bg-white p-6 shadow-2xl sm:max-w-md sm:rounded-3xl"><div className="flex items-start justify-between gap-3"><div><h3 className="text-base font-bold">{confirmAction==='cancel'?'Cancelar assinatura?':'Reativar assinatura?'}</h3><p className="mt-2 text-sm leading-relaxed text-slate-500">{confirmAction==='cancel'?'O acesso seguirá a regra do servidor para assinatura cancelada. Os dados da empresa, clientes e histórico não são apagados.':'O servidor vai tentar reativar a assinatura mantendo todos os dados existentes.'}</p></div><button onClick={()=>setConfirmAction(null)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X size={18}/></button></div><div className="mt-6 flex gap-2"><Btn variant="secondary" className="flex-1" onClick={()=>setConfirmAction(null)}>Voltar</Btn><Btn variant={confirmAction==='cancel'?'danger':'primary'} className="flex-1" disabled={subscriptionSaving} onClick={()=>runSubscription(confirmAction)}>{subscriptionSaving?<Loader2 className="animate-spin" size={16}/>:null}{confirmAction==='cancel'?'Confirmar cancelamento':'Confirmar reativação'}</Btn></div></div></div>}
   </div>;
 }

@@ -29,6 +29,9 @@ import {
   uploadDocumentosCompraDB, uploadLogoEmpresaDB,
 } from "../lib/runtimeApi";
 import { cancelarAssinaturaDB, reativarAssinaturaDB } from "../lib/subscriptionApi";
+import MinhaConta from "../components/MinhaConta";
+import { seloBetaAtivo } from "../lib/betaFlags";
+import { resumoAssinatura } from "../lib/subscriptionDisplay";
 import { chamarIAReal } from "../lib/aiApi";
 import { resolverLogoEmpresaDB, persistirFotosOSDB, resolverImagemProdutoDB, salvarImagemProdutoDB, removerImagemProdutoDB, prepararPreviewImagemProdutoDB } from "../lib/storageExtras";
 import { createProductImagePreview } from "../lib/productImagePreview";
@@ -234,7 +237,7 @@ const MEMBRESIAS_SEED = [
   { id: "m3", usuarioId: "u3", empresaId: "e2", papel: "proprietario", ativo: true, desde: addDays(HOJE, -35) },
 ];
 
-const PLANO = { nome: "ZiisTec Mensal", valor: 69.9 };
+const PLANO = { nome: "Profissional", valor: 79.9 };
 const ASSINATURAS_SEED = [
   { id: "a1", empresaId: "e1", plano: PLANO.nome, valor: PLANO.valor, status: "ativa", inicio: addDays(HOJE, -240), proximaCobranca: addDays(HOJE, 12) },
   { id: "a2", empresaId: "e2", plano: PLANO.nome, valor: PLANO.valor, status: "pendente", inicio: addDays(HOJE, -35), proximaCobranca: addDays(HOJE, -3) },
@@ -318,6 +321,10 @@ const TONE = {
 const Pill = ({ tone = "neutro", children, className }) => (
   <span className={cx("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap", TONE[tone], className)}>{children}</span>
 );
+/* BETA ACCESS · selo discreto no shell (marca lateral, trilho recolhido e cabeçalho mobile). */
+const SeloBeta = ({ className }) => (seloBetaAtivo() ? (
+  <span className={cx("inline-flex items-center rounded-md bg-teal-400/15 px-1.5 py-0.5 text-[10px] font-bold leading-none tracking-[0.12em] text-teal-300 ring-1 ring-teal-400/30", className)}>BETA</span>
+) : null);
 
 const ST_ORC = {
   rascunho: { label: "Rascunho", tone: "neutro" },
@@ -648,6 +655,7 @@ export default function ZiisTec({ contexto }) {
   const drawerSwipe = useRef(null);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [busca, setBusca] = useState(false);
+  const [minhaConta, setMinhaConta] = useState(false);
   /* --- identidade e acesso --- */
   const [empresas, setEmpresas] = useState(() => (real ? [contexto.empresa] : EMPRESAS_SEED));
   const [usuarios, setUsuarios] = useState(() => (real ? contexto.usuarios : USUARIOS_SEED));
@@ -1245,8 +1253,12 @@ export default function ZiisTec({ contexto }) {
 
   const Marca = ({ rail }) => (
     <div className={cx("flex items-center gap-3 px-5 h-[68px]", rail && !menuExpandido && "md:px-0 md:justify-center lg:px-5 lg:justify-start")}>
-      <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-9 h-9 rounded-xl object-contain shrink-0" />
+      <div className="relative shrink-0">
+        <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-9 h-9 rounded-xl object-contain" />
+        {rail && !menuExpandido && <SeloBeta className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1 text-[8px] lg:hidden" />}
+      </div>
       <p className={cx("text-white font-semibold tracking-tight text-[17px]", rail && !menuExpandido && "hidden lg:block")}>ZiisTec</p>
+      <SeloBeta className={rail && !menuExpandido ? "hidden lg:inline-flex" : ""} />
     </div>
   );
   const Nav = ({ rail }) => (
@@ -1267,21 +1279,29 @@ export default function ZiisTec({ contexto }) {
       })}
     </nav>
   );
-  const Empresa = ({ rail }) => (
-    <div className={cx("px-3 pb-4", rail && !menuExpandido && "hidden lg:block")}>
-      <div className="flex items-center gap-3 rounded-xl px-3 py-3 bg-white/5">
-        <div className="w-8 h-8 rounded-lg bg-slate-700 text-slate-200 flex items-center justify-center text-xs font-semibold shrink-0">{iniciais(empresa.nome)}</div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] text-white font-medium truncate">{empresa.nome}</p>
-          <p className="text-[11px] text-slate-400 truncate">
-            {usuarioAtual?.nome} · {papel === "proprietario" ? "proprietário" : "técnico"}
-          </p>
-        </div>
-        <button onClick={sair} aria-label="Sair da conta" title="Sair"
-          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 shrink-0"><LogOut className="w-4 h-4" /></button>
+  /* BETA ACCESS · Minha conta e Sair da conta ficam visíveis em desktop, no trilho recolhido do tablet e no menu mobile. */
+  const Empresa = ({ rail }) => {
+    const compacto = rail && !menuExpandido;
+    return (
+      <div className={cx("px-3 pb-4 space-y-1", compacto && "md:px-2 lg:px-3")}>
+        <button onClick={() => { setDrawer(false); setMinhaConta(true); }} aria-label="Minha conta" title="Minha conta"
+          className={cx("w-full min-h-11 flex items-center gap-3 rounded-xl px-3 py-3 bg-white/5 text-left hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400", compacto && "md:justify-center md:px-0 lg:justify-start lg:px-3")}>
+          <div className="w-8 h-8 rounded-lg bg-slate-700 text-slate-200 flex items-center justify-center text-xs font-semibold shrink-0">{iniciais(empresa.nome)}</div>
+          <div className={cx("min-w-0 flex-1", compacto && "md:hidden lg:block")}>
+            <p className="text-[13px] text-white font-medium truncate">{empresa.nome}</p>
+            <p className="text-[11px] text-slate-400 truncate">
+              {usuarioAtual?.nome} · {papel === "proprietario" ? "proprietário" : "técnico"}
+            </p>
+          </div>
+        </button>
+        <button onClick={sair} aria-label="Sair da conta" title="Sair da conta"
+          className={cx("w-full min-h-11 flex items-center gap-2.5 rounded-xl px-3 text-[13px] font-medium text-slate-300 hover:text-white hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400", compacto && "md:justify-center md:px-0 lg:justify-start lg:px-3")}>
+          <LogOut className="w-4 h-4 shrink-0" aria-hidden="true" />
+          <span className={compacto ? "md:hidden lg:inline" : ""}>Sair da conta</span>
+        </button>
       </div>
-    </div>
-  );
+    );
+  };
 
   const estiloGlobal = (
     <style>{`
@@ -1321,10 +1341,9 @@ export default function ZiisTec({ contexto }) {
       assinaturas={assinaturas} mudarAssinatura={mudarAssinatura} sair={sair} toast={toast} /></>
   );
 
-  /* portão 3 — assinatura sem liberação bloqueia o uso, nunca os dados */
-  if (assinatura && !ST_ASSINATURA[assinatura.status].libera) return (
-    <>{estiloGlobal}<AssinaturaBloqueada assinatura={assinatura} empresa={empresa} papel={papel} sair={sair}
-      reativar={() => mudarAssinatura(empresaId, "ativa")} /></>
+  /* portão 3 — assinatura sem liberação (status ou período encerrado) bloqueia o uso, nunca os dados */
+  if (assinatura && (!ST_ASSINATURA[assinatura.status]?.libera || resumoAssinatura(assinatura)?.bloqueado)) return (
+    <>{estiloGlobal}<AssinaturaBloqueada assinatura={assinatura} empresa={empresa} papel={papel} sair={sair} /></>
   );
 
   return (
@@ -1352,8 +1371,10 @@ export default function ZiisTec({ contexto }) {
         <div className="flex items-center gap-2.5">
           <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-7 h-7 rounded-lg object-contain" />
           <span className="text-white font-semibold tracking-tight">ZiisTec</span>
+          <SeloBeta />
         </div>
         <div className="flex items-center">
+          <button onClick={() => setMinhaConta(true)} aria-label="Minha conta" className="min-h-11 min-w-11 p-2.5 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><User className="w-5 h-5" /></button>
           <button onClick={() => setBusca(true)} aria-label="Buscar" className="min-h-11 min-w-11 p-2.5 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><Search className="w-5 h-5" /></button>
           <button onClick={() => setDrawer(true)} aria-label="Abrir menu" className="min-h-11 min-w-11 p-2.5 -mr-2 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><Menu className="w-6 h-6" /></button>
         </div>
@@ -1415,6 +1436,11 @@ export default function ZiisTec({ contexto }) {
       </nav>
 
       {busca && (real && papel === "proprietario" ? <GlobalSearchModal companyId={empresaId} onClose={() => setBusca(false)} onClient={abrirCliente} onWorkOrder={abrirOS} onQuote={abrirOrc} onWarranty={abrirGarantia} onLocation={(item)=>{ if(item.work_order_id) abrirOS(item.work_order_id); else abrirCliente(item.client_id); return true; }} onPostSale={()=>{ const u=new URL(window.location.href); u.searchParams.set("v2","pos-venda"); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} onProduct={(id)=>{ const u=new URL(window.location.href); u.searchParams.set("v2","produtos"); u.searchParams.set("product",id); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} /> : <BuscaGlobal onClose={() => setBusca(false)} {...props} />)}
+
+      {minhaConta && (
+        <MinhaConta nome={usuarioAtual?.nome} email={usuarioAtual?.email} empresa={empresa.fantasia || empresa.nome} papel={papel}
+          assinatura={assinatura} mostrarAssinatura={pode(papel, "assinatura")} sair={sair} onFechar={() => setMinhaConta(false)} />
+      )}
 
       {toast && (
         <div role="status" className="zt-nao-imprime fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white text-[14px] px-4 py-3 rounded-xl shadow-lg flex items-center gap-2.5 max-w-[92vw]">
@@ -5345,6 +5371,7 @@ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssina
   const [f, setF] = useState(empresa);
   const logoRef = useRef(null);
   const set = (k, v) => setF({ ...f, [k]: v });
+  const resumoAss = resumoAssinatura(assinatura);
   useEffect(() => {
     let ativo = true;
     if (f.logoPath && !f.logoUrl) resolverLogoEmpresaDB(f.logoPath).then((url) => { if (ativo && url) { setF((v) => ({ ...v, logoUrl: url })); setEmpresa((v) => ({ ...v, logoUrl: url })); } }).catch(() => {});
@@ -5418,31 +5445,28 @@ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssina
           </Panel>
         </section>
 
-        {assinatura && (
+        {/* BETA ACCESS · assinatura sem checkout: o texto segue o status real; renovação e cancelamento ficam com a ZiisTec. */}
+        {resumoAss && (
           <section>
             <Rotulo>Minha assinatura</Rotulo>
             <Panel className="p-5 sm:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-[15px] font-medium text-slate-900">{assinatura.plano}</p>
-                  <p className="text-[13px] text-slate-500 mt-0.5">
-                    {brl(assinatura.valor)} por mês · próxima cobrança em {dataBR(assinatura.proximaCobranca)}
-                  </p>
+                  <p className="text-[15px] font-medium text-slate-900">{resumoAss.plano}</p>
+                  {resumoAss.destaque && <p className="text-[13px] text-slate-600 mt-0.5 tabular-nums">{resumoAss.destaque}</p>}
                 </div>
-                <Pill tone={ST_ASSINATURA[assinatura.status].tone}>{ST_ASSINATURA[assinatura.status].label}</Pill>
+                <Pill tone={resumoAss.tom}>{resumoAss.titulo}</Pill>
               </div>
-              <div className="flex flex-wrap gap-2 mt-5">
-                <Btn variant="soft" size="sm" icon={CreditCard} onClick={() => aviso("Pagamento depende do provedor que ainda vamos integrar")}>
-                  Forma de pagamento
-                </Btn>
-                <Btn variant="ghost" size="sm" onClick={() => pedirConfirmacao({
-                  titulo: "Cancelar assinatura?",
-                  texto: "O acesso ao ZiisTec será interrompido ao confirmar. Seus dados não são apagados — cancelar assinatura é diferente de excluir a conta. Você pode reativar enquanto o período atual ainda estiver válido.",
-                  confirmar: "Cancelar assinatura", acao: () => mudarAssinatura(empresaId, "cancelada"),
-                })}>Cancelar assinatura</Btn>
-              </div>
-              <p className="text-[12px] text-slate-400 mt-4 leading-relaxed">
-                Cobrança e checkout dependem de um provedor de pagamento ainda não integrado. O cancelamento, porém, já é gravado no servidor e mantém todos os seus dados.
+              {resumoAss.linhas.length > 0 && (
+                <dl className="mt-4 space-y-2 text-[14px]">
+                  {resumoAss.linhas.map(([rotulo, valor]) => (
+                    <div key={rotulo} className="flex justify-between gap-3"><dt className="text-slate-500">{rotulo}</dt><dd className="font-medium tabular-nums">{valor}</dd></div>
+                  ))}
+                </dl>
+              )}
+              {(resumoAss.aviso || resumoAss.mensagem) && <p className="text-[13px] text-slate-500 mt-4 leading-relaxed">{resumoAss.aviso || resumoAss.mensagem}</p>}
+              <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">
+                Durante o beta, renovação, cancelamento e mudança de plano são feitos pela equipe ZiisTec. Entre em contato com a ZiisTec para renovar o acesso.
               </p>
             </Panel>
           </section>
@@ -5915,31 +5939,33 @@ function Autenticacao({ usuarios, membresias, empresas, onEntrar, onCriarConta, 
   );
 }
 
-function AssinaturaBloqueada({ assinatura, empresa, sair, reativar }) {
-  const st = ST_ASSINATURA[assinatura.status];
+/* BETA ACCESS · sem checkout: o proprietário não reativa por aqui (nada de pagamento simulado).
+   Trial encerrado e demais bloqueios mostram o status real; os dados continuam no servidor. */
+function AssinaturaBloqueada({ assinatura, empresa, papel, sair }) {
+  const resumo = resumoAssinatura(assinatura);
+  const proprietario = papel === "proprietario";
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased">
+    <div className="min-h-[100dvh] bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased overflow-x-hidden">
       <div className="w-full max-w-md text-center">
         <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center mx-auto mb-5">
           <Lock className="w-5 h-5 text-teal-400" aria-hidden="true" />
         </div>
-        <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
-          {assinatura.status === "cancelada" ? "Sua assinatura foi cancelada" : "Sua assinatura está pausada"}
-        </h1>
-        <p className="text-[15px] text-slate-500 mt-2 leading-relaxed">
-          Os dados da {empresa.nome} continuam armazenados: clientes, orçamentos, ordens, financeiro, garantias e histórico.
-          Nada foi apagado.
+        <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">{resumo.titulo}</h1>
+        <p className="text-[15px] text-slate-600 mt-2 leading-relaxed">{resumo.mensagem}</p>
+        <p className="text-[14px] text-slate-500 mt-1 leading-relaxed">
+          Clientes, orçamentos, ordens, financeiro, garantias e histórico da {empresa.nome} não foram apagados.
         </p>
-        <Panel className="p-5 mt-7 text-left space-y-3">
-          <div className="flex justify-between text-[14px]"><span className="text-slate-500">Plano</span><span className="font-medium">{assinatura.plano}</span></div>
-          <div className="flex justify-between text-[14px]"><span className="text-slate-500">Valor</span><span className="font-medium tabular-nums">{brl(assinatura.valor)}/mês</span></div>
-          <div className="flex justify-between items-center text-[14px]"><span className="text-slate-500">Situação</span><Pill tone={st.tone}>{st.label}</Pill></div>
-        </Panel>
-        <Btn className="w-full mt-5" icon={CreditCard} onClick={reativar}>Reativar assinatura</Btn>
-        <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">
-          Se o período atual ainda estiver válido, a reativação restaura o acesso sem apagar nada. Depois do vencimento, uma nova cobrança será necessária quando o provedor de pagamento estiver integrado.
+        {proprietario && (
+          <Panel className="p-5 mt-7 text-left space-y-3">
+            <div className="flex justify-between text-[14px]"><span className="text-slate-500">Plano</span><span className="font-medium">{resumo.plano}</span></div>
+            <div className="flex justify-between text-[14px]"><span className="text-slate-500">Valor</span><span className="font-medium tabular-nums">{resumo.preco}</span></div>
+            <div className="flex justify-between text-[14px]"><span className="text-slate-500">Fim do período</span><span className="font-medium tabular-nums">{resumo.fim}</span></div>
+          </Panel>
+        )}
+        <p className="mt-5 rounded-xl bg-white ring-1 ring-slate-200/70 px-4 py-3 text-[14px] font-medium text-slate-800">
+          {proprietario ? resumo.contato : "Fale com o responsável pela empresa para retomar o acesso."}
         </p>
-        <button onClick={sair} className={cx("text-[13px] text-slate-500 mt-6 hover:text-slate-800", ring)}>Sair da conta</button>
+        <Btn className="w-full mt-5" variant="soft" icon={LogOut} onClick={sair}>Sair da conta</Btn>
       </div>
     </div>
   );

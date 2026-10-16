@@ -100,6 +100,7 @@ regressions=(
   supabase/tests/v2_assistant_owner_reads_rollback.sql
   supabase/tests/v2_assistant_owner_writes_rollback.sql
   supabase/tests/v2_platform_subscription_renewal_rollback.sql
+  supabase/tests/v2_beta_invites_rollback.sql
 )
 
 for sql in "${regressions[@]}"; do
@@ -108,6 +109,7 @@ for sql in "${regressions[@]}"; do
 done
 
 bash scripts/test-rc1b-upload-concurrency.sh
+bash scripts/test-beta-invite-concurrency.sh
 node --test tests/blockers/f03_quote_to_wo_authority.test.mjs
 
 echo 'CI_SQL_RLS: OK'

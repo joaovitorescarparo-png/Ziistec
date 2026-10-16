@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { supabase, mensagemErro } from "../lib/supabase";
 import { ZiisTecAppMark } from "../components/ZiisTecBrand";
 
@@ -6,12 +6,22 @@ const anel = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-60
 const campo = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-600";
 
 /* Empresa + membresia de owner + assinatura trial nascem juntas, na RPC.
-   O frontend não insere em companies/company_members/subscriptions. */
+   O frontend não insere em companies/company_members/subscriptions.
+   BETA ACCESS · sem convite beta válido o formulário não aparece; o servidor recusa de qualquer forma. */
 export default function Onboarding({ perfil, aoCriar, sair }) {
   const [passo, setPasso] = useState(0);
   const [f, setF] = useState({ nome: "", atividade: "", temEquipe: false });
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState(null);
+  const [beta, setBeta] = useState("checando");
+
+  const checarConvite = async () => {
+    setBeta("checando"); setErro(null);
+    const { data, error } = await supabase.rpc("zt_beta_invite_status");
+    if (error) { setErro(mensagemErro(error)); setBeta("erro"); return; }
+    setBeta(data?.invited ? "liberado" : "fechado");
+  };
+  useEffect(() => { checarConvite(); }, []);
 
   const passos = [
     { chave: "nome", label: "Qual é o nome do seu negócio?", place: "Ex.: JR Serviços Técnicos" },
@@ -27,10 +37,53 @@ export default function Onboarding({ perfil, aoCriar, sair }) {
       p_owner_name: perfil?.full_name || null,
       p_phone: perfil?.phone || null,
     });
-    if (error) { setErro(mensagemErro(error)); setOcupado(false); return; }
+    if (error) {
+      if (error.hint === "beta_invite_required") setBeta("fechado");
+      else setErro(mensagemErro(error));
+      setOcupado(false); return;
+    }
     await aoCriar(data);
     setOcupado(false);
   };
+
+  if (beta !== "liberado") {
+    return (
+      <div className="min-h-[100dvh] bg-slate-50 flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 font-sans antialiased overflow-x-hidden">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6 sm:mb-8">
+            <ZiisTecAppMark className="mx-auto mb-5" />
+            <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
+              {beta === "fechado" ? "Beta fechado" : beta === "erro" ? "Não consegui verificar seu acesso" : "Verificando seu acesso"}
+            </h1>
+          </div>
+          <div className="bg-white rounded-2xl ring-1 ring-slate-200/70 p-5 sm:p-6 space-y-4">
+            {beta === "fechado" && (
+              <>
+                <p className="text-[15px] text-slate-700 leading-relaxed">Seu e-mail ainda não possui acesso ao beta da ZiisTec.</p>
+                <p className="text-[14px] text-slate-500 leading-relaxed">Se você recebeu um convite, confirme que está usando o mesmo e-mail.</p>
+                {perfil?.email && <p className="text-[13px] text-slate-500">Conta atual: <span className="font-medium text-slate-800 break-all">{perfil.email}</span></p>}
+                <button onClick={checarConvite} className={`w-full min-h-11 text-sm px-4 py-3 rounded-xl ring-1 ring-slate-200 text-slate-700 hover:bg-slate-50 ${anel}`}>
+                  Verificar novamente
+                </button>
+              </>
+            )}
+            {beta === "checando" && <p role="status" className="text-[14px] text-slate-500">Conferindo o convite do beta para este e-mail…</p>}
+            {beta === "erro" && (
+              <>
+                {erro && <p role="alert" className="text-[13px] text-rose-700 bg-rose-50 ring-1 ring-rose-200/70 rounded-xl px-3.5 py-3">{erro}</p>}
+                <button onClick={checarConvite} className={`w-full min-h-11 text-sm px-4 py-3 rounded-xl bg-teal-700 text-white font-medium ${anel}`}>
+                  Tentar novamente
+                </button>
+              </>
+            )}
+            <button onClick={sair} className={`w-full min-h-11 text-sm px-4 py-3 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 ${anel}`}>
+              Sair da conta
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const atual = passos[passo];
   return (

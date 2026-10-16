@@ -51,7 +51,7 @@
 - `bash scripts/run-sql-rls-ci.sh` reproduz migrations e regressões em Supabase descartável.
 - CodeQL cobre PRs de integração.
 - Migrations de segurança/regra de negócio devem ganhar teste SQL/RLS rollback-safe quando aplicável.
-- Numeração: a frente do Assistente ocupa 0093–0097 (0095 = Wave 2, já no Staging; 0096 = consultas do proprietário e 0097 = escritas canônicas, ambas da branch `claude/assistant-universal-owner-v1`). 0098 = renovação de assinatura pelo admin da plataforma (beta). As migrations dos Blocos 3/4 (branch `blocks-3-4-os-history-receipt`, hoje 0093–0098) precisam ser renumeradas para depois da última migration existente antes de integrar.
+- Numeração: a frente do Assistente ocupa 0093–0097 (0095 = Wave 2, já no Staging; 0096 = consultas do proprietário e 0097 = escritas canônicas, ambas da branch `claude/assistant-universal-owner-v1`). 0098 = renovação de assinatura pelo admin da plataforma (beta). 0099 = convites do beta fechado + plano Profissional R$ 79,90. As migrations dos Blocos 3/4 (branch `blocks-3-4-os-history-receipt`, hoje 0093–0098) precisam ser renumeradas para depois da última migration existente antes de integrar.
 - Beta: primeiro proprietário em `beta.ziistec.com` (Staging, sem técnicos); domínio, Auth, SMTP e renovação em `docs/engineering/BETA_OWNER_ONBOARDING.md`.
 - Mudança visual/UX relevante precisa de teste humano no Preview mesmo com CI verde.
 

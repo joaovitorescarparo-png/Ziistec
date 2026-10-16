@@ -10,6 +10,7 @@ Cada passo abaixo marcado **(João)** é manual e não é feito por agente: DNS,
 - Backups/PITR do Staging conferidos no Dashboard.
 - Smokes no Staging só com rollback forçado. Nenhum teste usa o tenant do beta.
 - Migration `0098_platform_subscription_renewal.sql` aplicada no Staging, com autorização explícita. Sem ela, a renovação do §4 não existe.
+- Migration `0099_beta_invites_professional_plan.sql` aplicada no Staging. Sem ela, o onboarding não confere convite e o plano nasce com o default antigo.
 
 ## 1. Domínio (João)
 
@@ -47,7 +48,7 @@ Ao trocar o Site URL, os e-mails de outras previews continuam funcionando enquan
 | Cadastro | `supabase.auth.signUp` com `options.emailRedirectTo` (`src/screens/Login.jsx`) | `https://beta.ziistec.com/` |
 | Recuperação de senha | `supabase.auth.resetPasswordForEmail(email, { redirectTo })` | `https://beta.ziistec.com/`; o evento `PASSWORD_RECOVERY` abre `NovaSenha`, que chama `updateUser({ password })` |
 | Login | `signInWithPassword` | sem redirect |
-| Google | `signInWithOAuth` | o provedor está **desligado** no Staging; o botão aparece e falha; não usar no beta |
+| Google | `signInWithOAuth` | o provedor está **desligado** no Staging; o botão fica oculto enquanto `VITE_ENABLE_GOOGLE_AUTH` não for `true` (padrão: oculto) |
 | Convite de equipe | Edge Function `team-invite-email` (`redirect_to` = origem) | fora do beta (sem técnicos); o CORS da função não inclui o domínio beta |
 
 Mantenha **Confirm email** ligado. Os templates são `supabase/templates/confirmation.html` e `recovery.html` e usam `{{ .ConfirmationURL }}`.
@@ -106,15 +107,54 @@ select action, before_data, after_data, created_at
 
 Regressão: `supabase/tests/v2_platform_subscription_renewal_rollback.sql`, no CI SQL/RLS. A tela de plataforma ainda não tem botão de renovação, só de status.
 
+## 4.1 Convites do beta fechado (admin)
+
+Só cria empresa nova quem tem convite beta válido para o mesmo e-mail confirmado no Auth (`zt_create_company`, 0099). Um cadastro sem convite cria só a conta e vê a tela "Beta fechado": nenhuma empresa, assinatura ou trial. Técnico convidado por uma empresa existente não precisa de convite beta (`zt_accept_invites` não muda).
+
+- Um convite ativo por e-mail (sem diferenciar maiúsculas); validade de 1 a 90 dias (padrão 7); revogável enquanto não foi usado.
+- Ao criar a empresa, o convite vira `used` com `used_by`, `used_at` e `company_id`, na mesma transação. Falha não consome o convite.
+- `beta_invites` não tem acesso direto para anon nem para usuários. Listar, criar e revogar exigem administrador da plataforma com MFA. Criação e revogação gravam `platform_audit_logs`.
+- Nenhum e-mail é enviado: passe `https://beta.ziistec.com` para a pessoa convidada.
+
+**Pelo app (conta dedicada de admin com MFA):** Plataforma → aba **Beta** → e-mail e validade → **Adicionar convite**. A lista mostra status, expiração, uso, empresa criada e período do trial. **Revogar** só aparece para convite pendente.
+
+**Fallback (João, SQL Editor do Staging):** mesma regra do §4: a flag de admin só existe dentro da transação. O admin não pode convidar o próprio e-mail.
+
+```sql
+begin;
+update public.profiles set is_platform_admin = true where id = '<UUID_DO_SEU_PERFIL>';
+select set_config('request.jwt.claim.sub', '<UUID_DO_SEU_PERFIL>', true);
+select set_config('request.jwt.claims', json_build_object('sub','<UUID_DO_SEU_PERFIL>','role','authenticated','aal','aal2')::text, true);
+select public.zt_platform_create_beta_invite('<email-do-convidado>', 7);
+-- revogar: select public.zt_platform_revoke_beta_invite('<UUID_DO_CONVITE>');
+update public.profiles set is_platform_admin = false where id = '<UUID_DO_SEU_PERFIL>';
+commit;
+```
+
+Para conferir convite, empresa e trial:
+
+```sql
+select i.email, i.status, i.expires_at, i.used_at, c.id as company_id, c.name, s.plan, s.amount, s.status, s.current_period_start, s.current_period_end
+  from public.beta_invites i
+  left join public.companies c on c.id = i.company_id
+  left join public.subscriptions s on s.company_id = i.company_id
+ order by i.created_at desc;
+```
+
+Regressão: `supabase/tests/v2_beta_invites_rollback.sql` e `scripts/test-beta-invite-concurrency.sh`, no CI SQL/RLS.
+
+**Assinatura no app:** trial mostra "Profissional · Teste grátis · X dias restantes · Depois do teste: R$ 79,90/mês" e a data de término. O proprietário não cancela nem reativa pelo app no beta: a tela orienta "Entre em contato com a ZiisTec para renovar o acesso" e a renovação segue o §4. Assinaturas antigas mantêm o plano e o valor gravados.
+
 ## 5. Onboarding do primeiro proprietário
 
 | # | Passo do cliente | Conferência |
 |---|---|---|
-| 1 | Acessa `https://beta.ziistec.com` | abre a tela de login sem pedir conta da Vercel |
+| 0 | (admin) Cria o convite beta para o e-mail do cliente (§4.1) | o convite aparece como Pendente |
+| 1 | Acessa `https://beta.ziistec.com` | abre a tela de login sem pedir conta da Vercel, sem botão do Google e com "Acesso beta por convite" |
 | 2 | Cria a conta com e-mail e senha | aparece o aviso de confirmação por e-mail |
 | 3 | Confirma o e-mail | o e-mail chega pelo SMTP próprio; o link volta para `https://beta.ziistec.com/` já autenticado |
-| 4 | Cria a empresa | `zt_create_company` cria o proprietário e o trial de 14 dias |
-| 5 | Recebe o trial | em Configurações, trial até D+14; o admin confere pela consulta do §4 |
+| 4 | Cria a empresa | `zt_create_company` confere o convite e cria o proprietário e o trial de 14 dias; sem convite aparece "Beta fechado" |
+| 5 | Recebe o trial | em Configurações e em Minha conta: Profissional, teste grátis, dias restantes e R$ 79,90/mês depois do teste; o convite vira Utilizado (§4.1) |
 | 6 | Entra | sair e entrar de novo funciona; recarregar mantém a sessão |
 | 7 | Cria o primeiro cliente | o cliente aparece na lista |
 | 8 | Cria o orçamento e aprova | o orçamento aparece com os totais certos |

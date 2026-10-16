@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { supabase, mensagemErro, configurado } from "../lib/supabase";
 import { redirectAuthAtual } from "../lib/authRedirect";
 import { ZiisTecAppMark } from "../components/ZiisTecBrand";
+import { googleAuthHabilitado } from "../lib/betaFlags";
 
 const anel = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50";
 const campo = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-600";
@@ -109,6 +110,8 @@ export default function Login() {
   }
 
   const criando = modo === "criar";
+  /* BETA ACCESS · Google fica oculto até o provedor ser habilitado (VITE_ENABLE_GOOGLE_AUTH=true). */
+  const googleAtivo = googleAuthHabilitado();
   const pronto = email.trim() && (criando ? senha.length >= 8 && nome.trim() : Boolean(senha));
 
   return (
@@ -120,6 +123,7 @@ export default function Login() {
             {criando ? "Criar conta na ZiisTec" : "Entre na sua conta"}
           </h1>
           <p className="text-[14px] text-slate-500 mt-1.5">Gestão de serviços para quem trabalha em campo.</p>
+          <p className="mt-3 inline-flex rounded-full bg-teal-50 px-3 py-1 text-[12px] font-semibold text-teal-800 ring-1 ring-teal-200/70">Acesso beta por convite</p>
         </div>
 
         <div className="bg-white rounded-2xl ring-1 ring-slate-200/70 p-5 sm:p-6 space-y-4">
@@ -147,10 +151,20 @@ export default function Login() {
             {ocupado ? "Aguarde…" : criando ? "Criar conta" : "Entrar"}
           </Botao>
 
-          <div className="flex items-center gap-3">
-            <span className="h-px bg-slate-200 flex-1" /><span className="text-[12px] text-slate-400">ou</span><span className="h-px bg-slate-200 flex-1" />
-          </div>
-          <Botao variante="soft" className="w-full" disabled={ocupado} onClick={google}>Entrar com Google</Botao>
+          {googleAtivo && (
+            <>
+              <div className="flex items-center gap-3">
+                <span className="h-px bg-slate-200 flex-1" /><span className="text-[12px] text-slate-400">ou</span><span className="h-px bg-slate-200 flex-1" />
+              </div>
+              <Botao variante="soft" className="w-full" disabled={ocupado} onClick={google}>Entrar com Google</Botao>
+            </>
+          )}
+
+          {criando && (
+            <p className="text-[12.5px] text-slate-500 leading-relaxed">
+              Durante o beta, só e-mails convidados criam uma empresa. Use o mesmo e-mail do convite.
+            </p>
+          )}
 
           <div className="flex justify-between gap-2 text-[13px] pt-1">
             {!criando
