@@ -180,7 +180,17 @@ begin
   -- Convite válido, mas a criação falha: o convite não pode ser consumido.
   insert into zt_bi_calls values('company_f_trial_used',pg_temp.create_company_as(pg_temp.uid('f'),'Empresa F'));
   insert into zt_bi_calls values('company_a_blank',pg_temp.create_company_as(pg_temp.uid('a'),'   '));
-  insert into zt_bi_calls values('invite_a_after_failure',pg_temp.invite(t.invite_a));
+end $$;
+reset role;
+
+-- Leitura direta da tabela só como postgres (authenticated não tem privilégio nela).
+insert into zt_bi_calls select 'invite_a_after_failure',pg_temp.invite(invite_a) from zt_bi;
+
+set local role authenticated;
+do $$
+declare v_admin uuid:=pg_temp.uid('admin'); t zt_bi%rowtype;
+begin
+  select * into t from zt_bi;
   -- Convite válido: cria; repetir devolve a mesma empresa.
   insert into zt_bi_calls values('company_a',pg_temp.create_company_as(pg_temp.uid('a'),'Empresa Beta A'));
   insert into zt_bi_calls values('company_a_retry',pg_temp.create_company_as(pg_temp.uid('a'),'Empresa Beta A'));
@@ -191,6 +201,9 @@ end $$;
 reset role;
 
 update zt_bi set company_a=(pg_temp.call('company_a')->>'company')::uuid;
+-- Assinatura como nasceu (antes do teste de vencimento mais abaixo).
+insert into zt_bi_calls select 'sub_a_created',(select jsonb_build_object('status',s.status,'plan',s.plan,'amount',s.amount,
+  'start',s.current_period_start,'end',s.current_period_end) from public.subscriptions s where s.company_id=zt_bi.company_a) from zt_bi;
 
 -- Convite de equipe: técnico sem convite beta entra na empresa existente X.
 insert into public.company_invites(company_id,email,role,job_title,name)
@@ -337,11 +350,9 @@ begin
   perform pg_temp.record_result('16_convite_valido_cria_trial_profissional',
     t.company_a is not null
     and (select count(*) from public.company_members m where m.company_id=t.company_a and m.user_id=pg_temp.uid('a') and m.role='owner' and m.status='active')=1
-    and (select jsonb_build_object('status',s.status,'plan',s.plan,'amount',s.amount,'start',s.current_period_start,'end',s.current_period_end)
-           from public.subscriptions s where s.company_id=t.company_a)
-        = jsonb_build_object('status','trial','plan','Profissional','amount',79.90,'start',current_date,'end',current_date+14)
+    and pg_temp.call('sub_a_created') = jsonb_build_object('status','trial','plan','Profissional','amount',79.90,'start',current_date,'end',current_date+14)
     and (select p.onboarding_company_created_at is not null from public.profiles p where p.id=pg_temp.uid('a')),
-    (select to_jsonb(s)::text from public.subscriptions s where s.company_id=t.company_a));
+    pg_temp.call('sub_a_created')::text);
   perform pg_temp.record_result('17_convite_marcado_usado',
     pg_temp.invite(t.invite_a) = jsonb_build_object('status','used','email',lower((select email from zt_bi_users where key='a')),
       'used_by',pg_temp.uid('a'),'company_id',t.company_a,'used',true),

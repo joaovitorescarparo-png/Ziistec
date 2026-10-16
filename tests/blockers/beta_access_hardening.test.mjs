@@ -343,6 +343,8 @@ test('0099: defaults Profissional 79.90, beta_invites fechada, RPCs admin com MF
   }
   const create = sql.slice(sql.indexOf('create or replace function zt_private.zt_create_company('), sql.indexOf('$$;', sql.indexOf('create or replace function zt_private.zt_create_company(')));
   assert.match(create, /security definer\nset search_path=''/);
+  // create or replace não pode remover defaults existentes (42P13): a assinatura viva tem defaults.
+  assert.match(create, /p_name text, p_activity text default null, p_has_team boolean default false,\n\s*p_owner_name text default null, p_phone text default null\n\)/);
   assert.match(create, /u\.email_confirmed_at is not null/);
   const order = ['pg_advisory_xact_lock(hashtext(v_uid::text))', 'return v_existing;', "i.email = v_email and i.status = 'pending' and i.expires_at > now()", 'for update;',
     "hint = 'beta_invite_required'", 'onboarding_company_created_at is not null', 'insert into public.companies', 'insert into public.company_members',

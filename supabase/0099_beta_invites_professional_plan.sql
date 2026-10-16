@@ -190,7 +190,8 @@ $$;
 
 -- Criação de empresa: e-mail confirmado + convite beta válido; convite consumido junto com a empresa.
 create or replace function zt_private.zt_create_company(
-  p_name text, p_activity text, p_has_team boolean, p_owner_name text, p_phone text
+  p_name text, p_activity text default null, p_has_team boolean default false,
+  p_owner_name text default null, p_phone text default null
 )
 returns uuid
 language plpgsql
