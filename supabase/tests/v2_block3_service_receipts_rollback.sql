@@ -5,8 +5,8 @@
 
 begin;
 
--- O relatório de atendimento nasce no fim da transação da conclusão; aqui ele precisa existir já.
-set constraints zt_service_report_after_done immediate;
+-- O relatório de atendimento nasce no fim da transação da conclusão (trigger diferido). Aqui ele é
+-- disparado logo depois das conclusões (set constraints ... immediate mais abaixo), já com o relato.
 
 create temp table zt_sr (
   owner_a uuid, tech_a uuid, owner_b uuid, tech_x uuid,
@@ -147,6 +147,9 @@ set local role authenticated;
 select public.zt_finalize_work_order_with_warranty_overrides((select wo_pending from zt_sr),null,null,null,7,'[]'::jsonb,'[]'::jsonb,null);
 select public.zt_finalize_work_order_with_warranty_overrides((select wo_warranty from zt_sr),null,null,null,7,'[]'::jsonb,'[]'::jsonb,null);
 reset role;
+
+-- Equivale ao commit: os relatórios pendentes são gerados agora, depois do relato da conclusão.
+set constraints zt_service_report_after_done immediate;
 
 update zt_sr t set finance_before=(select count(*) from public.financial_entries f where f.company_id=t.company_a);
 
