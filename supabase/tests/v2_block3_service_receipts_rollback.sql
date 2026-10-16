@@ -11,7 +11,7 @@ set constraints zt_service_report_after_done immediate;
 create temp table zt_sr (
   owner_a uuid, tech_a uuid, owner_b uuid, tech_x uuid,
   company_a uuid, company_b uuid, client_a uuid, location_a uuid,
-  wo_done uuid, wo_open uuid, wo_pending uuid, wo_warranty uuid,
+  wo_done uuid, wo_open uuid, wo_pending uuid, wo_warranty uuid, warranty_origin uuid,
   req_1 uuid, req_reissue uuid,
   receipt_1 jsonb, receipt_2 jsonb, receipt_warranty jsonb,
   finance_before integer
@@ -111,10 +111,24 @@ begin
     wo_pending=public.zt_save_work_order_idempotent(t.company_a,null,gen_random_uuid(),
       jsonb_build_object('client_id',t.client_a,'assigned_to',t.owner_a,'status','in_progress','request','__SR_WO_PENDING__'),
       jsonb_build_array(jsonb_build_object('kind','free','name','Serviço base','quantity',1,'unit_price',50),
-        jsonb_build_object('kind','free','name','Adicional sem preço','quantity',1,'unit_price',0,'is_extra',true,'price_pending',true))),
+        jsonb_build_object('kind','free','name','Adicional sem preço','quantity',1,'unit_price',0,'is_extra',true,'price_pending',true)));
+end $$;
+reset role;
+
+-- Visita em garantia (0036): precisa de garantia vigente do mesmo cliente, ligada à OS de origem.
+insert into public.warranties(company_id,client_id,work_order_id,kind,description,starts_on,ends_on)
+select company_a,client_a,wo_done,'service','__SR_GARANTIA_ORIGEM__',current_date,current_date+90 from zt_sr;
+update zt_sr t set warranty_origin=(select g.id from public.warranties g where g.work_order_id=t.wo_done and g.description='__SR_GARANTIA_ORIGEM__');
+
+set local role authenticated;
+do $$
+declare t zt_sr%rowtype;
+begin
+  select * into t from zt_sr;
+  update zt_sr set
     wo_warranty=public.zt_save_work_order_idempotent(t.company_a,null,gen_random_uuid(),
       jsonb_build_object('client_id',t.client_a,'assigned_to',t.owner_a,'status','in_progress','request','__SR_WO_WARRANTY__',
-        'is_warranty_visit',true),
+        'is_warranty_visit',true,'warranty_id',t.warranty_origin,'origin_wo_id',t.wo_done),
       jsonb_build_array(jsonb_build_object('kind','free','name','Revisão em garantia','quantity',1,'unit_price',100)));
 end $$;
 reset role;

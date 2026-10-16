@@ -80,14 +80,18 @@ function pdfTexts(bytes) {
   const buf = Buffer.from(bytes);
   const raw = buf.toString('latin1');
   const texts = [];
-  const marker = /stream\r?\n/g;
+  // "endstream\n" também contém "stream\n": o lookbehind evita casar o fim de um stream como início.
+  const marker = /(?<!end)stream\r?\n/g;
   let match;
   while ((match = marker.exec(raw))) {
     const start = match.index + match[0].length;
     const end = raw.indexOf('endstream', start);
     if (end < 0) break;
+    // O PDF põe UMA quebra de linha antes de "endstream". Remover todas cortava o último byte
+    // comprimido quando ele era 0x0a/0x0d (dependia da data no fuso da máquina) e o texto sumia.
     let chunk = buf.subarray(start, end);
-    while (chunk.length && (chunk[chunk.length - 1] === 0x0a || chunk[chunk.length - 1] === 0x0d)) chunk = chunk.subarray(0, chunk.length - 1);
+    if (chunk.length && chunk[chunk.length - 1] === 0x0a) chunk = chunk.subarray(0, chunk.length - 1);
+    if (chunk.length && chunk[chunk.length - 1] === 0x0d) chunk = chunk.subarray(0, chunk.length - 1);
     try {
       const content = zlib.inflateSync(chunk).toString('latin1');
       for (const hit of content.matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)) texts.push(Buffer.from(hit[1], 'hex').toString('latin1'));
