@@ -152,7 +152,7 @@ All functions below are owned by `postgres`, `service_role`-only at function ACL
 | `zt_save_purchase_idempotent(p_company uuid, p_purchase uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+ | `public` | delegated to guarded save | no | SAFE |
 | `zt_save_quote(p_company uuid, p_quote uuid, p_row jsonb, p_items jsonb)` | baseline/redefined | `public` | auth + owner/company + subscription | no | SAFE |
 | `zt_save_quote_idempotent(p_company uuid, p_quote uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+ | `public` | delegated to guarded save | no | SAFE |
-| `zt_save_work_order(p_company uuid, p_wo uuid, p_row jsonb, p_items jsonb)` | baseline/redefined/0067 | `public` | auth + owner/company/assignee + subscription | no | SAFE |
+| `zt_save_work_order(p_company uuid, p_wo uuid, p_row jsonb, p_items jsonb)` | baseline/redefined/0067/0103 | `""` | auth + owner/company/assignee + subscription; client_location of the same company/client | no | SAFE |
 | `zt_save_work_order_idempotent(p_company uuid, p_wo uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+/0067 | `public` | delegated to guarded save | no | SAFE |
 | `zt_service_report_after_done()` | 0082 | `""` | trigger-context + OS/company | no | SAFE |
 | `zt_set_followup_status(p_followup uuid, p_status text)` | baseline/redefined | `""` | auth + owner/company + subscription | no | SAFE |

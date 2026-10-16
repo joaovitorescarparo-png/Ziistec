@@ -197,10 +197,11 @@ test('0101/0102: atores definidos pelo banco e relato deduplicado por requestId 
   assert.match(report, /public\.zt_wo_is_owned\(v_wo\.id\) or \(public\.zt_wo_is_mine\(v_wo\.id\) and public\.zt_wo_open\(v_wo\.id\)\)/);
 });
 
-test('0103: OS direta valida local do mesmo cliente/empresa e preserva assinatura com default', () => {
+test('0103: OS direta valida local do mesmo cliente/empresa, preserva assinatura com default e usa search_path vazio', () => {
   const s = compact(sql.location);
   assert.match(s, /create or replace function zt_private\.zt_save_work_order\(p_company uuid, p_wo uuid, p_row jsonb, p_items jsonb default '\[\]'::jsonb\)/);
-  assert.match(s, /set search_path=public/);
+  assert.match(s, /security definer set search_path='' as \$\$/);
+  assert.doesNotMatch(sql.location.replace(/--[^\n]*/g, ''), /search_path=public/);
   assert.match(s, /where l\.id=v_location and l\.company_id=p_company and l\.client_id=v_client/);
   assert.match(s, /when p_row \? 'client_location_id' then v_location when v_client is distinct from client_id then null else client_location_id end/);
   assert.match(s, /if not public\.zt_is_owner\(p_company\) then raise exception 'Somente o proprietário salva ordens de serviço por este fluxo'/);

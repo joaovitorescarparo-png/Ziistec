@@ -2,6 +2,8 @@
 -- Portado da branch blocks-3-4-os-history-receipt (antiga 0096). Revisado contra a linha beta: o
 -- corpo vigente continua o da 0035 (0057/0086/Assistente só chamam a função), então a diferença
 -- abaixo é apenas o local; a conversão de orçamento (0086) segue gravando o local por conta própria.
+-- search_path vazio (a 0035 usava public): todas as tabelas, tipos e funções do corpo são qualificadas
+-- e os triggers de work_orders/work_order_items e as funções chamadas fixam o próprio search_path.
 --
 -- Até aqui só a conversão de orçamento (zt_create_work_order_from_quote) gravava
 -- client_location_id; a Nova OS ignorava o campo. A regra da 0086 continua: client_locations é a
@@ -18,7 +20,7 @@ create or replace function zt_private.zt_save_work_order(p_company uuid, p_wo uu
 returns uuid
 language plpgsql
 security definer
-set search_path=public
+set search_path=''
 as $$
 declare v_uid uuid:=auth.uid(); v_id uuid; v_number text; item jsonb;
   v_client uuid:=nullif(p_row->>'client_id','')::uuid;

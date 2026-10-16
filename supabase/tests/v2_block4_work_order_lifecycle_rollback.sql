@@ -63,10 +63,10 @@ begin
     and not has_function_privilege('authenticated',v_proc.oid,'EXECUTE')
     and not has_function_privilege('anon',v_proc.oid,'EXECUTE'),null);
 
-  -- 0103 substitui o corpo sem mudar assinatura, default, modo, search_path nem ACL.
+  -- 0103 substitui o corpo sem mudar assinatura, default, modo nem ACL; search_path passa de public para ''.
   select * into strict v_proc from pg_proc where oid=to_regprocedure('zt_private.zt_save_work_order(uuid,uuid,jsonb,jsonb)');
   perform pg_temp.lc_check('catalogo_save_os_preservado',v_proc.prosecdef and v_proc.pronargdefaults=1
-    and v_proc.proconfig @> array['search_path=public']::text[]
+    and exists(select 1 from unnest(coalesce(v_proc.proconfig,array[]::text[])) s where s in ('search_path=','search_path=""'))
     and not has_function_privilege('authenticated',v_proc.oid,'EXECUTE'),array_to_string(v_proc.proconfig,','));
 
   perform pg_temp.lc_check('catalogo_triggers_instalados',
