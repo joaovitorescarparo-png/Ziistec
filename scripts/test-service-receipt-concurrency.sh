@@ -36,6 +36,8 @@ trap cleanup EXIT
 
 # Fixture pelas RPCs reais do proprietário: OS direta concluída (o relatório nasce no commit).
 psql -X -v ON_ERROR_STOP=1 "$DB_URL" <<SQL >/dev/null
+-- O guard de assinatura das tabelas operacionais exige identidade autenticada (proprietário da empresa A).
+select set_config('request.jwt.claim.sub','$OWNER',false);
 update public.subscriptions set status='active',current_period_start=current_date,current_period_end=current_date+30 where company_id='$COMPANY';
 insert into public.clients(id,company_id,name,address) values('$CLIENT','$COMPANY','CI Comprovante Concorrente','Rua Paralela, 1');
 SQL
