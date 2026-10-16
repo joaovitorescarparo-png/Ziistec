@@ -105,6 +105,9 @@ async function embedImage(pdf,image){
   }catch{return null;}
 }
 
+// Reaproveitados pelo Comprovante de Serviço (mesma tipografia, logo e saneamento de texto).
+export { A4, MARGIN, clean, wrap, money, date, dateTime, safeName, paymentLabel, loadStorageImage, embedImage };
+
 export async function montarRelatorioAtendimentoPDF(report){
   const snapshot=report?.snapshot||{};
   if(!snapshot?.work_order?.id) throw new Error('Relatório de Atendimento inválido.');

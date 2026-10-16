@@ -36,6 +36,7 @@ import { chamarIAReal } from "../lib/aiApi";
 import { resolverLogoEmpresaDB, persistirFotosOSDB, resolverImagemProdutoDB, salvarImagemProdutoDB, removerImagemProdutoDB, prepararPreviewImagemProdutoDB } from "../lib/storageExtras";
 import { createProductImagePreview } from "../lib/productImagePreview";
 import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
+import ServiceReceiptPanel from "../components/ServiceReceiptPanel";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
 import useModalViewport from "../hooks/useModalViewport";
@@ -3639,6 +3640,7 @@ function OSDetalhe(p) {
   const [txtCheck, setTxtCheck] = useState("");
   const [agendando, setAgendando] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
+  const [comprovanteAberto, setComprovanteAberto] = useState(false);
   const orc = orcamentos.find((o) => o.id === os.orcamentoId);
   const cobranca = lancamentos.find((l) => l.origemTipo === "os" && l.origemId === os.id);
   const gar = garantias.filter((g) => g.osId === os.id);
@@ -3681,6 +3683,9 @@ function OSDetalhe(p) {
     if (podeAdministrarOS) acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
   }
   if (os.status === "andamento") acoes.push({ label: "Finalizar atendimento", icon: Check, fn: () => setFinalizando(true), principal: true });
+  // BLOCO 3 · Comprovante de Serviço (documento não fiscal): proprietário, OS concluída e banco real.
+  // A emissão também é recusada pelo backend para técnico.
+  if (verValores && real && os.status === "concluida") acoes.push({ label: "Comprovante de Serviço", icon: Receipt, fn: () => setComprovanteAberto(true), principal: true });
   const acaoPrincipal = acoes.find((acao) => acao.principal);
   const acoesSecundarias = acoes.filter((acao) => !acao.principal);
 
@@ -4060,6 +4065,12 @@ function OSDetalhe(p) {
       </div>
 
       <AgendarModal os={agendando ? os : null} onClose={() => setAgendando(false)} onSalvar={agendarOS} empresa={empresa} diaSugerido={HOJE} equipe={equipe} />
+
+      {comprovanteAberto && (
+        <Modal open onClose={() => setComprovanteAberto(false)} title={`Comprovante de Serviço · ${os.numero}`} sub="Documento não fiscal emitido pelo proprietário">
+          <ServiceReceiptPanel workOrderId={os.id} telefoneCliente={c?.whatsapp || c?.telefone || ""} onAviso={aviso} />
+        </Modal>
+      )}
 
       {novoItem && (
         <Modal open onClose={() => setNovoItem(null)} title="Adicionar ao atendimento" sub="Do seu catálogo" wide>
