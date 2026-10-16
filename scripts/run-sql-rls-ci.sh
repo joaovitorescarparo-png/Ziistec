@@ -103,13 +103,34 @@ regressions=(
   supabase/tests/v2_beta_invites_rollback.sql
 )
 
+# Falha de regressão também vira anotação do GitHub (legível sem baixar o log do job).
+annotate_failure() {
+  local title="$1" text="$2"
+  echo "::error title=${title}::$(printf '%s' "$text" | grep -E 'ERROR|FAILED|FAIL:|DETAIL|CONTEXT' | head -6 | tr '
+' ' ' | cut -c1-1500)"
+}
+
 for sql in "${regressions[@]}"; do
   echo "CI_SQL_RLS regression: $sql"
-  psql -X -v ON_ERROR_STOP=1 "$DB_URL" -f "$sql"
+  if ! out="$(psql -X -v ON_ERROR_STOP=1 "$DB_URL" -f "$sql" 2>&1)"; then
+    printf '%s
+' "$out"
+    annotate_failure "SQL regression failed: $sql" "$out"
+    exit 3
+  fi
+  printf '%s
+' "$out"
 done
 
 bash scripts/test-rc1b-upload-concurrency.sh
-bash scripts/test-beta-invite-concurrency.sh
+if ! out="$(bash scripts/test-beta-invite-concurrency.sh 2>&1)"; then
+  printf '%s
+' "$out"
+  annotate_failure "Beta invite concurrency failed" "$out"
+  exit 3
+fi
+printf '%s
+' "$out"
 node --test tests/blockers/f03_quote_to_wo_authority.test.mjs
 
 echo 'CI_SQL_RLS: OK'
