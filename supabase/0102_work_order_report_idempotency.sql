@@ -1,5 +1,8 @@
 -- ZiisTec · Bloco 4 — relato técnico sem duplicação em retry/duplo toque/finalização.
--- Portado da branch blocks-3-4-os-history-receipt (antiga 0095), sem mudança de regra.
+-- Portado da branch blocks-3-4-os-history-receipt (antiga 0095). Mesma regra, com o "último relato"
+-- determinístico: created_at é o início da transação, então relatos gravados na mesma transação
+-- empatam, e o desempate antigo por uuid escolhia um deles ao acaso. Agora a comparação vale
+-- contra todo o lote mais recente (todos os relatos com o maior created_at da OS).
 --
 -- 1. request_id opcional + índice único por OS: o mesmo envio repetido devolve a mesma linha.
 -- 2. Trigger de relato: um 'report' idêntico ao último relato da OS não vira nova linha. Cobre o
@@ -18,17 +21,17 @@ language plpgsql
 security invoker
 set search_path=''
 as $$
-declare v_last text;
 begin
   if new.entry_type <> 'report' then return new; end if;
-  select r.body into v_last
-    from public.work_order_reports r
-   where r.work_order_id=new.work_order_id
-     and r.company_id=new.company_id
-     and r.entry_type='report'
-   order by r.created_at desc, r.id desc
-   limit 1;
-  if v_last is not null and btrim(v_last)=btrim(new.body) then
+  if exists(
+    select 1 from public.work_order_reports r
+     where r.work_order_id=new.work_order_id
+       and r.company_id=new.company_id
+       and r.entry_type='report'
+       and btrim(r.body)=btrim(new.body)
+       and r.created_at=(select max(x.created_at) from public.work_order_reports x
+                          where x.work_order_id=new.work_order_id and x.company_id=new.company_id and x.entry_type='report')
+  ) then
     return null;
   end if;
   return new;
@@ -78,9 +81,12 @@ begin
 
   select r.* into v_row from public.work_order_reports r
    where r.work_order_id=v_wo.id and r.company_id=v_wo.company_id and r.entry_type='report'
-   order by r.created_at desc, r.id desc
+     and btrim(r.body)=v_text
+     and r.created_at=(select max(x.created_at) from public.work_order_reports x
+                        where x.work_order_id=v_wo.id and x.company_id=v_wo.company_id and x.entry_type='report')
+   order by r.id
    limit 1;
-  if found and btrim(v_row.body)=v_text then
+  if found then
     return to_jsonb(v_row);
   end if;
 
@@ -91,7 +97,10 @@ begin
     -- Um relato idêntico entrou por outro caminho entre a leitura e a gravação: devolve o existente.
     select r.* into v_row from public.work_order_reports r
      where r.work_order_id=v_wo.id and r.company_id=v_wo.company_id and r.entry_type='report'
-     order by r.created_at desc, r.id desc
+       and btrim(r.body)=v_text
+       and r.created_at=(select max(x.created_at) from public.work_order_reports x
+                          where x.work_order_id=v_wo.id and x.company_id=v_wo.company_id and x.entry_type='report')
+     order by r.id
      limit 1;
   end if;
   return to_jsonb(v_row);

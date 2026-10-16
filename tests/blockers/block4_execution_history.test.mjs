@@ -191,7 +191,9 @@ test('0101/0102: atores definidos pelo banco e relato deduplicado por requestId 
   assert.match(actors, /security invoker/);
   const report = compact(sql.report);
   assert.match(report, /create unique index if not exists uq_work_order_reports_request on public\.work_order_reports\(work_order_id, request_id\) where request_id is not null/);
-  assert.match(report, /btrim\(v_last\)=btrim\(new\.body\) then return null;/);
+  // Lote mais recente (mesmo created_at = mesma transação) inteiro, sem desempate aleatório por uuid.
+  assert.match(report, /and btrim\(r\.body\)=btrim\(new\.body\) and r\.created_at=\(select max\(x\.created_at\) from public\.work_order_reports x/);
+  assert.doesNotMatch(report, /order by r\.created_at desc, r\.id desc/, 'sem "último relato" escolhido por uuid');
   assert.match(report, /public\.zt_wo_is_owned\(v_wo\.id\) or \(public\.zt_wo_is_mine\(v_wo\.id\) and public\.zt_wo_open\(v_wo\.id\)\)/);
 });
 
@@ -231,7 +233,7 @@ test('Bloco 4: definers com search_path explícito, sem SQL dinâmico; regressõ
   assert.equal(definers, 4);
   const runner = read('scripts/run-sql-rls-ci.sh');
   for (const file of ['v2_block4_work_order_lifecycle_rollback.sql', 'v2_block4_client_service_history_rollback.sql']) {
-    assert.match(runner, new RegExp(file.replace(/\./g, '\\.')));
+    assert.ok(runner.includes(`supabase/tests/${file}`), `${file} registrado no gate SQL/RLS`);
     assert.match(read(`supabase/tests/${file}`), /\nrollback;\s*$/);
   }
   assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0101–0104 add three public definers[\s\S]*if v_total<>138 then/);
