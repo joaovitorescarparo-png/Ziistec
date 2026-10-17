@@ -6,6 +6,8 @@ import React from 'react';
 import { transformSync } from 'esbuild';
 import * as display from '../../src/lib/subscriptionDisplay.js';
 import { googleAuthHabilitado, seloBetaAtivo } from '../../src/lib/betaFlags.js';
+import * as formDrafts from '../../src/lib/formDrafts.js';
+import * as unsavedChanges from '../../src/lib/unsavedChanges.js';
 
 const read = path => fs.readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -63,7 +65,7 @@ function authStore(session) {
   return { supabase, signOutCalls, get stored() { return stored; } };
 }
 function sessao(store, env) {
-  const h = harness('src/lib/useSessao.js', { './supabase': { supabase: store.supabase, mensagemErro: e => String(e?.message || e) } }, env);
+  const h = harness('src/lib/useSessao.js', { './supabase': { supabase: store.supabase, mensagemErro: e => String(e?.message || e) }, './formDrafts': formDrafts }, env);
   return () => h.render(h.exports.useSessao);
 }
 
@@ -94,6 +96,7 @@ test('sem sessão o App mostra o Login e nenhum Assistente (contexto descartado)
     './lib/useSessao': { useSessao: () => ({ sessaoAuth: null, carregando: false, membresias: [], recarregar() {}, sair() {} }) },
     './lib/supabase': { configurado: true }, './screens/Login': { __esModule: true, default: LoginMock },
     './components/AssistantPanel': { __esModule: true, default: AssistantMock },
+    './lib/formDrafts': formDrafts, './lib/unsavedChanges': unsavedChanges,
   }, { window: { location: { search: '', href: 'https://beta.ziistec.com/' }, addEventListener() {}, removeEventListener() {} } });
   const tree = h.render(h.exports.default);
   assert.ok(find(tree, LoginMock));

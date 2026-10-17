@@ -47,6 +47,8 @@ import { useDiscardGuard, useFormDirty } from "../hooks/useUnsavedChanges";
 import { confirmDiscardNavigation } from "../lib/unsavedChanges";
 import DiscardChangesPrompt from "../components/DiscardChangesPrompt";
 import { useModalDismiss } from "../hooks/useModalDismiss";
+import { useFormDraft } from "../hooks/useFormDraft";
+import DraftRestoredNotice from "../components/DraftRestoredNotice";
 import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
 import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
 
@@ -2176,6 +2178,8 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
 function ClienteForm({ form, setForm, onSave, onSaved }) {
   const [salvandoCliente, setSalvandoCliente] = useState(false);
   const { dirty } = useFormDirty(form, Boolean(form));
+  const rascunho = useFormDraft({ formType: "cliente-novo", enabled: Boolean(form && !form.id), value: form, dirty,
+    onRestore: (dados) => setForm((atual) => (atual && !atual.id ? { ...atual, ...dados } : atual)) });
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const pj = form.tipo === "PJ";
@@ -2185,6 +2189,7 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
         <Btn disabled={!form.nome || salvandoCliente}
           onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
           {salvandoCliente ? "Salvando…" : "Salvar cliente"}</Btn></>}>
+      <DraftRestoredNotice savedAt={rascunho.restoredAt} onDiscard={() => setForm(rascunho.discardDraft() || { tipo: "PF" })} />
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
         {["PF", "PJ"].map((t) => (
           <button key={t} role="tab" aria-selected={form.tipo === t} onClick={() => set("tipo", t)}
@@ -3516,6 +3521,15 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
   const [erroCriacao, setErroCriacao] = useState("");
   const requestIdRef = useRef(null);
   const { dirty } = useFormDirty(f);
+  const rascunho = useFormDraft({ formType: "os-nova", enabled: real, value: { ...f, requestId: requestIdRef.current }, dirty,
+    onRestore: ({ requestId, ...dados }) => { setF((s) => ({ ...s, ...dados })); if (requestId) requestIdRef.current = requestId; } });
+  const descartarRascunho = () => {
+    const inicial = rascunho.discardDraft();
+    if (!inicial) return;
+    const { requestId, ...vazio } = inicial;
+    setF(vazio);
+    requestIdRef.current = requestId || null;
+  };
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const escolherCliente = (id) => {
     const cl = clientes.find((x) => x.id === id);
@@ -3558,6 +3572,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
         footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
           <Btn disabled={!pronto || criando} onClick={criar}>{criando ? "Criando…" : "Abrir ordem de serviço"}</Btn></>}>
 
+        <DraftRestoredNotice savedAt={rascunho.restoredAt} onDiscard={descartarRascunho} detail="Itens do catálogo não ficam no rascunho; adicione-os de novo se precisar." />
         {erroCriacao && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">{erroCriacao}</div>}
         <Field label="Cliente">
           <div className="flex gap-2 flex-wrap sm:flex-nowrap">

@@ -7,6 +7,7 @@ import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
 import AssistantPanel from "./components/AssistantPanel";
 import { confirmDiscardNavigation } from "./lib/unsavedChanges";
+import { setDraftScope } from "./lib/formDrafts";
 
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
@@ -156,6 +157,12 @@ export default function App() {
     else url.searchParams.delete("v2");
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   };
+
+  // Bloco 7: rascunho local só vale para o usuário + empresa desta sessão (outro escopo é apagado).
+  const draftUserId = s.sessaoAuth?.user?.id || null;
+  useEffect(() => {
+    setDraftScope(draftUserId && s.empresaId ? { userId: draftUserId, companyId: s.empresaId } : null);
+  }, [draftUserId, s.empresaId]);
 
   // Voltar do navegador sincroniza a tela com a URL (?v2= continua sendo a fonte da rota técnica).
   useEffect(() => {
