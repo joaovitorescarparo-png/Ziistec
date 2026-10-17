@@ -262,7 +262,7 @@ reset role;
 select set_config('request.jwt.claim.sub',(select tech_a::text from zt_b5),true);
 set local role authenticated;
 do $$
-declare t zt_b5%rowtype; r jsonb; s text; n bigint; v_items jsonb;
+declare t zt_b5%rowtype; r jsonb; s text; n bigint; v_items jsonb; v_ref jsonb;
 begin
   select * into t from zt_b5;
   -- Operacional: a própria OS, os itens sem preço, o próprio relato e o relatório sem financeiro.
@@ -307,9 +307,12 @@ begin
   r:=jsonb_build_object(
     'receipt',pg_temp.b5_state(format('select public.zt_issue_service_receipt(%L,gen_random_uuid())',t.wo_a)),
     'client_history',pg_temp.b5_state(format('select public.zt_client_service_history(%L,null)',t.client_a)),
-    'global_search',pg_temp.b5_state(format('select public.zt_global_operational_search(%L,''B5'',10,0)',t.company_a)),
-    'quote_reference',pg_temp.b5_state(format('select public.zt_assistant_reference(%L,''quote'',%L)',t.company_a,t.quote_a)));
-  perform pg_temp.b5_check('tecnico_rpcs_administrativas_negadas',pg_temp.b5_all(r,'42501'),r::text);
+    'global_search',pg_temp.b5_state(format('select public.zt_global_operational_search(%L,''B5'',10,0)',t.company_a)));
+  -- A referência do Assistente não lança: devolve {error, code} sem o contexto do orçamento.
+  v_ref:=public.zt_assistant_reference(t.company_a,'quote',t.quote_a);
+  perform pg_temp.b5_check('tecnico_rpcs_administrativas_negadas',pg_temp.b5_all(r,'42501')
+    and v_ref ? 'error' and not v_ref ? 'context' and v_ref::text !~ '"(unitPrice|total|items)"',
+    r::text||' referencia='||v_ref::text);
   r:=public.zt_assistant_read(t.company_a,'owner_finance_summary','{}'::jsonb,gen_random_uuid());
   perform pg_temp.b5_check('tecnico_assistente_sem_consulta_do_proprietario',r ? 'error' and not r ? 'result',left(r::text,300));
   r:=public.zt_assistant_plan(t.company_a,'technician_open_assigned_order',jsonb_build_object('workOrder',t.wo_b::text),gen_random_uuid());
