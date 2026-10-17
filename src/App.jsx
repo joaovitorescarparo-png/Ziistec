@@ -6,6 +6,7 @@ import NovaSenha from "./screens/NovaSenha";
 import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
 import AssistantPanel from "./components/AssistantPanel";
+import { confirmDiscardNavigation } from "./lib/unsavedChanges";
 
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
@@ -171,6 +172,7 @@ export default function App() {
   };
 
   const abrirWorkspaceV2 = (valor) => {
+    if (!confirmDiscardNavigation()) return;
     if (valor === "orcamento-ia") setQuoteSeed("");
     navegarV2(valor);
   };
@@ -214,7 +216,7 @@ export default function App() {
       /* ETAPA A — ponto de integração: as telas do shell principal podem
          abrir um recurso V2 pontual sem sair da navegação antiga. As etapas
          C a E usam isto para absorver as funções V2 aba por aba. */
-      abrirRecursoV2: (chave) => navegarV2(chave),
+      abrirRecursoV2: (chave) => { if (confirmDiscardNavigation()) navegarV2(chave); },
       salvarEmpresa: async (dados) => {
         const { error } = await supabase.from("companies")
           .update(paraEmpresaBanco(dados)).eq("id", s.empresaId);
@@ -231,6 +233,8 @@ export default function App() {
       work_order: ['memoria-os', 'wo'], quote: ['orcamentos'], financial_entry: ['financeiro'] };
     const target = targets[record.entityType];
     if (!target || !record.id || (record.entityType !== 'work_order' && s.membresiaAtual?.role !== 'owner')) return;
+    // Abrir o registro troca a tela inteira: formulário com alterações pergunta antes de descartar.
+    if (!confirmDiscardNavigation()) return;
     const url = new URL(window.location.href);
     for (const key of ['client', 'product', 'wo']) url.searchParams.delete(key);
     url.searchParams.set('v2', target[0]);

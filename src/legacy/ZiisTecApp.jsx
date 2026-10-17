@@ -43,6 +43,9 @@ import { listarLocaisClienteOrcamentoV2DB } from "../lib/quoteReuseV2Api";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
 import useModalViewport from "../hooks/useModalViewport";
+import { useDiscardGuard, useFormDirty } from "../hooks/useUnsavedChanges";
+import { confirmDiscardNavigation } from "../lib/unsavedChanges";
+import DiscardChangesPrompt from "../components/DiscardChangesPrompt";
 import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
 import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
 
@@ -438,23 +441,25 @@ const Input = (p) => <input {...p} className={cx(inputCls, p.className)} />;
 const Textarea = (p) => <textarea {...p} className={cx(inputCls, "resize-none leading-relaxed", p.className)} />;
 const Select = ({ children, ...p }) => <select {...p} className={cx(inputCls, "appearance-none", p.className)}>{children}</select>;
 
-function Modal({ open, onClose, title, sub, children, footer, wide }) {
+function Modal({ open, onClose, title, sub, children, footer, wide, dirty = false }) {
   const { overlay, scroller } = useModalViewport(open);
+  const guard = useDiscardGuard({ dirty: Boolean(open && dirty), onClose });
   if (!open) return null;
   return (
     <div ref={overlay} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6 pt-[env(safe-area-inset-top)]" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-900/40" onClick={guard.requestClose} />
       <div className={cx("ziistec-modal-panel relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[calc(100dvh-env(safe-area-inset-top))] sm:max-h-[88dvh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
         <div className="shrink-0 flex items-start justify-between gap-4 px-5 sm:px-7 pt-6 pb-4">
           <div>
             <h3 className="text-lg font-semibold text-slate-900 tracking-tight">{title}</h3>
             {sub && <p className="text-sm text-slate-500 mt-0.5">{sub}</p>}
           </div>
-          <button onClick={onClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
+          <button onClick={guard.requestClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
         </div>
         <div ref={scroller} className="min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-7 pb-6 space-y-5">{children}</div>
         {footer && <div className="shrink-0 sticky bottom-0 bg-white px-5 sm:px-7 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 flex flex-wrap gap-3 justify-end">{footer}</div>}
       </div>
+      <DiscardChangesPrompt open={guard.confirming} onKeepEditing={guard.keepEditing} onDiscard={guard.discard} />
     </div>
   );
 }
@@ -818,6 +823,7 @@ export default function ZiisTec({ contexto }) {
   const nomeCliente = (id) => { const c = cliente(id); return c?.fantasia || c?.nome || "Cliente"; };
 
   const irPara = (t) => {
+    if (!confirmDiscardNavigation()) return;
     setTela(t); setClienteAberto(null); setOrcamentoAberto(null); setOsAberta(null); setCompraAberta(null);
     setGarantiaAberta(null); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
   };
@@ -2120,7 +2126,8 @@ function Clientes(p) {
    Mínimo para continuar: nome + telefone. O resto pode vir depois. */
 function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
   const [f, setF] = useState(null);
-  useEffect(() => { if (aberto) setF({ tipo: "PF", nome: nomeInicial, telefone: "", whatsapp: "", endereco: "", documento: "", fantasia: "", responsavel: "", obs: "" }); }, [aberto]);
+  useEffect(() => { if (aberto) setF({ tipo: "PF", nome: nomeInicial, telefone: "", whatsapp: "", endereco: "", documento: "", fantasia: "", responsavel: "", obs: "" }); else setF(null); }, [aberto]);
+  const { dirty } = useFormDirty(f, Boolean(aberto && f));
   if (!aberto || !f) return null;
   const set = (k, v) => setF({ ...f, [k]: v });
   const pj = f.tipo === "PJ";
@@ -2128,7 +2135,7 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
   const faltaFiscal = pj && !f.documento.trim();
 
   return (
-    <Modal open onClose={onClose} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
+    <Modal open onClose={onClose} dirty={dirty} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
       footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
         <Btn disabled={!pronto} onClick={() => { onSave({ ...f, whatsapp: f.whatsapp || f.telefone }); onClose(); }}>Salvar e usar</Btn></>}>
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
@@ -2167,11 +2174,12 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
 
 function ClienteForm({ form, setForm, onSave, onSaved }) {
   const [salvandoCliente, setSalvandoCliente] = useState(false);
+  const { dirty } = useFormDirty(form, Boolean(form));
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const pj = form.tipo === "PJ";
   return (
-    <Modal open onClose={() => setForm(null)} title={form.id ? "Editar cliente" : "Novo cliente"} wide
+    <Modal open onClose={() => setForm(null)} dirty={dirty} title={form.id ? "Editar cliente" : "Novo cliente"} wide
       footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
         <Btn disabled={!form.nome || salvandoCliente}
           onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
@@ -2937,6 +2945,9 @@ function OrcamentoEditor(p) {
 
   /* Salva e, quando é um orçamento novo, oferece os próximos passos em vez de
      sair da tela ou baixar PDF sem o usuário pedir. */
+  const { dirty: orcamentoAlterado, markClean: orcamentoSalvo } = useFormDirty(d);
+  const saidaOrcamento = useDiscardGuard({ dirty: orcamentoAlterado, onClose: onFechar });
+
   const salvarEDecidir = async () => {
     if (!d.clienteId || d.itens.length === 0 || salvando) return;
     setSalvando(true);
@@ -2944,6 +2955,7 @@ function OrcamentoEditor(p) {
       const edicao = Boolean(d.id);
       const id = await salvarOrcamento(d);
       if (!id) return;                   // erro já foi avisado por salvarOrcamento
+      orcamentoSalvo();
       if (edicao) { onFechar(); return; }
       /* pós-criação: o registro já está salvo e a tela de Orçamentos abre as
          próximas ações. Nada é baixado automaticamente. */
@@ -2972,7 +2984,8 @@ function OrcamentoEditor(p) {
 
   return (
     <>
-      <button onClick={onFechar} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
+      <DiscardChangesPrompt open={saidaOrcamento.confirming} onKeepEditing={saidaOrcamento.keepEditing} onDiscard={saidaOrcamento.discard} />
+      <button onClick={saidaOrcamento.requestClose} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
         <ArrowLeft className="w-4 h-4" /> Voltar
       </button>
       <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche."
@@ -3501,6 +3514,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
   const [abaCat, setAbaCat] = useState("servicos");
   const [erroCriacao, setErroCriacao] = useState("");
   const requestIdRef = useRef(null);
+  const { dirty } = useFormDirty(f);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const escolherCliente = (id) => {
     const cl = clientes.find((x) => x.id === id);
@@ -3539,7 +3553,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
 
   return (
     <>
-      <Modal open onClose={onClose} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
+      <Modal open onClose={onClose} dirty={dirty} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
         footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
           <Btn disabled={!pronto || criando} onClick={criar}>{criando ? "Criando…" : "Abrir ordem de serviço"}</Btn></>}>
 
@@ -4186,6 +4200,8 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
   const [fotos, setFotos] = useState(os.fotos || []);
   const [addProduto, setAddProduto] = useState(false);
   const [garantiaOverrides, setGarantiaOverrides] = useState({});
+  const { dirty: registroAlterado } = useFormDirty({ relato, materiais, temAdicional, adicionais, custosExtras, temPendencia, pendencia, resultado,
+    retornoMotivo, retornoMaterial, retornoObs, retornoPrioridade, retornoPrevisao, fotos, garantiaOverrides });
 
   const anexarFotos = (ev, categoria) => {
     const arquivos = Array.from(ev.target.files || []);
@@ -4252,7 +4268,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
   /* edição do registro depois de concluído: sem etapas, só o que faz sentido rever */
   if (jaConcluida) {
     return (
-      <Modal open onClose={onClose} wide title="Editar registro do atendimento" sub={os.numero}
+      <Modal open onClose={onClose} dirty={registroAlterado} wide title="Editar registro do atendimento" sub={os.numero}
         footer={<><Btn variant="ghost" onClick={onClose}>Fechar</Btn>
           <Btn onClick={() => { onSalvarParcial({ relato, fotos, pendencia }); onClose(); }}>Salvar alterações</Btn></>}>
         <Field label="O que foi feito">
@@ -4524,7 +4540,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
 
   return (
     <>
-      <Modal open onClose={onClose} wide title={atual.titulo} sub={atual.sub}
+      <Modal open onClose={onClose} dirty={registroAlterado} wide title={atual.titulo} sub={atual.sub}
         footer={
           <div className="flex items-center justify-between gap-3 w-full">
             <Btn variant="ghost" onClick={() => (etapa === 0 ? onClose() : setEtapa(etapa - 1))}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
@@ -4727,6 +4743,7 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
 function CompraForm({ form, setForm, onSave, produtos }) {
   const [novoItem, setNovoItem] = useState(false);
   const [salvandoCompra, setSalvandoCompra] = useState(false);
+  const { dirty } = useFormDirty(form, Boolean(form));
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const total = form.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
@@ -4736,7 +4753,7 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 
   return (
     <>
-      <Modal open onClose={() => setForm(null)} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
+      <Modal open onClose={() => setForm(null)} dirty={dirty} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
         sub={form.id ? "" : "Ao salvar, a conta a pagar é criada no financeiro."}
         footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
           <Btn disabled={!form.fornecedor || form.itens.length === 0 || salvandoCompra}
@@ -4826,6 +4843,8 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   const [mes, setMes] = useState(mesRef(HOJE));
   const [aba, setAba] = useState("visao");
   const [form, setForm] = useState(null);
+  const [salvandoLancamento, setSalvandoLancamento] = useState(false);
+  const { dirty: lancamentoAlterado } = useFormDirty(form, Boolean(form));
   const [baixando, setBaixando] = useState(null);
   const [recibo, setRecibo] = useState(null);
   const [janela, setJanela] = useState(30);
@@ -5129,16 +5148,26 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
       )}
 
       {form && (
-        <Modal open onClose={() => setForm(null)} title="Novo lançamento" wide
+        <Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} title="Novo lançamento" wide
           footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
-            <Btn disabled={!form.descricao || !form.valor} onClick={async () => {
+            <Btn disabled={!form.descricao || !form.valor || salvandoLancamento} onClick={async () => {
               if (real) {
-                try { const salvo = await salvarLancamentoDB({ ...form, pagoEm: form.pago ? HOJE : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }
+                if (salvandoLancamento) return;
+                // Duplo toque/retry reaproveita o mesmo requestId: o banco devolve o mesmo lançamento.
+                let requestId = form.requestId;
+                if (!requestId) {
+                  if (!globalThis.crypto?.randomUUID) { aviso("Atualize o navegador para salvar o lançamento com segurança."); return; }
+                  requestId = globalThis.crypto.randomUUID();
+                  setForm((f) => (f ? { ...f, requestId } : f));
+                }
+                setSalvandoLancamento(true);
+                try { const salvo = await salvarLancamentoDB({ ...form, requestId, pagoEm: form.pago ? HOJE : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }
                 catch (e) { aviso(mensagemErro(e)); }
+                finally { setSalvandoLancamento(false); }
                 return;
               }
               setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? HOJE : null }, ...l]); setForm(null); aviso("Lançamento registrado");
-            }}>Salvar lançamento</Btn></>}>
+            }}>{salvandoLancamento ? "Salvando…" : "Salvar lançamento"}</Btn></>}>
           <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
             {[["despesa", "Despesa"], ["receita", "Receita"]].map(([id, label]) => (
               <button key={id} role="tab" aria-selected={form.tipo === id} onClick={() => setForm({ ...form, tipo: id })}

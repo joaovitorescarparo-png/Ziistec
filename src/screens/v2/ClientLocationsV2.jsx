@@ -31,7 +31,10 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
   const selected=rows.find(c=>c.id===selectedId)||null;
   const withLocation=rows.filter(c=>c.maps_url||c.address||(c.latitude!=null&&c.longitude!=null)).length;
 
+  // Bloco 6: leitura de GPS pertence ao cliente em que foi pedida; trocar de cliente descarta a leitura pendente.
+  const gpsRequest=useRef(null);
   const select=(client)=>{
+    gpsRequest.current=null;setLocating(false);
     setSelectedId(client.id);
     setForm({address:client.address||'',mapsUrl:client.maps_url||'',latitude:coord(client.latitude),longitude:coord(client.longitude),googlePlaceId:client.google_place_id||''});
     setError('');
@@ -44,10 +47,12 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
   const useGps=()=>{
     setError('');
     if(!navigator?.geolocation){setError('Este navegador não disponibiliza localização GPS.');return;}
+    const request={clientId:selectedId};
+    gpsRequest.current=request;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
-      ({coords})=>{setForm(f=>({...f,latitude:String(coords.latitude),longitude:String(coords.longitude),mapsUrl:''}));setLocating(false);},
-      (e)=>{setLocating(false);setError(e?.code===1?'Permita o acesso à localização para usar o GPS.':'Não consegui obter a localização atual.');},
+      ({coords})=>{if(gpsRequest.current!==request)return;gpsRequest.current=null;setForm(f=>({...f,latitude:String(coords.latitude),longitude:String(coords.longitude),mapsUrl:''}));setLocating(false);},
+      (e)=>{if(gpsRequest.current!==request)return;gpsRequest.current=null;setLocating(false);setError(e?.code===1?'Permita o acesso à localização para usar o GPS.':'Não consegui obter a localização atual.');},
       {enableHighAccuracy:true,timeout:12000,maximumAge:30000},
     );
   };

@@ -10,6 +10,8 @@ import {
 } from '../../lib/workOrderMemoryV2Api';
 import { baixarRelatorioAtendimentoPDF,compartilharRelatorioAtendimentoPDF } from '../../lib/serviceReportPdf';
 import InstalledEquipmentPanel from '../../components/InstalledEquipmentPanel';
+import DiscardChangesPrompt from '../../components/DiscardChangesPrompt';
+import { useDiscardGuard } from '../../hooks/useUnsavedChanges';
 
 const money=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const date=(v)=>v?new Date(`${String(v).slice(0,10)}T12:00:00`).toLocaleDateString('pt-BR'):'—';
@@ -45,6 +47,14 @@ export default function WorkOrderMemoryV2({companyId,companyName='Sua empresa',u
   const [reportPreview,setReportPreview]=useState(false);
   const fileRef=useRef(null);
   const reportRequestRef=useRef(null);
+  // Bloco 6: o relato digitado pertence à OS aberta. Trocar de OS ou voltar com texto não salvo pergunta
+  // antes e, ao descartar, limpa o campo (antes o texto seguia para a próxima OS e podia ser salvo nela).
+  const pendingNavigation=useRef(null);
+  const leaveWorkOrder=useDiscardGuard({dirty:Boolean(report.trim())&&!savingReport,onClose:()=>{
+    const go=pendingNavigation.current;pendingNavigation.current=null;
+    setReport('');setInterim('');reportRequestRef.current=null;go?.();
+  }});
+  const navigateFromWorkOrder=(go)=>{pendingNavigation.current=go;leaveWorkOrder.requestClose();};
 
   const load=useCallback(async()=>{
     setLoading(true);setError('');
@@ -152,10 +162,11 @@ export default function WorkOrderMemoryV2({companyId,companyName='Sua empresa',u
   const maps=(address)=>{if(!address)return;window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,'_blank','noopener,noreferrer');};
 
   return <div className="min-h-[100dvh] overflow-x-hidden bg-slate-950 text-white">
+    <DiscardChangesPrompt open={leaveWorkOrder.confirming} onKeepEditing={leaveWorkOrder.keepEditing} onDiscard={leaveWorkOrder.discard} text="O relato técnico digitado ainda não foi salvo nesta OS."/>
     <header className="sticky top-0 z-30 border-b border-white/10 bg-slate-950/95 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
-          <button onClick={selected?()=>setSelected(null):onClose} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2.5 text-slate-300 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300" aria-label="Voltar"><ArrowLeft size={19}/></button>
+          <button onClick={()=>navigateFromWorkOrder(selected?()=>setSelected(null):onClose)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2.5 text-slate-300 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300" aria-label="Voltar"><ArrowLeft size={19}/></button>
           <div className="min-w-0"><div className="flex items-center gap-2"><h1 className="truncate text-base font-bold">Memória técnica da OS</h1><span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300">V2</span></div><p className="truncate text-xs text-slate-500">{selectedRow?`${selectedRow.number} · ${selectedRow.client?.name||'Cliente'}`:companyName}</p></div>
         </div>
         <button onClick={()=>selected?loadDetail(selected):load()} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2.5 text-slate-300 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300" aria-label="Atualizar"><RefreshCw size={18}/></button>
@@ -184,7 +195,7 @@ export default function WorkOrderMemoryV2({companyId,companyName='Sua empresa',u
 
           <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5"><div className="flex items-center gap-2"><Package className="text-emerald-300" size={18}/><h3 className="text-sm font-bold">Serviços, produtos e materiais</h3></div><div className="mt-4 space-y-2">{detail.items.length===0&&detail.materials.length===0?<p className="text-sm text-slate-500">Nenhum item registrado.</p>:<>{detail.items.map(i=><div key={i.id} className="flex flex-col items-start gap-2 rounded-2xl bg-black/15 px-4 py-3 min-[390px]:flex-row min-[390px]:items-center min-[390px]:justify-between"><div className="min-w-0"><p className="break-words text-sm font-semibold">{i.name}</p><p className="mt-0.5 text-[11px] text-slate-500">{Number(i.quantity||0)} {i.unit||'unidade'}{i.is_extra?' · adicional':''}</p></div><span className="shrink-0 text-xs text-slate-400">{i.price_pending?'Valor pendente':owner?money(Number(i.quantity||0)*Number(i.unit_price||0)):null}</span></div>)}{detail.materials.map(m=><div key={m.id} className="flex flex-col items-start gap-2 rounded-2xl bg-black/15 px-4 py-3 min-[390px]:flex-row min-[390px]:items-center min-[390px]:justify-between"><div className="min-w-0"><p className="break-words text-sm font-semibold">{m.name}</p><p className="mt-0.5 text-[11px] text-slate-500">Material · qtd. {Number(m.quantity||0)}</p></div>{m.serial_number&&<span className="shrink-0 text-[11px] text-slate-400">S/N {m.serial_number}</span>}</div>)}</>}</div><p className="mt-4 flex items-center gap-2 text-[11px] text-emerald-300/70"><ShieldCheck size={14}/>Nenhum custo interno ou margem é carregado nesta tela.</p></section>
 
-          <InstalledEquipmentPanel detail={detail} owner={owner} onNavigateWorkOrder={setSelected}/>
+          <InstalledEquipmentPanel detail={detail} owner={owner} onNavigateWorkOrder={(id)=>navigateFromWorkOrder(()=>setSelected(id))}/>
 
           <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5"><div className="flex items-center gap-2"><FileText className="text-sky-300" size={18}/><h3 className="text-sm font-bold">Relato técnico</h3></div>{canWrite?<><div className="relative mt-4"><textarea rows={6} value={report} onChange={e=>setReport(e.target.value.slice(0,10000))} placeholder="Descreva o que foi encontrado, o que foi feito, testes realizados e pendências..." className="w-full resize-y rounded-2xl border border-white/10 bg-black/15 p-4 pr-14 text-sm leading-relaxed outline-none placeholder:text-slate-600 focus:border-sky-400/30"/><button type="button" onClick={speech.listening?speech.stop:speech.processing?speech.cancel:speech.start} className={`absolute right-3 top-3 inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 ${speech.busy?'bg-rose-500 text-white':'bg-white/10 text-sky-300'}`} title={speech.listening?'Parar ditado':speech.processing?'Cancelar transcrição':'Ditar relato'}>{speech.busy?<MicOff size={18}/>:<Mic size={18}/>}</button></div>{interim&&<p className="mt-2 text-xs italic text-slate-500">Ouvindo: {interim}</p>}{speech.processing&&<p className="mt-2 text-xs font-semibold text-sky-300">Transcrevendo...</p>}{speech.success&&<p className="mt-2 text-xs font-semibold text-emerald-300">Texto inserido.</p>}{speech.error&&<div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-amber-300"><span>{speech.error}</span><button type="button" onClick={speech.retry} className="min-h-11 rounded-lg border border-amber-300/30 px-3 font-bold">Tentar novamente</button></div>}<div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-[11px] text-slate-600">{report.length}/10.000</span><button onClick={saveReport} disabled={savingReport||!report.trim()} className="min-h-11 rounded-xl bg-sky-500 px-4 py-2.5 text-xs font-bold text-slate-950 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">{savingReport?'Salvando...':'Salvar relato'}</button></div></>:<p className="mt-4 rounded-2xl bg-black/15 p-4 text-sm text-slate-500">OS concluída/cancelada: o técnico consulta o histórico, mas não altera o relato. O proprietário pode complementar a memória quando necessário.</p>}</section>
 
