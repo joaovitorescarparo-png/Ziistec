@@ -182,10 +182,11 @@ end $$;
 reset role;
 
 -- ---------------------------------------------------------------- 0101: atores do ciclo de vida
+-- 0105: authenticated não tem SELECT em work_orders.approved_*; os blocos leem só as colunas que verificam.
 select set_config('request.jwt.claim.sub',(select owner_a::text from zt_lc),true);
 set local role authenticated;
 do $$
-declare t zt_lc%rowtype; w public.work_orders%rowtype; v_id uuid:=gen_random_uuid();
+declare t zt_lc%rowtype; w record; v_id uuid:=gen_random_uuid();
 begin
   select * into t from zt_lc;
   update zt_lc set
@@ -194,13 +195,13 @@ begin
       jsonb_build_array(jsonb_build_object('kind','free','name','Serviço ciclo','quantity',1,'unit_price',80))),
     wo_report=public.zt_save_work_order_idempotent(t.company_a,null,gen_random_uuid(),
       jsonb_build_object('client_id',t.client_a,'assigned_to',t.tech_a,'status','in_progress','request','__LC_WO_REPORT__'),'[]'::jsonb);
-  select * into w from public.work_orders where id=(select wo_life from zt_lc);
+  select status,started_at,started_by,completed_by into w from public.work_orders where id=(select wo_life from zt_lc);
   perform pg_temp.lc_check('atores_nulos_na_criacao',w.started_at is null and w.started_by is null and w.completed_by is null,null);
 
   insert into public.work_orders(id,company_id,number,client_id,assigned_to,status,started_at,started_by,completed_by)
   values(v_id,t.company_a,'__LC-FORGED-'||left(v_id::text,8),t.client_a,t.tech_a,'scheduled',now()-interval '3 days',t.tech_a,t.tech_a);
   update zt_lc set wo_forged=v_id;
-  select * into w from public.work_orders where id=v_id;
+  select status,started_at,started_by,completed_by into w from public.work_orders where id=v_id;
   perform pg_temp.lc_check('insert_direto_nao_forja_atores',w.started_at is null and w.started_by is null and w.completed_by is null,
     row(w.started_at,w.started_by,w.completed_by)::text);
 end $$;
@@ -209,16 +210,16 @@ reset role;
 select set_config('request.jwt.claim.sub',(select tech_a::text from zt_lc),true);
 set local role authenticated;
 do $$
-declare t zt_lc%rowtype; w public.work_orders%rowtype;
+declare t zt_lc%rowtype; w record;
 begin
   select * into t from zt_lc;
   update public.work_orders set started_by=t.owner_a,completed_by=t.owner_a,started_at=now()-interval '2 days' where id=t.wo_life;
-  select * into w from public.work_orders where id=t.wo_life;
+  select status,started_at,started_by,completed_by into w from public.work_orders where id=t.wo_life;
   perform pg_temp.lc_check('tecnico_nao_forja_atores',w.started_at is null and w.started_by is null and w.completed_by is null,
     row(w.started_at,w.started_by,w.completed_by)::text);
 
   update public.work_orders set status='in_progress' where id=t.wo_life;
-  select * into w from public.work_orders where id=t.wo_life;
+  select status,started_at,started_by,completed_by into w from public.work_orders where id=t.wo_life;
   perform pg_temp.lc_check('inicio_registra_tecnico',w.started_by=t.tech_a and w.started_at is not null and w.completed_by is null,
     row(w.started_at,w.started_by)::text);
 end $$;
@@ -227,22 +228,22 @@ reset role;
 select set_config('request.jwt.claim.sub',(select owner_a::text from zt_lc),true);
 set local role authenticated;
 do $$
-declare t zt_lc%rowtype; w0 public.work_orders%rowtype; w public.work_orders%rowtype;
+declare t zt_lc%rowtype; w0 record; w record;
 begin
   select * into t from zt_lc;
-  select * into w0 from public.work_orders where id=t.wo_life;
+  select status,started_at,started_by,completed_by into w0 from public.work_orders where id=t.wo_life;
   update public.work_orders set status='scheduled' where id=t.wo_life;
   update public.work_orders set status='in_progress' where id=t.wo_life;
-  select * into w from public.work_orders where id=t.wo_life;
+  select status,started_at,started_by,completed_by into w from public.work_orders where id=t.wo_life;
   perform pg_temp.lc_check('reinicio_preserva_primeiro_inicio',w.started_by=t.tech_a and w.started_at=w0.started_at,null);
 
   perform public.zt_finalize_work_order_with_warranty_overrides(t.wo_life,null,null,null,7,'[]'::jsonb,'[]'::jsonb,null);
-  select * into w from public.work_orders where id=t.wo_life;
+  select status,started_at,started_by,completed_by into w from public.work_orders where id=t.wo_life;
   perform pg_temp.lc_check('conclusao_registra_proprietario',w.status='done' and w.completed_by=t.owner_a and w.started_by=t.tech_a,
     row(w.status,w.completed_by)::text);
 
   update public.work_orders set completed_by=t.tech_a,started_by=t.owner_a where id=t.wo_life;
-  select * into w from public.work_orders where id=t.wo_life;
+  select status,started_at,started_by,completed_by into w from public.work_orders where id=t.wo_life;
   perform pg_temp.lc_check('proprietario_nao_forja_atores',w.completed_by=t.owner_a and w.started_by=t.tech_a,null);
 end $$;
 reset role;
@@ -315,11 +316,11 @@ reset role;
 select set_config('request.jwt.claim.sub',(select tech_a::text from zt_lc),true);
 set local role authenticated;
 do $$
-declare t zt_lc%rowtype; s text; w public.work_orders%rowtype;
+declare t zt_lc%rowtype; s text; w record;
 begin
   select * into t from zt_lc;
   perform public.zt_finalize_work_order_with_warranty_overrides(t.wo_report,'Relato C: ajuste',null,null,7,'[]'::jsonb,'[]'::jsonb,null);
-  select * into w from public.work_orders where id=t.wo_report;
+  select status,started_at,started_by,completed_by into w from public.work_orders where id=t.wo_report;
   perform pg_temp.lc_check('finalizacao_nao_duplica_relato',w.status='done' and pg_temp.lc_report_count(t.wo_report)=3,
     pg_temp.lc_report_count(t.wo_report)::text);
   perform pg_temp.lc_check('conclusao_registra_tecnico',w.completed_by=t.tech_a,w.completed_by::text);

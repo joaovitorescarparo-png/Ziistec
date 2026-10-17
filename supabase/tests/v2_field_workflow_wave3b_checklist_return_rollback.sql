@@ -128,7 +128,7 @@ set local role authenticated;
 update zt_fw3b t set
  finance_before=(select count(*) from public.financial_entries f where f.work_order_id=t.wo_id),
  warranty_before=(select count(*) from public.warranties w where w.work_order_id=t.wo_id),
- service_report_before=(select count(*) from public.work_order_reports r where r.work_order_id=t.wo_id and r.entry_type='service_report');
+ service_report_before=(case when public.zt_get_service_report(t.wo_id) is null then 0 else 1 end);
 update zt_fw3b t set return_id=public.zt_mark_work_order_needs_return(
  t.wo_id,'Falta peça de acabamento','Acabamento FR220','Retornar após chegada da peça','high',current_date+2,t.return_request
 );
@@ -138,11 +138,11 @@ update zt_fw3b t set retry_return_id=public.zt_mark_work_order_needs_return(
 update zt_fw3b t set
  finance_after_return=(select count(*) from public.financial_entries f where f.work_order_id=t.wo_id),
  warranty_after_return=(select count(*) from public.warranties w where w.work_order_id=t.wo_id),
- service_report_after_return=(select count(*) from public.work_order_reports r where r.work_order_id=t.wo_id and r.entry_type='service_report');
+ service_report_after_return=(case when public.zt_get_service_report(t.wo_id) is null then 0 else 1 end);
 do $$
-declare t zt_fw3b%rowtype; w public.work_orders%rowtype;
+declare t zt_fw3b%rowtype; w record;
 begin
- select * into t from zt_fw3b; select * into w from public.work_orders where id=t.wo_id;
+ select * into t from zt_fw3b; select status,completed_at,needs_return into w from public.work_orders where id=t.wo_id;
  if t.return_id is null or t.retry_return_id<>t.return_id then raise exception 'Retry duplicou pendência de retorno'; end if;
  if (select count(*) from public.work_order_returns where work_order_id=t.wo_id)<>1 then raise exception 'Retry criou retorno duplicado'; end if;
  if w.status='done' or w.completed_at is not null or not w.needs_return then raise exception 'Precisa retornar alterou estado definitivo incorretamente'; end if;
@@ -196,9 +196,9 @@ select public.zt_finalize_work_order_with_warranty_overrides(
 );
 set constraints all immediate;
 do $$
-declare t zt_fw3b%rowtype; w public.work_orders%rowtype; r public.work_order_returns%rowtype;
+declare t zt_fw3b%rowtype; w record; r public.work_order_returns%rowtype;
 begin
- select * into t from zt_fw3b; select * into w from public.work_orders where id=t.wo_id; select * into r from public.work_order_returns where id=t.return_id;
+ select * into t from zt_fw3b; select status,completed_at,needs_return into w from public.work_orders where id=t.wo_id; select * into r from public.work_order_returns where id=t.return_id;
  if w.status<>'done' or w.completed_at is null then raise exception 'Conclusão posterior não concluiu OS'; end if;
  if w.needs_return then raise exception 'OS concluída permaneceu needs_return'; end if;
  if r.returned_at is null or r.resolved_at is null then raise exception 'Data real do retorno não foi preservada'; end if;

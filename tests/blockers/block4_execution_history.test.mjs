@@ -220,7 +220,7 @@ test('0104: histórico só do proprietário; detalhe só da própria OS para o t
   assert.match(s, /where l\.id=p_location and l\.company_id=v_company and l\.client_id=p_client/);
 });
 
-test('Bloco 4: definers com search_path explícito, sem SQL dinâmico; regressões no gate SQL/RLS; inventário 138', () => {
+test('Bloco 4: definers com search_path explícito, sem SQL dinâmico; regressões no gate SQL/RLS; inventário inclui o Bloco 4', () => {
   let definers = 0;
   for (const [name, source] of Object.entries(sql)) {
     for (const [whole, body] of source.matchAll(/create or replace function[\s\S]*?\$\$([\s\S]*?)\$\$;/gi)) {
@@ -237,5 +237,6 @@ test('Bloco 4: definers com search_path explícito, sem SQL dinâmico; regressõ
     assert.ok(runner.includes(`supabase/tests/${file}`), `${file} registrado no gate SQL/RLS`);
     assert.match(read(`supabase/tests/${file}`), /\nrollback;\s*$/);
   }
-  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0101–0104 add three public definers[\s\S]*if v_total<>138 then/);
+  // 138 com o Bloco 4; 140 depois dos dois definers da 0105 (Bloco 5).
+  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0101–0104 add three public definers[\s\S]*if v_total<>140 then/);
 });
