@@ -72,6 +72,8 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 | `zt_save_work_order_report(p_wo uuid, p_body text, p_request uuid)` | 0102 | authenticated, service_role | `""` | direct | owner or assigned + open OS | technical report, idempotent | no | SAFE |
 | `zt_client_service_history(p_client uuid, p_location uuid, p_limit integer)` | 0104 | authenticated, service_role | `""` | direct | owner/company | read, owner-only | no | SAFE |
 | `zt_work_order_history_detail(p_wo uuid)` | 0104 | authenticated, service_role | `""` | direct | owner or assigned OS | read; prices/financial owner-only | no | SAFE |
+| `zt_get_service_report(p_wo uuid)` | 0105 | authenticated | `""` | direct | owner or assigned OS | read; technician projection without payment/prices | no | SAFE |
+| `zt_field_work_order_items(p_company uuid, p_wo uuid)` | 0105 | authenticated | `""` | direct | active member; OS assigned to caller; owner gets none | read; no unit_price/unit_cost | no | SAFE |
 | `zt_quote_seed_from_work_order(p_work_order uuid)` | 0085 | authenticated, service_role | `""` | delegated | owner/company | read | no | SAFE |
 | `zt_reactivate_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
 | `zt_refresh_subscription_status(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
