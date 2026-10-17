@@ -56,6 +56,7 @@
 - Beta: primeiro proprietário em `beta.ziistec.com` (Staging, sem técnicos); domínio, Auth, SMTP e renovação em `docs/engineering/BETA_OWNER_ONBOARDING.md`.
 - Mudança visual/UX relevante precisa de teste humano no Preview mesmo com CI verde.
 - Formulário com alteração não fecha sem perguntar (Bloco 6): `Modal` recebe `dirty` (`useFormDirty`), telas usam `useDiscardGuard`, navegação que troca a tela chama `confirmDiscardNavigation()`. Salvar fecha pelo próprio fluxo, sem pergunta; envio repetido usa `requestId` estável enquanto o formulário estiver aberto.
+- Esc/Voltar no modal, rascunho mínimo (só Novo cliente e Nova OS, sessionStorage por usuário+empresa) e limites do iOS: `docs/engineering/MOBILE_RESILIENCE.md` (Bloco 7).
 
 ## Dívidas conhecidas que não devem ser misturadas em feature pequena
 
