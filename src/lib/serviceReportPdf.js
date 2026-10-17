@@ -247,9 +247,13 @@ export async function montarRelatorioAtendimentoPDF(report){
   divider();
 
   heading('SITUAÇÃO DO ATENDIMENTO');
-  labelValue('Pagamento',payment.status_label||'Não informado');
-  if(payment.payment_method) labelValue('Forma',paymentLabel(payment.payment_method));
-  if(payment.show_values&&payment.billable_total!=null) labelValue('Valor exibível',money(payment.billable_total));
+  // Projeção do técnico (0105) chega sem bloco de pagamento: não há valor nem situação financeira a exibir.
+  if(snapshot.financial_redacted) labelValue('Situação','Atendimento concluído');
+  else{
+    labelValue('Pagamento',payment.status_label||'Não informado');
+    if(payment.payment_method) labelValue('Forma',paymentLabel(payment.payment_method));
+    if(payment.show_values&&payment.billable_total!=null) labelValue('Valor exibível',money(payment.billable_total));
+  }
   if(wo.needs_return) labelValue('Retorno','Atendimento marcado como precisa retornar');
   divider();
 

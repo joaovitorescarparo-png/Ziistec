@@ -59,7 +59,9 @@ const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.clie
 const fromPurchase = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, fornecedor:x.supplier_name, data:x.purchase_date, forma:x.payment_method||'', vencimento:x.due_date||'', obs:x.notes||'', lancamentoId:x.entry_id, itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)})) });
 
 const QUOTE_SELECT='*, quote_items:quote_items!quote_items_quote_company_fkey(*)';
-const WO_SELECT='*, work_order_items:work_order_items!wo_items_work_order_company_fkey(*), work_order_materials:work_order_materials!wo_materials_work_order_company_fkey(*)';
+// 0105: work_orders tem SELECT por coluna (approved_* só pelas RPCs do proprietário); "select *" falha pela Data API.
+const WO_COLUMNS='id,company_id,number,client_id,quote_id,assigned_to,status,scheduled_date,scheduled_time,address,service_place,request,pre_notes,pending_note,extra_cost,pending_pricing,needs_return,warranty_id,origin_wo_id,is_warranty_visit,problem_report,billing_entry_id,completed_at,created_by,created_at,updated_at,client_request_id,maintenance_contract_id,contract_cycle,deleted_at,client_location_id';
+const WO_SELECT=`${WO_COLUMNS}, work_order_items:work_order_items!wo_items_work_order_company_fkey(*), work_order_materials:work_order_materials!wo_materials_work_order_company_fkey(*)`;
 const PURCHASE_SELECT='*, purchase_items:purchase_items!purchase_items_purchase_company_fkey(*)';
 
 const aplicarCustosPrivados = (rows, itemCosts=[], materialCosts=[], workOrderCosts=[]) => {
@@ -105,11 +107,29 @@ async function carregarCustosPrivados(companyId, workOrderId=null) {
   };
 }
 
+// 0105: o técnico não lê work_order_items direto; recebe os itens das OS atribuídas a ele sem preço/custo.
+// O proprietário recebe lista vazia (lê a tabela com preço). Banco sem a 0105 segue entregando pelo embed.
+const rpcAusente=(error,nome)=>String(error?.code||'')==='PGRST202'||(String(error?.message||'').includes(nome)&&/(schema cache|does not exist|could not find)/i.test(String(error?.message||'')));
+
+async function carregarItensCampo(companyId, workOrderId=null) {
+  const r=await supabase.rpc('zt_field_work_order_items',{p_company:companyId,p_wo:workOrderId});
+  if(!r.error) return r.data||[];
+  if(rpcAusente(r.error,'zt_field_work_order_items')) return [];
+  throw r.error;
+}
+
+const aplicarItensCampo = (rows, itens=[]) => {
+  if(!itens.length) return rows||[];
+  const porOS=new Map();
+  for(const i of itens){ const lista=porOS.get(i.work_order_id)||[]; lista.push(i); porOS.set(i.work_order_id,lista); }
+  return (rows||[]).map((wo)=>(wo.work_order_items||[]).length||!porOS.has(wo.id)?wo:{...wo,work_order_items:porOS.get(wo.id)});
+};
+
 async function carregarOSCompletaDB(id) {
   const wo = await supabase.from('work_orders').select(WO_SELECT).eq('id',id).single();
   if (wo.error) throw wo.error;
-  const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(wo.data.company_id,id);
-  return aplicarCustosPrivados([wo.data],itemCosts,materialCosts,workOrderCosts)[0];
+  const [{itemCosts,materialCosts,workOrderCosts},itensCampo]=await Promise.all([carregarCustosPrivados(wo.data.company_id,id),carregarItensCampo(wo.data.company_id,id)]);
+  return aplicarCustosPrivados(aplicarItensCampo([wo.data],itensCampo),itemCosts,materialCosts,workOrderCosts)[0];
 }
 
 export async function carregarOSPorIdDB(id) {
@@ -123,8 +143,8 @@ export async function carregarOSPorOrcamentoDB(quoteId, companyId) {
     .order('created_at',{ascending:true}).limit(1).maybeSingle();
   if (response.error) throw response.error;
   if (!response.data) return null;
-  const { itemCosts, materialCosts, workOrderCosts } = await carregarCustosPrivados(companyId,response.data.id);
-  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,workOrderCosts)[0]);
+  const [{ itemCosts, materialCosts, workOrderCosts }, itensCampo] = await Promise.all([carregarCustosPrivados(companyId,response.data.id),carregarItensCampo(companyId,response.data.id)]);
+  return fromWorkOrder(aplicarCustosPrivados(aplicarItensCampo([response.data],itensCampo),itemCosts,materialCosts,workOrderCosts)[0]);
 }
 
 export async function carregarDadosEmpresa(companyId) {
@@ -139,8 +159,8 @@ export async function carregarDadosEmpresa(companyId) {
     supabase.from('warranties').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
   ]);
   const firstError=reqs.find(r=>r.error)?.error; if(firstError) throw firstError;
-  const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(companyId);
-  const ordens=aplicarCustosPrivados(reqs[4].data,itemCosts,materialCosts,workOrderCosts).map(fromWorkOrder);
+  const [{itemCosts,materialCosts,workOrderCosts},itensCampo]=await Promise.all([carregarCustosPrivados(companyId),carregarItensCampo(companyId)]);
+  const ordens=aplicarCustosPrivados(aplicarItensCampo(reqs[4].data,itensCampo),itemCosts,materialCosts,workOrderCosts).map(fromWorkOrder);
   const orcamentos=reqs[3].data.map(fromQuote).map(q=>({...q,osId:ordens.find(o=>o.orcamentoId===q.id)?.id||null}));
   return { clientes:reqs[0].data.map(fromClient), servicos:reqs[1].data.map(fromService), produtos:reqs[2].data.map(fromProduct), orcamentos, ordens, lancamentos:reqs[5].data.map(fromFinancial), compras:reqs[6].data.map(fromPurchase), garantias:reqs[7].data.map(fromWarranty) };
 }

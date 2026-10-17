@@ -60,18 +60,26 @@ async function carregarAttachments(woId,companyId){
 }
 
 export async function carregarDetalheMemoriaOSV2DB(companyId,woId){
-  const [woR,itemsR,materialsR,reportsR,attachments]=await Promise.all([
+  const [woR,itemsR,materialsR,reportsR,attachments,serviceR,fieldItemsR]=await Promise.all([
     supabase.from('work_orders').select('id,company_id,number,client_id,assigned_to,status,scheduled_date,scheduled_time,address,service_place,request,pre_notes,pending_note,needs_return,is_warranty_visit,problem_report,completed_at,created_at,updated_at').eq('company_id',companyId).eq('id',woId).single(),
     supabase.from('work_order_items').select('id,work_order_id,kind,service_id,product_id,name,unit,quantity,unit_price,notes,is_extra,price_pending').eq('company_id',companyId).eq('work_order_id',woId),
     supabase.from('work_order_materials').select('id,work_order_id,product_id,name,quantity,serial_number,created_at').eq('company_id',companyId).eq('work_order_id',woId).order('created_at',{ascending:true}),
     supabase.from('work_order_reports').select(REPORT_SELECT).eq('company_id',companyId).eq('work_order_id',woId).order('created_at',{ascending:true}),
     carregarAttachments(woId,companyId),
+    // 0105: o banco decide a projeção. Proprietário recebe o snapshot completo; técnico, sem pagamento/preços.
+    supabase.rpc('zt_get_service_report',{p_wo:woId}),
+    // Técnico não lê work_order_items direto: itens da própria OS sem preço (proprietário recebe lista vazia).
+    supabase.rpc('zt_field_work_order_items',{p_company:companyId,p_wo:woId}),
   ]);
   const wo=check(woR);
   const client=check(await supabase.from('clients').select('id,name,address,phone,whatsapp').eq('company_id',companyId).eq('id',wo.client_id).maybeSingle())||null;
   const reports=check(reportsR)||[];
-  const serviceReport=reports.find(r=>r.entry_type==='service_report'&&r.is_active)||null;
-  return {workOrder:{...wo,client,status_label:STATUS_LABEL[wo.status]||wo.status},items:check(itemsR)||[],materials:check(materialsR)||[],reports,serviceReport,media:attachments.media,mediaMigrationReady:attachments.migrated};
+  const serviceReport=serviceR?.error&&rpcMissing(serviceR.error,'zt_get_service_report')
+    ?reports.find(r=>r.entry_type==='service_report'&&r.is_active)||null
+    :check(serviceR)||null;
+  const ownerItems=check(itemsR)||[];
+  const fieldItems=fieldItemsR?.error&&rpcMissing(fieldItemsR.error,'zt_field_work_order_items')?[]:check(fieldItemsR)||[];
+  return {workOrder:{...wo,client,status_label:STATUS_LABEL[wo.status]||wo.status},items:ownerItems.length?ownerItems:fieldItems,materials:check(materialsR)||[],reports,serviceReport,media:attachments.media,mediaMigrationReady:attachments.migrated};
 }
 
 // BLOCO 4 · requestId estável por texto: retry/duplo toque devolve a mesma linha em vez de duplicar o relato.
