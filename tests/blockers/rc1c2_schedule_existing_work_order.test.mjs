@@ -10,6 +10,9 @@ const modalSource = source.slice(modalStart, source.indexOf('\n/*', modalStart))
 const modalCode = transformSync(`${modalSource}\nAgendarModal;`, { loader: 'jsx' }).code;
 const scheduleStart = source.indexOf('  const agendarOS = async');
 const scheduleSource = source.slice(scheduleStart, source.indexOf('  const desagendarOS', scheduleStart));
+// Bloco 7: agendarOS preserva os complementos da OS com a função real do legado.
+const mergeStart = source.indexOf('function mesclarOSRelida(');
+const mesclarOSRelida = vm.runInNewContext(`${source.slice(mergeStart, source.indexOf('\nfunction aplicarOSSalvaNoEstado', mergeStart))}\nmesclarOSRelida;`);
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const deferred = () => {
   let resolve;
@@ -148,7 +151,7 @@ function scheduling({ status = 'aguardando', real = true, update } = {}) {
   const forbiddenCalls = [];
   const forbidden = (name) => () => { forbiddenCalls.push(name); throw new Error(`Forbidden: ${name}`); };
   const schedule = vm.runInNewContext(`${scheduleSource}\nagendarOS;`, {
-    real, HOJE: '2026-09-19', uid: () => 'history-1', dataBR: (date) => date,
+    real, HOJE: '2026-09-19', uid: () => 'history-1', dataBR: (date) => date, mesclarOSRelida,
     mensagemErro: (error) => error.message, aviso: (text) => notices.push(text),
     setOrdens: (apply) => { orders = apply(orders); },
     atualizarOSDB: async (id, patch) => {

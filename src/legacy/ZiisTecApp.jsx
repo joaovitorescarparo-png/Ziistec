@@ -289,9 +289,27 @@ const RESPONSAVEIS = { "Jonas Ribeiro": "u1", "Diego Farias": "u2" };
 const cx = (...c) => c.filter(Boolean).join(" ");
 const ring = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50";
 
+/* A OS relida do banco (fromWorkOrder) vem sem relato, histórico, checklist, fotos, retornos e
+   materiais registrados: esses complementos chegam pela hidratação (runtimeApi). Ao trocar status,
+   agenda ou salvar, a OS da lista mantém os complementos em vez de aparecer vazia até recarregar. */
+function mesclarOSRelida(anterior, salvo) {
+  if (!anterior || !salvo) return salvo;
+  const itensSalvos = salvo.itens || [];
+  const materiais = (anterior.itens || []).filter((i) => i.materialRegistrado && !itensSalvos.some((s) => s.id === i.id));
+  return {
+    ...salvo,
+    relato: salvo.relato || anterior.relato || "",
+    historico: salvo.historico?.length ? salvo.historico : anterior.historico || [],
+    retornos: salvo.retornos?.length ? salvo.retornos : anterior.retornos,
+    checklist: salvo.checklist?.length ? salvo.checklist : anterior.checklist || [],
+    fotos: salvo.fotos?.length ? salvo.fotos : anterior.fotos || [],
+    itens: [...itensSalvos, ...materiais],
+  };
+}
+
 function aplicarOSSalvaNoEstado(salvo, { setOrdens, setOrcamentos, setOsAberta }) {
   setOrdens((lista) => lista.some((x) => x.id === salvo.id)
-    ? lista.map((x) => x.id === salvo.id ? salvo : x)
+    ? lista.map((x) => x.id === salvo.id ? mesclarOSRelida(x, salvo) : x)
     : [salvo, ...lista]);
   if (salvo.orcamentoId) {
     setOrcamentos((lista) => lista.map((o) => o.id === salvo.orcamentoId ? { ...o, osId: salvo.id } : o));
@@ -1079,7 +1097,7 @@ export default function ZiisTec({ contexto }) {
   const agendarOS = async (osId, { data, hora, responsavel, responsavelId }) => {
     if (!data) return false;
     if (real) {
-      try { const salvo=await atualizarOSDB(osId,{scheduled_date:data,scheduled_time:hora||null,assigned_to:responsavelId||null,status:'scheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?{...salvo,responsavel}:x)); }
+      try { const salvo=await atualizarOSDB(osId,{scheduled_date:data,scheduled_time:hora||null,assigned_to:responsavelId||null,status:'scheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?{...mesclarOSRelida(x,salvo),responsavel}:x)); }
       catch(e){ aviso(mensagemErro(e)); return false; }
     } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data, hora, responsavel, responsavelId: responsavelId || x.responsavelId, status: x.status === "aguardando" || x.status === "agendada" ? "agendada" : x.status, historico: [...x.historico, { id: uid(), quando: HOJE, texto: `Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""} · ${responsavel}` }] } : x));
     aviso(`Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""}`);
@@ -1087,7 +1105,7 @@ export default function ZiisTec({ contexto }) {
   };
   const desagendarOS = async (osId) => {
     if (real) {
-      try { const salvo=await atualizarOSDB(osId,{scheduled_date:null,scheduled_time:null,status:'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?salvo:x)); }
+      try { const salvo=await atualizarOSDB(osId,{scheduled_date:null,scheduled_time:null,status:'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?mesclarOSRelida(x,salvo):x)); }
       catch(e){ aviso(mensagemErro(e)); return; }
     } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data: "", hora: "", status: "aguardando", historico: [...x.historico, { id: uid(), quando: HOJE, texto: "Agendamento removido" }] } : x));
     aviso("Agendamento removido");
@@ -1095,7 +1113,7 @@ export default function ZiisTec({ contexto }) {
   const mudarStatusOS = async (os, status) => {
     if (real) {
       const mapa={aguardando:'unscheduled',agendada:'scheduled',andamento:'in_progress',concluida:'done',cancelada:'canceled'};
-      try { const salvo=await atualizarOSDB(os.id,{status:mapa[status]||'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===os.id?salvo:x)); }
+      try { const salvo=await atualizarOSDB(os.id,{status:mapa[status]||'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===os.id?mesclarOSRelida(x,salvo):x)); }
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
@@ -6470,4 +6488,4 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
 
 /* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
 
-export { OSDetalhe, NovaOS, OrdensServico, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado };
+export { OSDetalhe, NovaOS, OrdensServico, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado, mesclarOSRelida };
