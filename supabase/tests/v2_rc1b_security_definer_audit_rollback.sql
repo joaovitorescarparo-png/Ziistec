@@ -20,7 +20,11 @@ begin
   -- 0097 adds no definer (owner writes reuse plan/execute); its write helpers are invoker.
   -- 0098 adds one public definer (platform-admin subscription renewal, MFA-gated and audited).
   -- 0099 adds four public definers (own beta-invite status; MFA-gated list/create/revoke); zt_create_company is replaced.
-  if v_total<>134 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=134 actual=%',v_total; end if;
+  -- 0100 adds one public definer (owner-only service receipt issue/reissue).
+  -- 0101–0104 add three public definers (idempotent technical report; owner-only client history; OS detail for owner/assigned);
+  -- their triggers are invoker and zt_save_work_order is replaced.
+  -- 0105 adds two public definers (service report projection by role; field items without price for the technician).
+  if v_total<>140 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=140 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;

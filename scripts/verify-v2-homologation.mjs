@@ -102,7 +102,9 @@ requireText('supabase/tests/v2_technician_sale_rollback_smoke.sql', [
   'V2_TECHNICIAN_SALE_COST_ISOLATION_OK',
   'zt_sell_product_on_work_order',
   'unassigned_blocked=true',
-  'tech_public_unit_cost=0',
+  // 0105: o técnico vê o item vendido pela projeção de campo, sem a linha base nem preço/custo.
+  'tech_base_row_visible=false',
+  'tech_projection_has_price=false',
   'tech_private_cost_visible=false',
   'stock_after=3',
   'movement_delta=-2',

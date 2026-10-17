@@ -36,7 +36,7 @@ test('0098: ACL sem PUBLIC/anon; regressão SQL no CI; inventário RC1B atualiza
   assert.ok(migration.includes(`grant execute on function ${SIGNATURE} to authenticated;`));
   assert.doesNotMatch(migration, /\bgrant\b[^;]*\bto\b[^;]*\b(anon|public)\b/i, 'nenhum grant para anon ou PUBLIC');
   assert.match(runner, /supabase\/tests\/v2_platform_subscription_renewal_rollback\.sql/);
-  assert.match(rc1b, /expected=134/); // 0098 + quatro definers de convite beta da 0099
+  assert.match(rc1b, /-- 0098 adds one public definer/); // total vigente fica no próprio RC1B
 });
 
 test('runbook do beta: domínio, Auth com redirect exato, SMTP, renovação e onboarding somente do proprietário', () => {

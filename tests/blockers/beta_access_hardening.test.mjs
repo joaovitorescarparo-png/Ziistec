@@ -357,7 +357,8 @@ test('0099: defaults Profissional 79.90, beta_invites fechada, RPCs admin com MF
   const ci = read('scripts/run-sql-rls-ci.sh');
   assert.match(ci, /supabase\/tests\/v2_beta_invites_rollback\.sql/);
   assert.match(ci, /bash scripts\/test-beta-invite-concurrency\.sh/);
-  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /if v_total<>134 then/);
+  // O total vigente fica no próprio RC1B; aqui só se exige que a 0099 tenha sido contabilizada.
+  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0099 adds four public definers/);
   const smoke = read('supabase/tests/v2_beta_invites_rollback.sql');
   assert.match(smoke, /^begin;$/m); assert.match(smoke, /^rollback;$/m);
   assert.match(smoke, /20_convite_de_equipe_intacto/);

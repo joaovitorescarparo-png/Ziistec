@@ -68,6 +68,12 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 | `zt_platform_list_beta_invites()` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin read | no | SAFE |
 | `zt_platform_create_beta_invite(p_email text, p_valid_days integer)` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin, audited | no | SAFE |
 | `zt_platform_revoke_beta_invite(p_invite uuid)` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin, audited | no | SAFE |
+| `zt_issue_service_receipt(p_wo uuid, p_request uuid, p_notes text, p_reissue_reason text)` | 0100 | authenticated, service_role | `""` | direct | owner/company + subscription | service receipt issue/reissue, idempotent | no | SAFE |
+| `zt_save_work_order_report(p_wo uuid, p_body text, p_request uuid)` | 0102 | authenticated, service_role | `""` | direct | owner or assigned + open OS | technical report, idempotent | no | SAFE |
+| `zt_client_service_history(p_client uuid, p_location uuid, p_limit integer)` | 0104 | authenticated, service_role | `""` | direct | owner/company | read, owner-only | no | SAFE |
+| `zt_work_order_history_detail(p_wo uuid)` | 0104 | authenticated, service_role | `""` | direct | owner or assigned OS | read; prices/financial owner-only | no | SAFE |
+| `zt_get_service_report(p_wo uuid)` | 0105 | authenticated | `""` | direct | owner or assigned OS | read; technician projection without payment/prices | no | SAFE |
+| `zt_field_work_order_items(p_company uuid, p_wo uuid)` | 0105 | authenticated | `""` | direct | active member; OS assigned to caller; owner gets none | read; no unit_price/unit_cost | no | SAFE |
 | `zt_quote_seed_from_work_order(p_work_order uuid)` | 0085 | authenticated, service_role | `""` | delegated | owner/company | read | no | SAFE |
 | `zt_reactivate_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
 | `zt_refresh_subscription_status(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
@@ -148,7 +154,7 @@ All functions below are owned by `postgres`, `service_role`-only at function ACL
 | `zt_save_purchase_idempotent(p_company uuid, p_purchase uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+ | `public` | delegated to guarded save | no | SAFE |
 | `zt_save_quote(p_company uuid, p_quote uuid, p_row jsonb, p_items jsonb)` | baseline/redefined | `public` | auth + owner/company + subscription | no | SAFE |
 | `zt_save_quote_idempotent(p_company uuid, p_quote uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+ | `public` | delegated to guarded save | no | SAFE |
-| `zt_save_work_order(p_company uuid, p_wo uuid, p_row jsonb, p_items jsonb)` | baseline/redefined/0067 | `public` | auth + owner/company/assignee + subscription | no | SAFE |
+| `zt_save_work_order(p_company uuid, p_wo uuid, p_row jsonb, p_items jsonb)` | baseline/redefined/0067/0103 | `""` | auth + owner/company/assignee + subscription; client_location of the same company/client | no | SAFE |
 | `zt_save_work_order_idempotent(p_company uuid, p_wo uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+/0067 | `public` | delegated to guarded save | no | SAFE |
 | `zt_service_report_after_done()` | 0082 | `""` | trigger-context + OS/company | no | SAFE |
 | `zt_set_followup_status(p_followup uuid, p_status text)` | baseline/redefined | `""` | auth + owner/company + subscription | no | SAFE |
