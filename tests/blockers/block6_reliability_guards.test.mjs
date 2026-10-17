@@ -182,18 +182,20 @@ test('legado: lançamento bloqueia envio duplicado e guarda o requestId no formu
 
 // ------------------------------------------------------------------ fiação nas telas
 test('legado: Modal guarda fundo e X; formulários críticos informam alteração; salvar segue fechando direto', () => {
-  assert.match(legacy, /function Modal\(\{ open, onClose, title, sub, children, footer, wide, dirty = false \}\) \{\s*const \{ overlay, scroller \} = useModalViewport\(open\);\s*const guard = useDiscardGuard\(\{ dirty: Boolean\(open && dirty\), onClose \}\);\s*if \(!open\) return null;/);
+  // Bloco 7: o mesmo guard agora também atende Esc/Voltar (useModalDismiss usa useDiscardGuard).
+  assert.match(legacy, /function Modal\(\{ open, onClose, title, sub, children, footer, wide, dirty = false, busy = false \}\) \{\s*const \{ overlay, scroller \} = useModalViewport\(open\);\s*const guard = useModalDismiss\(\{ open, dirty, busy, onClose, overlayRef: overlay \}\);\s*if \(!open\) return null;/);
+  assert.match(read('src/hooks/useModalDismiss.js'), /const guard = useDiscardGuard\(\{ dirty: Boolean\(open && dirty\), onClose \}\);/);
   assert.match(legacy, /<div className="absolute inset-0 bg-slate-900\/40" onClick=\{guard\.requestClose\} \/>/);
   assert.match(legacy, /<button onClick=\{guard\.requestClose\} aria-label="Fechar"/);
   assert.match(legacy, /<DiscardChangesPrompt open=\{guard\.confirming\} onKeepEditing=\{guard\.keepEditing\} onDiscard=\{guard\.discard\} \/>/);
   for (const marker of [
     '<Modal open onClose={onClose} dirty={dirty} wide title="Cadastrar cliente"',
-    '<Modal open onClose={() => setForm(null)} dirty={dirty} title={form.id ? "Editar cliente" : "Novo cliente"}',
-    '<Modal open onClose={onClose} dirty={dirty} wide title="Nova ordem de serviço"',
-    '<Modal open onClose={onClose} dirty={registroAlterado} wide title="Editar registro do atendimento"',
-    '<Modal open onClose={onClose} dirty={registroAlterado} wide title={atual.titulo}',
-    '<Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} title="Novo lançamento"',
-    '<Modal open onClose={() => setForm(null)} dirty={dirty} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}',
+    '<Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCliente} title={form.id ? "Editar cliente" : "Novo cliente"}',
+    '<Modal open onClose={onClose} dirty={dirty} busy={criando} wide title="Nova ordem de serviço"',
+    '<Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title="Editar registro do atendimento"',
+    '<Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title={atual.titulo}',
+    '<Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} busy={salvandoLancamento} title="Novo lançamento"',
+    '<Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCompra} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}',
   ]) assert.ok(legacy.includes(marker), `formulário ligado ao guard: ${marker}`);
   // Formulário com retrato tirado na abertura (cadastro rápido zera ao fechar).
   assert.match(legacy, /else setF\(null\); \}, \[aberto\]\);\s*const \{ dirty \} = useFormDirty\(f, Boolean\(aberto && f\)\);/);

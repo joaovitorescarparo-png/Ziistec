@@ -46,6 +46,7 @@ import useModalViewport from "../hooks/useModalViewport";
 import { useDiscardGuard, useFormDirty } from "../hooks/useUnsavedChanges";
 import { confirmDiscardNavigation } from "../lib/unsavedChanges";
 import DiscardChangesPrompt from "../components/DiscardChangesPrompt";
+import { useModalDismiss } from "../hooks/useModalDismiss";
 import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
 import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
 
@@ -441,9 +442,9 @@ const Input = (p) => <input {...p} className={cx(inputCls, p.className)} />;
 const Textarea = (p) => <textarea {...p} className={cx(inputCls, "resize-none leading-relaxed", p.className)} />;
 const Select = ({ children, ...p }) => <select {...p} className={cx(inputCls, "appearance-none", p.className)}>{children}</select>;
 
-function Modal({ open, onClose, title, sub, children, footer, wide, dirty = false }) {
+function Modal({ open, onClose, title, sub, children, footer, wide, dirty = false, busy = false }) {
   const { overlay, scroller } = useModalViewport(open);
-  const guard = useDiscardGuard({ dirty: Boolean(open && dirty), onClose });
+  const guard = useModalDismiss({ open, dirty, busy, onClose, overlayRef: overlay });
   if (!open) return null;
   return (
     <div ref={overlay} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6 pt-[env(safe-area-inset-top)]" role="dialog" aria-modal="true" aria-label={title}>
@@ -1864,7 +1865,7 @@ function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = []
   };
   if (!os || !f) return null;
   return (
-    <Modal open onClose={fechar} title="Agendar atendimento" sub={os.numero}
+    <Modal open onClose={fechar} busy={salvando} title="Agendar atendimento" sub={os.numero}
       footer={<><Btn variant="ghost" disabled={salvando} onClick={fechar}>Cancelar</Btn>
         <Btn disabled={!f.data || salvando} onClick={confirmar}>{salvando ? "Agendando..." : "Confirmar agendamento"}</Btn></>}>
       <div className="grid sm:grid-cols-2 gap-5">
@@ -2179,7 +2180,7 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
   const set = (k, v) => setForm({ ...form, [k]: v });
   const pj = form.tipo === "PJ";
   return (
-    <Modal open onClose={() => setForm(null)} dirty={dirty} title={form.id ? "Editar cliente" : "Novo cliente"} wide
+    <Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCliente} title={form.id ? "Editar cliente" : "Novo cliente"} wide
       footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
         <Btn disabled={!form.nome || salvandoCliente}
           onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
@@ -3553,7 +3554,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
 
   return (
     <>
-      <Modal open onClose={onClose} dirty={dirty} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
+      <Modal open onClose={onClose} dirty={dirty} busy={criando} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
         footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
           <Btn disabled={!pronto || criando} onClick={criar}>{criando ? "Criando…" : "Abrir ordem de serviço"}</Btn></>}>
 
@@ -4268,7 +4269,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
   /* edição do registro depois de concluído: sem etapas, só o que faz sentido rever */
   if (jaConcluida) {
     return (
-      <Modal open onClose={onClose} dirty={registroAlterado} wide title="Editar registro do atendimento" sub={os.numero}
+      <Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title="Editar registro do atendimento" sub={os.numero}
         footer={<><Btn variant="ghost" onClick={onClose}>Fechar</Btn>
           <Btn onClick={() => { onSalvarParcial({ relato, fotos, pendencia }); onClose(); }}>Salvar alterações</Btn></>}>
         <Field label="O que foi feito">
@@ -4540,7 +4541,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
 
   return (
     <>
-      <Modal open onClose={onClose} dirty={registroAlterado} wide title={atual.titulo} sub={atual.sub}
+      <Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title={atual.titulo} sub={atual.sub}
         footer={
           <div className="flex items-center justify-between gap-3 w-full">
             <Btn variant="ghost" onClick={() => (etapa === 0 ? onClose() : setEtapa(etapa - 1))}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
@@ -4753,7 +4754,7 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 
   return (
     <>
-      <Modal open onClose={() => setForm(null)} dirty={dirty} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
+      <Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCompra} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
         sub={form.id ? "" : "Ao salvar, a conta a pagar é criada no financeiro."}
         footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
           <Btn disabled={!form.fornecedor || form.itens.length === 0 || salvandoCompra}
@@ -5148,7 +5149,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
       )}
 
       {form && (
-        <Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} title="Novo lançamento" wide
+        <Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} busy={salvandoLancamento} title="Novo lançamento" wide
           footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
             <Btn disabled={!form.descricao || !form.valor || salvandoLancamento} onClick={async () => {
               if (real) {
