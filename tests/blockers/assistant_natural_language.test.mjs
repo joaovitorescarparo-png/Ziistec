@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import React from 'react';
 import { transformSync } from 'esbuild';
 import * as toolRegistry from '../../src/lib/assistantTools.js';
+import * as unsavedChanges from '../../src/lib/unsavedChanges.js';
 import { createAssistantHandler } from '../../api/assistant.js';
 import { PROVIDER_ID_QUESTION, inferAssistantPlan } from '../../api/_assistantPlanner.js';
 import { GEMINI_API_BASE } from '../../api/_aiGateway.js';
@@ -309,7 +310,7 @@ function app(start) {
     membresiaAtual: { role: 'owner', status: 'active' }, membresias: [], recarregar() {} };
   const Assistant = () => null;
   const render = harness('src/App.jsx', { './lib/useSessao': { useSessao: () => session }, './lib/supabase': { configurado: true },
-    './components/AssistantPanel': { __esModule: true, default: Assistant } }, { window: nav.window });
+    './components/AssistantPanel': { __esModule: true, default: Assistant }, './lib/unsavedChanges': unsavedChanges }, { window: nav.window });
   const lazyNode = (tree, name) => nodes(tree).find(n => typeof n.type === 'function' && n.type.source?.includes(name));
   return { nav, render, assistant: () => find(render(), Assistant), lazyNode };
 }
@@ -363,4 +364,27 @@ test('ClientLocationsV2 aplica initialClientId uma vez por valor; voltar para a 
   assert.equal(closed.length, 1);
   props.initialClientId = clientB; render(props); render(props);
   assert.notEqual(back().props.onClick, props.onClose, 'um novo cliente pedido abre normalmente');
+});
+
+test('Bloco 6: com formulário não salvo, abrir registro pelo Assistente pergunta; "Cancelar" mantém a tela e o histórico', () => {
+  const a = app('https://app.example/');
+  const token = {};
+  const asked = [];
+  const originalConfirm = globalThis.confirm;
+  unsavedChanges.markUnsaved(token, true);
+  try {
+    globalThis.confirm = (message) => { asked.push(message); return false; };
+    a.assistant().props.onOpenRecord({ id: clientA, entityType: 'client', title: 'Mauro Silva' });
+    assert.equal(asked.length, 1);
+    assert.equal(a.nav.entries.length, 1, 'sem nova entrada de histórico');
+    assert.equal(a.lazyNode(a.render(), 'ClientLocationsV2'), undefined);
+    assert.ok(a.lazyNode(a.render(), 'legacy/ZiisTecApp'), 'a tela com o formulário continua aberta');
+    globalThis.confirm = (message) => { asked.push(message); return true; };
+    a.assistant().props.onOpenRecord({ id: clientA, entityType: 'client', title: 'Mauro Silva' });
+    assert.ok(a.lazyNode(a.render(), 'ClientLocationsV2'), 'descartar abre o registro');
+    assert.equal(asked.length, 2);
+  } finally {
+    globalThis.confirm = originalConfirm;
+    unsavedChanges.markUnsaved(token, false);
+  }
 });
