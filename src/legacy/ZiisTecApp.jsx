@@ -478,7 +478,7 @@ function Modal({ open, onClose, title, sub, children, footer, wide, dirty = fals
           <button onClick={guard.requestClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
         </div>
         <div ref={scroller} className="min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-7 pb-6 space-y-5">{children}</div>
-        {footer && <div className="shrink-0 sticky bottom-0 bg-white px-5 sm:px-7 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 flex flex-wrap gap-3 justify-end">{footer}</div>}
+        {footer && <div className="shrink-0 sticky bottom-0 bg-white px-5 sm:px-7 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 flex flex-wrap gap-3 justify-end">{typeof footer === "function" ? footer(guard.requestClose) : footer}</div>}
       </div>
       <DiscardChangesPrompt open={guard.confirming} onKeepEditing={guard.keepEditing} onDiscard={guard.discard} />
     </div>
@@ -1240,15 +1240,15 @@ export default function ZiisTec({ contexto }) {
   /* --------- compras → conta a pagar --------- */
   const salvarCompra = async (c) => {
     if (real) {
-      try { const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await uploadDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id); await recarregarDados(); aviso(c.id ? "Compra atualizada" : `${salva.numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(salva.id); }
-      catch(e){ aviso(mensagemErro(e)); }
-      return;
+      let salva;
+      try { salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await uploadDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id); await recarregarDados(); aviso(c.id ? "Compra atualizada" : `${salva.numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(salva.id); return true; }
+      catch(e){ aviso(mensagemErro(e)); return salva ? { ok: false, id: salva.id, requestId: salva.requestId } : false; }
     }
     const total = c.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
-    if (c.id) { setCompras((l) => l.map((x) => (x.id === c.id ? c : x))); setLancamentos((l) => l.map((x) => x.id === c.lancamentoId ? { ...x, valor: total, vencimento: c.vencimento, descricao: `Compra ${c.numero} · ${c.fornecedor}` } : x)); aviso("Compra atualizada"); return; }
+    if (c.id) { setCompras((l) => l.map((x) => (x.id === c.id ? c : x))); setLancamentos((l) => l.map((x) => x.id === c.lancamentoId ? { ...x, valor: total, vencimento: c.vencimento, descricao: `Compra ${c.numero} · ${c.fornecedor}` } : x)); aviso("Compra atualizada"); return true; }
     const id = uid(); const numero = proxNumero(comprasEmp, "CMP"); const lancamentoId = uid();
     setLancamentos((l) => [{ id: lancamentoId, empresaId, tipo: "despesa", descricao: `Compra ${numero} · ${c.fornecedor}`, valor: total, vencimento: c.vencimento || HOJE, pago: !!c.jaPago, pagoEm: c.jaPago ? HOJE : null, forma: c.jaPago ? c.forma : null, origemTipo: "compra", origemId: id, categoria: "Materiais" }, ...l]);
-    setCompras((l) => [{ ...c, id, numero, lancamentoId, empresaId }, ...l]); aviso(`${numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(id);
+    setCompras((l) => [{ ...c, id, numero, lancamentoId, empresaId }, ...l]); aviso(`${numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(id); return true;
   };
 
   const props = {
@@ -2147,6 +2147,8 @@ function Clientes(p) {
    Mínimo para continuar: nome + telefone. O resto pode vir depois. */
 function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
   const [f, setF] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const salvandoRef = useRef(false);
   useEffect(() => { if (aberto) setF({ tipo: "PF", nome: nomeInicial, telefone: "", whatsapp: "", endereco: "", documento: "", fantasia: "", responsavel: "", obs: "" }); else setF(null); }, [aberto]);
   const { dirty } = useFormDirty(f, Boolean(aberto && f));
   if (!aberto || !f) return null;
@@ -2156,9 +2158,14 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
   const faltaFiscal = pj && !f.documento.trim();
 
   return (
-    <Modal open onClose={onClose} dirty={dirty} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
-      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn disabled={!pronto} onClick={() => { onSave({ ...f, whatsapp: f.whatsapp || f.telefone }); onClose(); }}>Salvar e usar</Btn></>}>
+    <Modal open onClose={onClose} dirty={dirty} busy={salvando} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
+      footer={(requestClose) => <><Btn variant="ghost" disabled={salvando} onClick={requestClose}>Cancelar</Btn>
+        <Btn disabled={!pronto || salvando} onClick={async () => {
+          if (salvandoRef.current) return;
+          salvandoRef.current = true; setSalvando(true);
+          try { const id = await onSave({ ...f, whatsapp: f.whatsapp || f.telefone }); if (id) onClose(); }
+          finally { salvandoRef.current = false; setSalvando(false); }
+        }}>{salvando ? "Salvando…" : "Salvar e usar"}</Btn></>}>
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
         {["PF", "PJ"].map((t) => (
           <button key={t} role="tab" aria-selected={f.tipo === t} onClick={() => set("tipo", t)}
@@ -2203,9 +2210,9 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
   const pj = form.tipo === "PJ";
   return (
     <Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCliente} title={form.id ? "Editar cliente" : "Novo cliente"} wide
-      footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
+      footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoCliente} onClick={requestClose}>Cancelar</Btn>
         <Btn disabled={!form.nome || salvandoCliente}
-          onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
+          onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); if (!id) return; setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
           {salvandoCliente ? "Salvando…" : "Salvar cliente"}</Btn></>}>
       <DraftRestoredNotice savedAt={rascunho.restoredAt} onDiscard={() => setForm(rascunho.discardDraft() || { tipo: "PF" })} />
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
@@ -3225,7 +3232,7 @@ function OrcamentoEditor(p) {
       </div>
 
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); return id; }} />
 
       <CadastroRapidoCatalogo
         tipo={cadastroRapido}
@@ -3587,7 +3594,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
   return (
     <>
       <Modal open onClose={onClose} dirty={dirty} busy={criando} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
-        footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        footer={(requestClose) => <><Btn variant="ghost" disabled={criando} onClick={requestClose}>Cancelar</Btn>
           <Btn disabled={!pronto || criando} onClick={criar}>{criando ? "Criando…" : "Abrir ordem de serviço"}</Btn></>}>
 
         <DraftRestoredNotice savedAt={rascunho.restoredAt} onDiscard={descartarRascunho} detail="Itens do catálogo não ficam no rascunho; adicione-os de novo se precisar." />
@@ -3690,7 +3697,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
       </Modal>
 
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); return id; }} />
     </>
   );
 }
@@ -4575,9 +4582,9 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
   return (
     <>
       <Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title={atual.titulo} sub={atual.sub}
-        footer={
+        footer={(requestClose) =>
           <div className="flex items-center justify-between gap-3 w-full">
-            <Btn variant="ghost" onClick={() => (etapa === 0 ? onClose() : setEtapa(etapa - 1))}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
+            <Btn variant="ghost" disabled={concluindo} onClick={() => { if (!concluindo) etapa === 0 ? requestClose() : setEtapa(etapa - 1); }}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
             <div className="flex items-center gap-3">
               {atual.pular && <Btn variant="ghost" onClick={() => setEtapa(etapa + 1)}>{atual.pular}</Btn>}
               {ultima
@@ -4789,9 +4796,9 @@ function CompraForm({ form, setForm, onSave, produtos }) {
     <>
       <Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCompra} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
         sub={form.id ? "" : "Ao salvar, a conta a pagar é criada no financeiro."}
-        footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
+        footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoCompra} onClick={requestClose}>Cancelar</Btn>
           <Btn disabled={!form.fornecedor || form.itens.length === 0 || salvandoCompra}
-            onClick={async () => { if (salvandoCompra) return; setSalvandoCompra(true); try { await onSave(form); setForm(null); } finally { setSalvandoCompra(false); } }}>
+            onClick={async () => { if (salvandoCompra) return; setSalvandoCompra(true); try { const salvo = await onSave(form); if (salvo === false) return; if (salvo?.ok === false) { setForm((atual) => atual ? { ...atual, id: salvo.id, requestId: salvo.requestId } : atual); return; } setForm(null); } finally { setSalvandoCompra(false); } }}>
             {salvandoCompra ? "Registrando…" : form.id ? "Salvar alterações" : `Registrar compra de ${brl(total)}`}
           </Btn></>}>
         <div className="grid sm:grid-cols-2 gap-5">
@@ -5183,7 +5190,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
 
       {form && (
         <Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} busy={salvandoLancamento} title="Novo lançamento" wide
-          footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
+          footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoLancamento} onClick={requestClose}>Cancelar</Btn>
             <Btn disabled={!form.descricao || !form.valor || salvandoLancamento} onClick={async () => {
               if (real) {
                 if (salvandoLancamento) return;

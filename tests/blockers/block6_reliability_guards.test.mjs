@@ -189,7 +189,7 @@ test('legado: Modal guarda fundo e X; formulários críticos informam alteraçã
   assert.match(legacy, /<button onClick=\{guard\.requestClose\} aria-label="Fechar"/);
   assert.match(legacy, /<DiscardChangesPrompt open=\{guard\.confirming\} onKeepEditing=\{guard\.keepEditing\} onDiscard=\{guard\.discard\} \/>/);
   for (const marker of [
-    '<Modal open onClose={onClose} dirty={dirty} wide title="Cadastrar cliente"',
+    '<Modal open onClose={onClose} dirty={dirty} busy={salvando} wide title="Cadastrar cliente"',
     '<Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCliente} title={form.id ? "Editar cliente" : "Novo cliente"}',
     '<Modal open onClose={onClose} dirty={dirty} busy={criando} wide title="Nova ordem de serviço"',
     '<Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title="Editar registro do atendimento"',
@@ -201,8 +201,8 @@ test('legado: Modal guarda fundo e X; formulários críticos informam alteraçã
   assert.match(legacy, /else setF\(null\); \}, \[aberto\]\);\s*const \{ dirty \} = useFormDirty\(f, Boolean\(aberto && f\)\);/);
   assert.match(legacy, /useFormDirty\(\{ relato, materiais, temAdicional, adicionais, custosExtras, temPendencia, pendencia, resultado,/);
   // Salvar continua fechando pelo próprio fluxo (sem passar pela pergunta).
-  assert.match(legacy, /const id = await onSave\(form\); setForm\(null\); onSaved\?\.\(id\);/);
-  assert.match(legacy, /onSave\(\{ \.\.\.f, whatsapp: f\.whatsapp \|\| f\.telefone \}\); onClose\(\);/);
+  assert.match(legacy, /const id = await onSave\(form\); if \(!id\) return; setForm\(null\); onSaved\?\.\(id\);/);
+  assert.match(legacy, /await onSave\(\{ \.\.\.f, whatsapp: f\.whatsapp \|\| f\.telefone \}\); if \(id\) onClose\(\);/);
 });
 
 test('legado: Voltar do editor de orçamento pergunta com alteração; depois de salvar não pergunta; menu também', () => {

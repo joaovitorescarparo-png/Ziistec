@@ -83,6 +83,110 @@ function modalHarness({ dirty = false, busy = false, browser = fakeBrowser() } =
 
 beforeEach(() => { unsaved.resetUnsavedChangesForTests(); });
 
+// Execute the actual footer JSX so a direct onClose bypass cannot hide behind hook-only tests.
+function formFooter(name, values, requestClose) {
+  const source = legacy.slice(legacy.indexOf(`function ${name}(`));
+  const expression = source.match(/footer=\{(\(requestClose\) => <>[\s\S]*?<\/>)\}/)?.[1];
+  assert.ok(expression, `${name} supplies its footer through the modal close guard`);
+  const nodes = [];
+  const React = { Fragment: 'fragment', createElement(type, props, ...children) {
+    const node = { type, props: props || {}, children }; nodes.push(node); return node;
+  } };
+  const context = { React, Btn: 'Btn', ...values, requestClose };
+  vm.runInNewContext(transformSync(`(${expression})(requestClose)`, { loader: 'jsx', jsx: 'transform' }).code, context);
+  return nodes.filter((n) => n.type === 'Btn');
+}
+
+test('actual form Cancel buttons honor busy, dirty, keep editing and discard', () => {
+  const cases = [
+    ['ClienteRapido', { salvando: true, pronto: true }],
+    ['ClienteForm', { salvandoCliente: true, form: { nome: 'Teste' }, onSave() {} }],
+    ['NovaOS', { criando: true, pronto: true, criar() {} }],
+    ['CompraForm', { salvandoCompra: true, form: { fornecedor: 'Teste', itens: [{}] }, brl: String, total: 1 }],
+    ['Financeiro', { salvandoLancamento: true, form: { descricao: 'Teste', valor: 1 } }],
+  ];
+  for (const [name, values] of cases) {
+    const h = modalHarness({ busy: true, dirty: true });
+    const cancel = (guard, props) => formFooter(name, props, guard.requestClose).find((n) => n.children.includes('Cancelar'));
+    let guard = h.view();
+    let button = cancel(guard, values);
+    assert.equal(button.props.disabled, true, name);
+    button.props.onClick();
+    assert.equal(h.state.closed, 0, 'save pending: cannot close even by direct callback');
+    h.set({ busy: false }); guard = h.view();
+    const idle = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, typeof v === 'boolean' ? false : v]));
+    cancel(guard, idle).props.onClick(); guard = h.view();
+    assert.equal(guard.confirming, true, name);
+    guard.keepEditing(); guard = h.view();
+    assert.equal(h.state.closed, 0);
+    cancel(guard, idle).props.onClick(); guard = h.view(); guard.discard();
+    assert.equal(h.state.closed, 1);
+    h.rt.unmount();
+  }
+});
+
+test('client save failure retains form; retry closes only after success', async () => {
+  let closed = 0; let saved = 0; let busy = false; let result = null;
+  const values = { salvandoCliente: false, form: { nome: 'Teste' },
+    setSalvandoCliente: (v) => { busy = v; }, onSave: async () => result,
+    setForm: () => { closed += 1; }, onSaved: () => { saved += 1; } };
+  const save = () => formFooter('ClienteForm', values, () => {}).find((n) => !n.children.includes('Cancelar')).props.onClick();
+  await save();
+  assert.equal(closed, 0); assert.equal(saved, 0); assert.equal(busy, false);
+  result = 'client-id'; await save();
+  assert.equal(closed, 1); assert.equal(saved, 1); assert.equal(busy, false);
+});
+
+test('quick client waits for save, blocks duplicate submit and retains data on failure', async () => {
+  let closed = 0; let calls = 0; let resolve;
+  const values = { salvando: false, pronto: true, f: { nome: 'Teste', telefone: '123' },
+    salvandoRef: { current: false }, setSalvando() {}, onClose: () => { closed += 1; },
+    onSave: () => { calls += 1; return new Promise((r) => { resolve = r; }); } };
+  const save = formFooter('ClienteRapido', values, () => {}).find((n) => !n.children.includes('Cancelar')).props.onClick;
+  const pending = save(); await save();
+  assert.equal(calls, 1); assert.equal(closed, 0);
+  resolve(null); await pending; assert.equal(closed, 0);
+  const retry = save(); resolve('client-id'); await retry;
+  assert.equal(calls, 2); assert.equal(closed, 1);
+});
+
+test('purchase save failure retains form and successful retry closes it', async () => {
+  let closed = 0; let result = false;
+  const values = { salvandoCompra: false, form: { fornecedor: 'Teste', itens: [{}] }, total: 1, brl: String,
+    setSalvandoCompra() {}, onSave: async () => result, setForm: () => { closed += 1; } };
+  const save = () => formFooter('CompraForm', values, () => {}).find((n) => !n.children.includes('Cancelar')).props.onClick();
+  await save(); assert.equal(closed, 0);
+  result = true; await save(); assert.equal(closed, 1);
+});
+
+test('purchase persisted before upload failure retains identity and later edits for retry', async () => {
+  let current = { fornecedor: 'Edited while waiting', itens: [{}] };
+  const values = { salvandoCompra: false, form: { fornecedor: 'Original', itens: [{}] }, total: 1, brl: String,
+    setSalvandoCompra() {}, onSave: async () => ({ ok: false, id: 'purchase-id', requestId: 'request-id' }),
+    setForm: (next) => { current = typeof next === 'function' ? next(current) : next; } };
+  await formFooter('CompraForm', values, () => {}).find((n) => !n.children.includes('Cancelar')).props.onClick();
+  assert.equal(current.id, 'purchase-id'); assert.equal(current.requestId, 'request-id');
+  assert.equal(current.fornecedor, 'Edited while waiting');
+});
+
+test('purchase callback reports partial persistence when document upload fails', async () => {
+  const start = legacy.indexOf('  const salvarCompra = async (c) => {');
+  const source = legacy.slice(start, legacy.indexOf('\n  const props =', start));
+  let failUpload = true; let savedId = null;
+  const callback = vm.runInNewContext(`${source}\nsalvarCompra`, {
+    real: true, empresaId: 'company', usuarioAtual: { id: 'owner' },
+    salvarCompraDB: async () => ({ id: 'purchase-id', requestId: 'request-id' }),
+    uploadDocumentosCompraDB: async () => { if (failUpload) throw new Error('upload failed'); },
+    recarregarDados: async () => {}, aviso() {}, mensagemErro: (e) => e.message,
+    setCompraAberta: (id) => { savedId = id; },
+  });
+  const failed = await callback({ anexos: [] });
+  assert.equal(failed.ok, false); assert.equal(failed.id, 'purchase-id'); assert.equal(savedId, null);
+  failUpload = false;
+  assert.equal(await callback({ id: failed.id, requestId: failed.requestId, anexos: [] }), true);
+  assert.equal(savedId, 'purchase-id');
+});
+
 // ------------------------------------------------------------------ Esc
 test('Esc: modal limpo fecha; foco em outro painel não fecha o modal', () => {
   const h = modalHarness();
