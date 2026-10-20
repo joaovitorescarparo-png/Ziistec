@@ -21,8 +21,8 @@ Escopo: evitar perda silenciosa de trabalho no celular sem transformar o app em 
 - **iOS/Safari:**
   - não é possível impedir o fechamento da aba, nem o recarregar ou o encerramento do app pelo sistema;
   - `beforeunload` não mostra confirmação no iOS;
-  - `pagehide` e `visibilitychange` (hidden) disparam, mas só permitem gravar algo rapidamente; não permitem perguntar.
-- **Desktop e Android (Chrome):** `beforeunload` mostra a confirmação do próprio navegador ao recarregar ou fechar com formulário alterado. O texto é do navegador e não pode ser personalizado.
+  - `pagehide` e `visibilitychange` (hidden), quando entregues pelo navegador, permitem tentar gravar o rascunho; não permitem perguntar. O encerramento pelo sistema pode ocorrer sem esses eventos.
+- **Desktop e Android (Chrome):** `beforeunload` pode mostrar a confirmação do próprio navegador ao recarregar ou fechar com formulário alterado, dependendo da interação prévia e das políticas do navegador. Não é garantia contra encerramento pelo sistema. O texto é do navegador e não pode ser personalizado.
 - **Encerramento pelo sistema** (aba em segundo plano descartada):
   - o estado do React se perde;
   - o único recurso é o rascunho abaixo, que vale para a mesma aba;
