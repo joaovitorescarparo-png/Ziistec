@@ -7,7 +7,7 @@
 export const SHELL_V2_STATE = 'ziistecShellV2';
 export const SHELL_V2_ORIGIN = 'ziistecShellOrigin';
 
-const ABAS_COM_ENTRADA = ['catalogo', 'clientes', 'garantias', 'financeiro'];
+const ABAS_COM_ENTRADA = ['inicio', 'catalogo', 'clientes', 'garantias', 'financeiro'];
 
 export const RECURSOS_V2_OWNER = Object.freeze({
   produtos: Object.freeze({ rotulo: 'Estoque e movimentações', aba: 'catalogo' }),

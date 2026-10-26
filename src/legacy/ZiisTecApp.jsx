@@ -51,6 +51,7 @@ import { useFormDraft } from "../hooks/useFormDraft";
 import DraftRestoredNotice from "../components/DraftRestoredNotice";
 import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
 import { abaDeOrigemV2, recursosV2DaAba, semOrigemV2 } from "../lib/recursosV2";
+import { concluidasRecentemente, produtosComEstoqueBaixo } from "../lib/dashboardInicio";
 import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
 
 /* ================================================================ helpers */
@@ -1548,7 +1549,7 @@ function BuscaGlobal({ onClose, clientes, orcamentos, ordens, compras, nomeClien
 }
 
 /* =============================================================== Dashboard */
-function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso }) {
+function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso, produtos, abrirV2 }) {
   const verFinanceiro = permitido("financeiro");
   const [revisoesInicio, setRevisoesInicio] = useState([]);
   useEffect(() => {
@@ -1568,6 +1569,9 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
   const aPagar = soma(lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && noMes(l)));
   const despesasPagas = soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago && noMes(l)));
 
+  const recentes = concluidasRecentemente(ordens, HOJE);
+  const semEstoque = papel === "proprietario" ? produtosComEstoqueBaixo(produtos) : [];
+
   const pend = [];
   if (papel === "proprietario") {
     const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= HOJE);
@@ -1575,6 +1579,7 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
     const hoje = revisoesPendentes.filter((r)=>r.data === HOJE);
     if (atrasadas.length) pend.push({ id:"pos-venda-atrasado", tom:"erro", titulo: atrasadas.length + " retorno" + (atrasadas.length>1?"s":"") + " de pós-venda atrasado" + (atrasadas.length>1?"s":""), detalhe:"Mais antigo: " + dataBR(atrasadas[0].data), acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
     if (hoje.length) pend.push({ id:"pos-venda-hoje", tom:"atencao", titulo: hoje.length + " retorno" + (hoje.length>1?"s":"") + " de pós-venda para hoje", detalhe:"Revisar clientes e concluir ou dispensar", acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
+    if (semEstoque.length) pend.push({ id:"estoque-baixo", tom:"atencao", titulo: semEstoque.length + " produto" + (semEstoque.length>1?"s":"") + " com estoque baixo", detalhe: semEstoque.slice(0, 3).map((p) => p.nome).join(" · ") + (semEstoque.length > 3 ? " · +" + (semEstoque.length - 3) : ""), acao:"Ver estoque", ir:()=>(abrirV2 ? abrirV2("produtos") : irPara("catalogo")) });
   }
   if (verFinanceiro) {
   const vencidas = lancamentos.filter((l) => !l.pago && l.vencimento < HOJE);
@@ -1692,6 +1697,27 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
                 ))}
               </Panel>
             )}
+          </section>
+
+          <section>
+            <Rotulo acao={<button onClick={() => irPara("ordens")} className="text-[13px] font-medium text-teal-800 hover:underline">Ver serviços</button>}>
+              Serviços concluídos recentemente
+            </Rotulo>
+            <Panel className="divide-y divide-slate-100 overflow-hidden">
+              {recentes.length === 0 ? <Empty icon={CheckCircle2} title="Nenhum serviço concluído nos últimos 30 dias" />
+                : recentes.map((os) => (
+                  <Linha key={os.id} onClick={() => abrirOS(os.id)}>
+                    <div className="flex items-center gap-3.5">
+                      <span className="text-[12px] font-medium text-slate-500 tabular-nums w-[44px] shrink-0">{dataCurta(os.concluidaEm)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[14px] font-medium text-slate-800 truncate">{nomeCliente(os.clienteId)}</p>
+                        <p className="text-[12.5px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
+                      </div>
+                      <Pill tone={ST_OS.concluida.tone}>{ST_OS.concluida.label}</Pill>
+                    </div>
+                  </Linha>
+                ))}
+            </Panel>
           </section>
         </div>
 

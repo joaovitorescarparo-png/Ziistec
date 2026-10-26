@@ -4,6 +4,7 @@ import {
   Pencil, Plus, RefreshCcw, ScanLine, Search, ShieldCheck, TrendingUp, TriangleAlert, X,
 } from 'lucide-react';
 import { salvarProdutoDB } from '../../lib/dataApi';
+import { estoqueBaixo } from '../../lib/estoque';
 import {
   ajustarEstoqueDB,
   carregarMovimentosEstoqueDB,
@@ -101,7 +102,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
 
   const metrics = useMemo(() => {
     const tracked = products.filter(p=>p.controlaEstoque);
-    const low = tracked.filter(p=>p.estoque <= p.estoqueMinimo);
+    const low = tracked.filter(estoqueBaixo);
     const cost = tracked.reduce((t,p)=>t + p.estoque * p.custo, 0);
     const sale = tracked.reduce((t,p)=>t + p.estoque * p.preco, 0);
     return { total:products.length, low:low.length, cost, sale };
@@ -111,7 +112,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
     const q = search.trim().toLowerCase();
     return products.filter(p => {
       const hay = `${p.nome} ${p.marca} ${p.modelo} ${p.sku||''} ${p.codigoBarras||''}`.toLowerCase();
-      const low = !p.controlaEstoque || p.estoque > p.estoqueMinimo;
+      const low = !estoqueBaixo(p);
       return (!q || hay.includes(q)) && (!onlyLow || !low);
     });
   }, [products, search, onlyLow]);
@@ -222,7 +223,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
 
           {filtered.length === 0 ? <div className="px-5 py-16 text-center text-sm text-slate-500">Nenhum produto encontrado.</div>
           : <div className="divide-y divide-slate-100">{filtered.map(p => {
-            const low = p.controlaEstoque && p.estoque <= p.estoqueMinimo;
+            const low = estoqueBaixo(p);
             const margin = p.preco > 0 ? ((p.preco-p.custo)/p.preco)*100 : 0;
             return <article key={p.id} className="p-4 sm:p-5">
               <div className="flex gap-4">
