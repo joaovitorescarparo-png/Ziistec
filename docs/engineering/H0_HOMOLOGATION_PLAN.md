@@ -9,7 +9,7 @@
 Provar, num ambiente **descartável e separado**, que a próxima versão (branch `claude/blocks34-port-beta-v1`) funciona de ponta
 a ponta com banco e frontend juntos, antes de qualquer decisão sobre o Beta Live:
 
-1. as migrations **0100–0106** aplicam limpas, na ordem, sobre um banco no estado do Beta Live (**0099**);
+1. as migrations **0100–0107** aplicam limpas, na ordem, sobre um banco no estado do Beta Live (**0099**);
 2. o frontend novo continua utilizável contra o banco 0099 (modo reduzido) e fica completo depois das migrations;
 3. proprietário e técnico executam o fluxo real em aparelhos reais (Android e iPhone), com o técnico sem acesso a preços;
 4. o plano de volta (restaurar backup) foi ensaiado;
@@ -28,9 +28,10 @@ Critério de saída: roteiro da seção 9 inteiro marcado, sem falha P0/P1 abert
 | Histórico por cliente/local | 0104 | `zt_client_service_history` (só proprietário) e `zt_work_order_history_detail` |
 | Técnico sem preços | 0105 | itens e relato sem valores para o técnico; `work_orders` com SELECT por coluna |
 | Preferência de rota por usuário | 0106 | `user_route_preferences` (uma linha por usuário, RLS própria) |
+| Técnico não reescreve contrato/ciclo da OS | 0107 | trava de UPDATE do técnico cobre `maintenance_contract_id` e `contract_cycle` (auditoria de segurança V1, SEC-01) |
 | Frontend | Blocos 6 e 7, Onda 1, Onda 2 | formulários protegidos, rascunho, V2 no app principal, logo nos PDFs, Início, rotas |
 
-Estado esperado do banco: **definers = 134** no 0099, **140** depois da 0105 e **140** depois da 0106 (a 0106 não cria função).
+Estado esperado do banco: **definers = 134** no 0099, **140** depois da 0105 e **140** depois da 0106 (a 0106 não cria função) e **140** depois da 0107 (ela só substitui uma função de trigger existente).
 
 ## 3. Ordem segura: frontend novo → migrations
 
@@ -46,7 +47,7 @@ Sequência do ensaio no H0:
    - telas abrem, OS e agenda funcionam, nada mostra erro técnico;
    - Comprovante, histórico por local e preferência persistente aparecem como "ainda não disponível na sua conta" (ou valem só na sessão);
    - "Abrir rota" funciona com o app padrão (Google Maps) e a troca de app vale só na sessão.
-4. Aplicar **0100 → 0101 → 0102 → 0103 → 0104 → 0105 → 0106**, um arquivo por vez, cada um em uma transação
+4. Aplicar **0100 → 0101 → 0102 → 0103 → 0104 → 0105 → 0106 → 0107**, um arquivo por vez, cada um em uma transação
    (`psql -v ON_ERROR_STOP=1 -1 -f <arquivo>`), conferindo a seção 4 depois de cada passo.
 5. Recarregar o frontend novo e executar o roteiro completo (seção 9).
 
@@ -67,6 +68,7 @@ anterior. Não há reversa automática para 0100–0104 (criam tabelas, colunas,
 
 Se for preciso desfazer só uma etapa no H0 (ensaio manual; conferir cada policy em `pg_policies` antes):
 
+- **0107:** recriar `public.zt_guard_work_order_technician_update()` com o corpo da 0031 (sem `maintenance_contract_id` e `contract_cycle`). Só para ensaio: reabre o SEC-01.
 - **0106:** `drop table public.user_route_preferences;`. O frontend volta ao modo "vale na sessão" sem erro.
 - **0105:** devolver o estado anterior:
   `grant select on table public.work_orders to authenticated;`
