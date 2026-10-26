@@ -167,7 +167,7 @@ export default function WorkOrderMemoryV2({companyId,companyName='Sua empresa',u
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <button onClick={()=>navigateFromWorkOrder(selected?()=>setSelected(null):onClose)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2.5 text-slate-300 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300" aria-label="Voltar"><ArrowLeft size={19}/></button>
-          <div className="min-w-0"><div className="flex items-center gap-2"><h1 className="truncate text-base font-bold">Memória técnica da OS</h1><span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300">V2</span></div><p className="truncate text-xs text-slate-500">{selectedRow?`${selectedRow.number} · ${selectedRow.client?.name||'Cliente'}`:companyName}</p></div>
+          <div className="min-w-0"><div className="flex items-center gap-2"><h1 className="truncate text-base font-bold">Memória técnica da OS</h1></div><p className="truncate text-xs text-slate-500">{selectedRow?`${selectedRow.number} · ${selectedRow.client?.name||'Cliente'}`:companyName}</p></div>
         </div>
         <button onClick={()=>selected?loadDetail(selected):load()} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2.5 text-slate-300 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300" aria-label="Atualizar"><RefreshCw size={18}/></button>
       </div>

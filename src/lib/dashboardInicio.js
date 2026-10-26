@@ -1,4 +1,4 @@
-import { estoqueBaixo } from './estoque';
+import { estoqueBaixo } from './estoque.js';
 
 /* Dados derivados do Início. Funções puras sobre o que o app principal já carregou: nenhuma consulta nova,
  * e a visibilidade de cada bloco continua sendo decidida pelo papel (RLS decide o que cada papel carrega). */
