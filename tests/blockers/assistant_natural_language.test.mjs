@@ -7,6 +7,7 @@ import { transformSync } from 'esbuild';
 import * as toolRegistry from '../../src/lib/assistantTools.js';
 import * as unsavedChanges from '../../src/lib/unsavedChanges.js';
 import * as formDrafts from '../../src/lib/formDrafts.js';
+import * as recursosV2 from '../../src/lib/recursosV2.js';
 import { createAssistantHandler } from '../../api/assistant.js';
 import { PROVIDER_ID_QUESTION, inferAssistantPlan } from '../../api/_assistantPlanner.js';
 import { GEMINI_API_BASE } from '../../api/_aiGateway.js';
@@ -311,7 +312,7 @@ function app(start) {
     membresiaAtual: { role: 'owner', status: 'active' }, membresias: [], recarregar() {} };
   const Assistant = () => null;
   const render = harness('src/App.jsx', { './lib/useSessao': { useSessao: () => session }, './lib/supabase': { configurado: true },
-    './components/AssistantPanel': { __esModule: true, default: Assistant }, './lib/unsavedChanges': unsavedChanges, './lib/formDrafts': formDrafts }, { window: nav.window });
+    './components/AssistantPanel': { __esModule: true, default: Assistant }, './lib/unsavedChanges': unsavedChanges, './lib/formDrafts': formDrafts, './lib/recursosV2': recursosV2 }, { window: nav.window });
   const lazyNode = (tree, name) => nodes(tree).find(n => typeof n.type === 'function' && n.type.source?.includes(name));
   return { nav, render, assistant: () => find(render(), Assistant), lazyNode };
 }

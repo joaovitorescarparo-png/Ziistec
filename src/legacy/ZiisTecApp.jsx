@@ -50,6 +50,7 @@ import { useModalDismiss } from "../hooks/useModalDismiss";
 import { useFormDraft } from "../hooks/useFormDraft";
 import DraftRestoredNotice from "../components/DraftRestoredNotice";
 import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
+import { abaDeOrigemV2, recursosV2DaAba, semOrigemV2 } from "../lib/recursosV2";
 import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
 
 /* ================================================================ helpers */
@@ -506,6 +507,11 @@ const PageHead = ({ title, sub, action }) => (
   </div>
 );
 
+/* Entradas das telas V2 dentro da aba do app principal. Só o proprietário recebe; o acesso real segue no App e no banco. */
+const RecursosV2 = ({ aba, papel, abrirV2 }) => (typeof abrirV2 === "function"
+  ? recursosV2DaAba(aba, papel).map((r) => <Btn key={r.chave} variant="soft" onClick={() => abrirV2(r.chave)}>{r.rotulo}</Btn>)
+  : null);
+
 const Empty = ({ icon: Icon, title, sub, action }) => (
   <div className="text-center py-12 px-6">
     <div className="w-12 h-12 rounded-2xl bg-white ring-1 ring-slate-200/70 mx-auto flex items-center justify-center text-slate-300"><Icon className="w-5 h-5" /></div>
@@ -677,7 +683,13 @@ export default function ZiisTec({ contexto }) {
   /* contexto vem do Supabase (Fase 1). Quando presente, substitui a
      autenticação simulada e os dados de demonstração de empresa/usuário. */
   const real = Boolean(contexto);
-  const [tela, setTela] = useState("inicio");
+  const [tela, setTela] = useState(() => (typeof window !== "undefined" ? abaDeOrigemV2(window.history.state) : null) || "inicio");
+  useEffect(() => {
+    // A origem vale uma vez: consumida, sai do histórico para um recarregamento comum voltar ao Início.
+    if (typeof window === "undefined") return;
+    const limpo = semOrigemV2(window.history.state);
+    if (limpo) window.history.replaceState(limpo, "", window.location.href);
+  }, []);
   const [drawer, setDrawer] = useState(false);
   const [menuExpandido, setMenuExpandido] = useState(false);
   const menuTouchX = useRef(null);
@@ -1264,6 +1276,7 @@ export default function ZiisTec({ contexto }) {
     compraAberta, setCompraAberta, setTela, abrirOS, abrirOrc, abrirCliente, abrirCompra,
     garantiaAberta, setGarantiaAberta, abrirGarantia, real,
     pedirConfirmacao: setConfirmar, excluirRegistro, contexto,
+    abrirV2: contexto?.abrirRecursoV2 ? (chave, params) => contexto.abrirRecursoV2(chave, { origem: tela, params }) : undefined,
   };
 
   const NAV = [
@@ -1912,7 +1925,7 @@ function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = []
 
 /* ================================================================ Clientes */
 function Clientes(p) {
-  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso, excluirRegistro, papel } = p;
+  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso, excluirRegistro, papel, abrirV2 } = p;
   const [revisoesCliente, setRevisoesCliente] = useState([]);
   useEffect(() => {
     if (!real || !empresaId) return;
@@ -1970,6 +1983,7 @@ function Clientes(p) {
           </div>
           <div className="flex gap-2 flex-wrap">
             <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm(c)}>Editar</Btn>
+            {papel === "proprietario" && abrirV2 && <Btn variant="soft" size="sm" icon={MapPin} onClick={() => abrirV2("clientes-locais", { client: c.id })}>Locais no mapa</Btn>}
             {papel === "proprietario" && <Btn variant="danger" size="sm" icon={Trash2} onClick={() => excluirRegistro("cliente", c.id, c.fantasia || c.nome, () => setClienteAberto(null))}>Excluir</Btn>}
             <Btn size="sm" icon={FileText} onClick={() => { setTela("orcamentos"); setOrcamentoAberto("novo:" + c.id); }}>Novo orçamento</Btn>
           </div>
@@ -2118,7 +2132,8 @@ function Clientes(p) {
 
   return (
     <>
-      <PageHead title="Clientes" sub={`${clientes.length} cadastrados`} action={<Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn>} />
+      <PageHead title="Clientes" sub={`${clientes.length} cadastrados`}
+        action={<div className="flex flex-wrap gap-2"><RecursosV2 aba="clientes" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn></div>} />
       <div className="mb-5 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder="Buscar por nome, documento ou telefone" /></div>
       {lista.length === 0 ? (
         <Panel><Empty icon={Users} title="Nenhum cliente encontrado" sub="Cadastre um cliente para começar a criar orçamentos." action={<Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn>} /></Panel>
@@ -2244,7 +2259,7 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
 }
 
 /* ==================================================== Catálogo (serviços + produtos) */
-function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirRegistro, papel, contexto, real, empresaId, aviso }) {
+function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirRegistro, papel, contexto, real, empresaId, aviso, abrirV2 }) {
   const [aba, setAba] = useState("servicos");
   const [busca, setBusca] = useState("");
   const [formS, setFormS] = useState(null);
@@ -2361,7 +2376,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
       <PageHead title="Serviços e produtos" sub="O que você vende, quanto cobra e como cobra."
         action={aba === "servicos"
           ? <Btn icon={Plus} onClick={() => setFormS({ unidade: "unidade", ativo: true, preco: 0, custo: 0, categoria: "", garantiaDias: 0, retornoDias: 0 })}>Novo serviço</Btn>
-          : <Btn icon={Plus} onClick={() => abrirFormProduto(null)}>Novo produto</Btn>} />
+          : <div className="flex flex-wrap gap-2"><RecursosV2 aba="catalogo" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => abrirFormProduto(null)}>Novo produto</Btn></div>} />
 
       <Tabs valor={aba} onChange={setAba} opcoes={[{ id: "servicos", label: `Serviços · ${ativosS.length}` }, { id: "produtos", label: `Produtos e materiais · ${ativosP.length}` }]} className="mb-5" />
       <div className="mb-6 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder={aba === "servicos" ? "Buscar serviço" : "Buscar produto, marca, modelo, SKU ou código"} /></div>
@@ -2544,7 +2559,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
           <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <label className="flex items-center gap-3 min-h-11"><input type="checkbox" checked={Boolean(formP.controlaEstoque)} onChange={(e) => setFormP({ ...formP, controlaEstoque: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" /><span className="text-[14px] text-slate-700">Controlar estoque deste produto</span></label>
-              {formP.id && contexto?.abrirRecursoV2 && <Btn size="sm" variant="soft" onClick={() => contexto.abrirRecursoV2("produtos")}>Estoque e movimentações</Btn>}
+              {formP.id && contexto?.abrirRecursoV2 && <Btn size="sm" variant="soft" onClick={() => contexto.abrirRecursoV2("produtos", { origem: "catalogo", params: { product: formP.id } })}>Estoque e movimentações</Btn>}
             </div>
             {formP.controlaEstoque && <div className="grid min-[430px]:grid-cols-2 gap-4"><Field label="Estoque atual"><Input type="number" value={formP.estoque || 0} disabled className="bg-slate-50" /></Field><Field label="Estoque mínimo"><Input type="number" inputMode="numeric" min="0" value={formP.estoqueMinimo || 0} onChange={(e) => setFormP({ ...formP, estoqueMinimo: Math.max(0, Number(e.target.value)) })} /></Field></div>}
             <label className="flex items-center gap-3 min-h-11"><input type="checkbox" checked={formP.vendaHabilitada !== false} onChange={(e) => setFormP({ ...formP, vendaHabilitada: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" /><span className="text-[14px] text-slate-700">Liberado para venda em campo</span></label>
@@ -4880,7 +4895,7 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 }
 
 /* ============================================================== Financeiro */
-function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId, empresa: empresaDados, excluirRegistro, papel }) {
+function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId, empresa: empresaDados, excluirRegistro, papel, abrirV2 }) {
   const [mes, setMes] = useState(mesRef(HOJE));
   const [aba, setAba] = useState("visao");
   const [form, setForm] = useState(null);
@@ -5009,7 +5024,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   return (
     <>
       <PageHead title="Financeiro" sub="Quanto entrou, quanto falta entrar e quanto sai."
-        action={<Btn icon={Plus} onClick={() => setForm({ tipo: "despesa", vencimento: HOJE, pago: false, valor: 0, categoria: "Materiais", origemTipo: "manual" })}>Novo lançamento</Btn>} />
+        action={<div className="flex flex-wrap gap-2"><RecursosV2 aba="financeiro" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => setForm({ tipo: "despesa", vencimento: HOJE, pago: false, valor: 0, categoria: "Materiais", origemTipo: "manual" })}>Novo lançamento</Btn></div>} />
 
       <div className="flex items-center justify-between gap-2 mb-6">
         <button onClick={() => mudarMes(-1)} aria-label="Mês anterior" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700", ring)}><ArrowLeft className="w-4 h-4" /></button>
@@ -5615,7 +5630,7 @@ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssina
 /* =============================================================== Garantias
    Consulta e acionamento. As garantias não são cadastradas aqui: elas nascem
    da OS concluída, a partir do prazo configurado em cada serviço.           */
-function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, excluirRegistro, papel }) {
+function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, excluirRegistro, papel, abrirV2 }) {
   const [filtro, setFiltro] = useState("ativas");
   const [busca, setBusca] = useState("");
   const [acionando, setAcionando] = useState(false);
@@ -5792,7 +5807,8 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
 
   return (
     <>
-      <PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`} />
+      <PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`}
+        action={papel === "proprietario" && typeof abrirV2 === "function" ? <div className="flex flex-wrap gap-2"><RecursosV2 aba="garantias" papel={papel} abrirV2={abrirV2} /></div> : undefined} />
       {revisoes.filter((r)=>r.status === "pending").length > 0 && (
         <section className="mb-7">
           <Rotulo>Pós-venda programado · {revisoes.filter((r)=>r.status === "pending").length}</Rotulo>

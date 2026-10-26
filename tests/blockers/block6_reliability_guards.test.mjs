@@ -215,7 +215,8 @@ test('legado: Voltar do editor de orçamento pergunta com alteração; depois de
 test('app: Assistente e troca de workspace não descartam formulário sem perguntar', () => {
   const app = read('src/App.jsx');
   assert.match(app, /const abrirWorkspaceV2 = \(valor\) => \{\s*if \(!confirmDiscardNavigation\(\)\) return;/);
-  assert.match(app, /abrirRecursoV2: \(chave\) => \{ if \(confirmDiscardNavigation\(\)\) navegarV2\(chave\); \},/);
+  assert.match(app, /const abrirRecursoV2 = \(chave, opcoes = \{\}\) => \{[^]*?if \(!confirmDiscardNavigation\(\)\) return false;[^]*?setWorkspaceV2\(chave\);/);
+  assert.match(app, /^\s+abrirRecursoV2,\r?$/m);
   assert.match(app, /record\.entityType !== 'work_order' && s\.membresiaAtual\?\.role !== 'owner'\)\) return;\s*\/\/[^\n]*\s*if \(!confirmDiscardNavigation\(\)\) return;\s*const url = new URL/);
 });
 
