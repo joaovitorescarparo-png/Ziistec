@@ -16,6 +16,7 @@ import {
 const read = (path) => fs.readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const ENDERECO = 'Rua José de Alencar, 10 — Apto & Bloco #3 (50%) + "loja" <A>';
 const PLACE_ID = 'ChIJ0WGkg4FEzpQRrlsz_whLqZs';
+const hostDe = (url) => new URL(url).hostname; // compara o host de verdade, nunca por trecho do texto da URL
 const query = (url, nome) => new URL(url).searchParams.get(nome);
 const COORD = { latitude: -23.55052, longitude: -46.633308, endereco: 'Av. Paulista, 1000', placeId: null };
 const SO_ENDERECO = { latitude: null, longitude: null, endereco: ENDERECO, placeId: null };
@@ -318,7 +319,7 @@ test('UI: "Abrir rota" usa a preferência e "Abrir com outro app" mostra as alte
   assert.match(markup, /aria-label="Abrir rota no Google Maps"/);
   assert.ok(links.some((l) => l.startsWith('https://waze.com/ul?ll=-23.56,-46.65')), 'Waze por coordenadas');
   assert.ok(links.some((l) => l.startsWith('https://maps.apple.com/?daddr=-23.56%2C-46.65')), 'Apple Maps por coordenadas');
-  assert.equal(links.filter((l) => l.includes('google.com')).length, 1, 'o app usado não reaparece nas alternativas');
+  assert.equal(links.filter((l) => hostDe(l) === 'www.google.com').length, 1, 'o app usado não reaparece nas alternativas');
   assert.match(markup, /<input type="radio"[^>]*checked=""[^>]*value="google"/, 'padrão marcado em "Usar sempre"');
   assert.match(markup, /target="_blank"/); assert.match(markup, /rel="noopener noreferrer"/);
   assert.ok(links.every((l) => urlDeRotaSegura(l)));
@@ -327,8 +328,8 @@ test('UI: "Abrir rota" usa a preferência e "Abrir com outro app" mostra as alte
   markup = html(destino); links = hrefs(markup);
   assert.match(links[0], /^https:\/\/waze\.com\/ul\?ll=/, 'preferência Waze → Abrir rota abre o Waze');
   assert.match(markup, /aria-label="Abrir rota no Waze"/);
-  assert.equal(links.filter((l) => l.includes('waze.com')).length, 1, 'Waze não é oferecido como "outro app"');
-  assert.ok(links.some((l) => l.includes('google.com')) && links.some((l) => l.includes('maps.apple.com')));
+  assert.equal(links.filter((l) => hostDe(l) === 'waze.com').length, 1, 'Waze não é oferecido como "outro app"');
+  assert.ok(links.some((l) => hostDe(l) === 'www.google.com') && links.some((l) => hostDe(l) === 'maps.apple.com'));
   assert.match(markup, /<input type="radio"[^>]*checked=""[^>]*value="waze"/);
   assert.doesNotMatch(markup, /<input type="radio"[^>]*checked=""[^>]*value="google"/);
 
