@@ -66,10 +66,11 @@
 - Automação SaaS de cobrança/assinatura é trabalho de produto separado de hardening.
 - Valor do plano em `subscriptions.amount` é legível por qualquer membro ativo (preço público do plano, não financeiro da empresa); restringir exige revisar leituras de plataforma/configurações.
 
-## Backlog registrado — FEEDBACK BETA CLIENTE 01 (não implementado)
+## Feedback Beta Cliente 01 — implementado na próxima versão (ainda não no Beta Live)
 
-- P2 · Logo no PDF: normalizar a imagem enviada sem cortar nem esticar (manter proporção), área de cabeçalho consistente de ~48 mm × 18 mm, PNG transparente recomendado, normalização automática no upload.
-- P2 · Rotas da OS: Google Maps, Waze ou Apple Maps; preferência salva por usuário; "Abrir rota" usa a preferência e "Abrir com outro app" oferece as demais.
+- Logo no PDF: caixa única ~48 × 18 mm (136 × 51 pt, contain) nos quatro PDFs, em `src/lib/pdfLogoBox.js`; a logo normalizada continua PNG nos PDFs gerados no navegador.
+- Rotas da OS: Google Maps, Waze e Apple Maps em `src/lib/routeApps.js`. A preferência é do **usuário**, não da empresa (`user_route_preferences`, migration 0106, RLS `user_id = auth.uid()`, sem company_id). Sem a 0106 a escolha vale só na sessão. Coordenadas só do cadastro do cliente e só quando o endereço do atendimento é o dele.
+- Homologação isolada (H0) e ordem frontend → migrations 0100–0106: `docs/engineering/H0_HOMOLOGATION_PLAN.md`. Nenhuma dessas migrations está aplicada em ambiente real.
 
 ## Direção de produto aprovada
 
