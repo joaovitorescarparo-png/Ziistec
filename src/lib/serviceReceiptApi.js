@@ -32,7 +32,7 @@ export async function emitirComprovanteServicoDB({workOrderId,requestId,notes=''
     p_reissue_reason:String(reissueReason||'').trim()||null,
   }));
   if(r?.error&&migrationPending(r.error)){
-    const e=new Error('O Comprovante de Serviço ainda não está disponível neste ambiente (migration pendente).');
+    const e=new Error('O Comprovante de Serviço ainda não está disponível na sua conta.');
     e.code='V2_MIGRATION_PENDING';
     throw e;
   }

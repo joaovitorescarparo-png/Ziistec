@@ -78,7 +78,7 @@ export function mensagemErro(erro) {
   if (codigo === "57014" || /timeout/i.test(texto)) return "A operação demorou demais. Tente novamente.";
   if (codigo === "42P01" || codigo === "42703" || /relation .* does not exist|column .* does not exist/i.test(texto)) {
     registrarTecnico(erro);
-    return "Esta função ainda não está disponível neste ambiente.";
+    return "Este recurso ainda não está disponível na sua conta.";
   }
   if (/^PGRST/.test(codigo) || /^[0-9A-Z]{5}$/.test(codigo)) {
     registrarTecnico(erro);

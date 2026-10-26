@@ -105,7 +105,7 @@ export async function enviarEvidenciaOSV2DB({workOrder,file,companyId,userId,sta
   if(!workOrder?.id||workOrder.company_id!==companyId) throw new Error('OS inválida para esta empresa.');
   const probe=await supabase.from('attachments').select('content_sha256,media_kind,include_in_service_report').eq('company_id',companyId).limit(1);
   if(probe.error&&migrationPending(probe.error)){
-    const e=new Error('A memória técnica desta branch depende da migration RC-1B de evidências homologada no Staging.');
+    const e=new Error('O envio de evidências ainda não está disponível na sua conta.');
     e.code='V2_MIGRATION_PENDING';
     throw e;
   }

@@ -66,7 +66,7 @@ export default function LocationHistoryPanel({clientId,locationId=null,currentWo
   };
 
   if(estado.carregando) return <p className="flex items-center gap-2 p-4 text-[13px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin"/>Carregando histórico do local…</p>;
-  if(!estado.disponivel) return <p className="p-4 text-[13px] text-slate-500">Histórico por local ainda não disponível neste ambiente.</p>;
+  if(!estado.disponivel) return <p className="p-4 text-[13px] text-slate-500">O histórico por local ainda não está disponível na sua conta.</p>;
   if(estado.erro) return <p className="p-4 text-[13px] text-slate-500">{estado.erro}</p>;
 
   const itens=estado.itens.filter(i=>i.work_order_id!==currentWorkOrderId);

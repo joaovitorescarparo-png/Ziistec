@@ -81,7 +81,7 @@ export default function ServiceReceiptPanel({workOrderId,telefoneCliente='',onAv
     {erro&&<div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">{erro}</div>}
 
     {estado.carregando?<p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin"/>Carregando comprovante…</p>
-    :!estado.disponivel?<p className="rounded-xl bg-amber-50 px-3.5 py-3 text-sm text-amber-900 ring-1 ring-amber-200/70">O Comprovante de Serviço ainda não está disponível neste ambiente.</p>
+    :!estado.disponivel?<p className="rounded-xl bg-amber-50 px-3.5 py-3 text-sm text-amber-900 ring-1 ring-amber-200/70">O Comprovante de Serviço ainda não está disponível na sua conta.</p>
     :!ativo?<div className="space-y-3">
       <label className="grid gap-1.5 text-sm font-medium text-slate-700">Observações (opcional)
         <textarea rows={3} maxLength={2000} value={obs} onChange={e=>setObs(e.target.value)} className={campo} placeholder="Ex.: garantia de 90 dias para o serviço executado."/>

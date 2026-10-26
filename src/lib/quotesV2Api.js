@@ -110,7 +110,7 @@ export async function criarOSDoOrcamentoV2DB({quoteId,assignedTo=null,scheduledD
   });
   if(result.error){
     if(conversaoQuoteV2AindaNaoMigrada(result.error)){
-      const error=new Error('A conversão segura orçamento → OS depende da migration 0057, ainda não aplicada neste banco.');
+      const error=new Error('A conversão do orçamento em OS ainda não está disponível na sua conta.');
       error.code='V2_MIGRATION_PENDING';
       throw error;
     }
