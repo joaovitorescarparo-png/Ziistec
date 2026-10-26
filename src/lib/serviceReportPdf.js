@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { supabase } from './supabase';
+import { LOGO_BOX, desenharLogoNaCaixa, ajustarTextoNaLargura } from './pdfLogoBox';
 
 const A4=[595.28,841.89];
 const MARGIN=42;
@@ -63,7 +64,8 @@ const canvasBlob=(canvas,type='image/jpeg',quality=.8)=>new Promise((resolve,rej
   canvas.toBlob((blob)=>blob?resolve(blob):reject(new Error('Falha ao preparar imagem.')),type,quality);
 });
 
-async function rasterizeBlob(blob,maxSide=1400){
+// `logo:true` mantém PNG: o JPEG não tem transparência e a logo normalizada (fundo transparente) sairia com fundo preto.
+async function rasterizeBlob(blob,maxSide=1400,{logo=false}={}){
   if(typeof document!=='undefined'&&typeof createImageBitmap==='function'){
     try{
       const image=await createImageBitmap(blob);
@@ -76,8 +78,9 @@ async function rasterizeBlob(blob,maxSide=1400){
       if(!ctx) throw new Error('Canvas indisponível.');
       ctx.drawImage(image,0,0,width,height);
       if(typeof image.close==='function') image.close();
-      const out=await canvasBlob(canvas,'image/jpeg',.78);
-      return {bytes:new Uint8Array(await out.arrayBuffer()),type:'image/jpeg'};
+      const type=logo?'image/png':'image/jpeg';
+      const out=await canvasBlob(canvas,type,logo?undefined:.78);
+      return {bytes:new Uint8Array(await out.arrayBuffer()),type};
     }catch{/* tenta formato original abaixo */}
   }
   if(blob.type==='image/jpeg'||blob.type==='image/jpg'||blob.type==='image/png'){
@@ -86,7 +89,7 @@ async function rasterizeBlob(blob,maxSide=1400){
   return null;
 }
 
-async function loadStorageImage(bucket,path,maxSide){
+async function loadStorageImage(bucket,path,maxSide,opcoes={}){
   const url=await signedUrl(bucket,path);
   if(!url) return null;
   try{
@@ -94,7 +97,7 @@ async function loadStorageImage(bucket,path,maxSide){
     if(!response.ok) return null;
     const blob=await response.blob();
     if(blob.size>20*1024*1024) return null;
-    return rasterizeBlob(blob,maxSide);
+    return rasterizeBlob(blob,maxSide,opcoes);
   }catch{return null;}
 }
 
@@ -156,14 +159,13 @@ export async function montarRelatorioAtendimentoPDF(report){
   const payment=snapshot.payment||{};
 
   let logo=null;
-  if(company.logo_path) logo=await embedImage(pdf,await loadStorageImage('zt-branding',company.logo_path,700));
-  if(logo){
-    const dims=logo.scale(1);
-    const scale=Math.min(82/dims.width,42/dims.height,1);
-    page.drawImage(logo,{x:MARGIN,y:y-38,width:dims.width*scale,height:dims.height*scale});
-  }
-  const headerX=MARGIN+(logo?100:0);
-  page.drawText(clean(company.trade_name||company.name||'Empresa'),{x:headerX,y:y-3,size:14,font:bold,color:ink});
+  if(company.logo_path) logo=await embedImage(pdf,await loadStorageImage('zt-branding',company.logo_path,700,{logo:true}));
+  const logoYBase=y-(LOGO_BOX.height-10);
+  const logoDesenhada=logo?desenharLogoNaCaixa(page,logo,{x:MARGIN,yBase:logoYBase}):false;
+  const headerX=MARGIN+(logoDesenhada?LOGO_BOX.textoX:0);
+  const tituloLargura=bold.widthOfTextAtSize('RELATÓRIO DE ATENDIMENTO',13);
+  const nomeEmpresa=ajustarTextoNaLargura(bold,clean(company.trade_name||company.name||'Empresa'),14,A4[0]-MARGIN-tituloLargura-14-headerX);
+  page.drawText(nomeEmpresa.texto,{x:headerX,y:y-3,size:nomeEmpresa.tamanho,font:bold,color:ink});
   page.drawText('RELATÓRIO DE ATENDIMENTO',{x:A4[0]-MARGIN-bold.widthOfTextAtSize('RELATÓRIO DE ATENDIMENTO',13),y:y-3,size:13,font:bold,color:ink});
   y-=19;
   if(company.tax_id) page.drawText(clean(`CNPJ/CPF: ${company.tax_id}`),{x:headerX,y,size:8.5,font:regular,color:muted});
@@ -172,6 +174,7 @@ export async function montarRelatorioAtendimentoPDF(report){
   const companyContact=[company.phone,company.email].filter(Boolean).join(' · ');
   if(companyContact){page.drawText(clean(companyContact),{x:headerX,y,size:8.5,font:regular,color:muted});y-=11;}
   if(company.address){text(company.address,{x:headerX,size:8,width:A4[0]-MARGIN-headerX-150,color:muted,lineHeight:10});}
+  if(logoDesenhada) y=Math.min(y,logoYBase-2);
   y-=5;divider();
 
   page.drawRectangle({x:MARGIN,y:y-27,width:A4[0]-MARGIN*2,height:32,color:soft});

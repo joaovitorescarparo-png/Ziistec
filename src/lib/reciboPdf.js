@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { LOGO_BOX, desenharLogoNaCaixa, ajustarTextoNaLargura } from './pdfLogoBox';
 
 /* Recibo / documento de cobrança para o cliente.
  *
@@ -65,34 +66,38 @@ export async function montarReciboPDF(dados) {
   };
 
   /* cabeçalho: logo quando houver, dados da empresa e identificação do documento */
+  let fundoLogo = null;
   if (logoBytes) {
     try {
       const tipo = String(logoTipo || '').toLowerCase();
       const img = tipo.includes('png') ? await pdf.embedPng(logoBytes)
         : (tipo.includes('jpeg') || tipo.includes('jpg')) ? await pdf.embedJpg(logoBytes) : null;
       if (img) {
-        const alvo = 46;
-        const escala = Math.min(alvo / img.height, 120 / img.width);
-        pagina.drawImage(img, { x: margem, y: y - alvo, width: img.width * escala, height: img.height * escala });
+        const yBase = y - LOGO_BOX.height;
+        if (desenharLogoNaCaixa(pagina, img, { x: margem, yBase })) fundoLogo = yBase;
       }
     } catch { /* logo inválida não impede o documento */ }
   }
 
   y -= 8;
-  escrever(empresa.nome || 'Empresa', { x: margem + (logoBytes ? 132 : 0), size: 15, fonte: negrito });
-  direita(titulo, { size: titulo.length > 18 ? 11 : 15, fonte: negrito });
+  const textoX = margem + (fundoLogo != null ? LOGO_BOX.textoX : 0);
+  const tituloSize = titulo.length > 18 ? 11 : 15;
+  const nome = ajustarTextoNaLargura(negrito, limpar(empresa.nome || 'Empresa'), 15, width - margem - negrito.widthOfTextAtSize(limpar(titulo), tituloSize) - 14 - textoX);
+  escrever(nome.texto, { x: textoX, size: nome.tamanho, fonte: negrito });
+  direita(titulo, { size: tituloSize, fonte: negrito });
   y -= 15;
-  if (empresa.documento) escrever(`CNPJ/CPF: ${empresa.documento}`, { x: margem + (logoBytes ? 132 : 0), size: 9, cor: suave });
+  if (empresa.documento) escrever(`CNPJ/CPF: ${empresa.documento}`, { x: textoX, size: 9, cor: suave });
   direita(numero ? `Nº ${numero}` : '', { size: 9, cor: suave });
   y -= 12;
   const contato = [empresa.telefone, empresa.email].filter(Boolean).join(' · ');
-  if (contato) escrever(contato, { x: margem + (logoBytes ? 132 : 0), size: 9, cor: suave });
+  if (contato) escrever(contato, { x: textoX, size: 9, cor: suave });
   direita(`Emitido em ${dataBR(emitidoEm)}`, { size: 9, cor: suave });
   y -= 12;
   if (empresa.endereco) {
-    for (const linha of quebrar(empresa.endereco, regular, 9, 300)) { escrever(linha, { x: margem + (logoBytes ? 132 : 0), size: 9, cor: suave }); y -= 11; }
+    for (const linha of quebrar(empresa.endereco, regular, 9, 300)) { escrever(linha, { x: textoX, size: 9, cor: suave }); y -= 11; }
   }
 
+  if (fundoLogo != null) y = Math.min(y, fundoLogo - 2);
   y -= 10; regua(); y -= 20;
 
   /* aviso obrigatório: este documento não substitui nota fiscal */
