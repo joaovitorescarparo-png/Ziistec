@@ -466,5 +466,7 @@ test('Bloco 5 intacto: 0105, projeções e regras de preço do técnico não mud
   const migration = read('supabase/0105_technician_financial_projection.sql');
   assert.match(migration, /alter policy p_wo_items_select on public\.work_order_items\s+using \(public\.zt_wo_is_owned\(work_order_id\)\);/);
   assert.match(migration, /a\.attname not in \('approved_subtotal','approved_discount','approved_surcharge','approved_total'\)/);
-  assert.ok(!fs.readdirSync(new URL('../../supabase/', import.meta.url)).some((f) => /^01(0[6-9]|[1-9]\d)_/.test(f)), 'nenhuma migration nova');
+  // O Bloco 7 não criou migration. A única posterior prevista é a preferência de rota da Onda 2 (0106), documentada à parte.
+  const posteriores = fs.readdirSync(new URL('../../supabase/', import.meta.url)).filter((f) => /^01(0[6-9]|[1-9]\d)_/.test(f));
+  assert.deepEqual(posteriores, ['0106_user_route_preferences.sql'], 'só a migration de preferência de rota (Onda 2)');
 });
