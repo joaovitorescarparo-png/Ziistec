@@ -11,6 +11,8 @@ import {
 import { baixarRelatorioAtendimentoPDF,compartilharRelatorioAtendimentoPDF } from '../../lib/serviceReportPdf';
 import InstalledEquipmentPanel from '../../components/InstalledEquipmentPanel';
 import DiscardChangesPrompt from '../../components/DiscardChangesPrompt';
+import useRoutePreference from '../../hooks/useRoutePreference';
+import { linkDeRota, resolverDestinoRota } from '../../lib/routeApps';
 import { useDiscardGuard } from '../../hooks/useUnsavedChanges';
 
 const money=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -159,7 +161,9 @@ export default function WorkOrderMemoryV2({companyId,companyName='Sua empresa',u
     finally{setReportBusy(false);}
   };
 
-  const maps=(address)=>{if(!address)return;window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,'_blank','noopener,noreferrer');};
+  // A rota segue o app que o usuário escolheu (Google Maps é o padrão); o endereço é o do atendimento.
+  const {app:routeApp}=useRoutePreference();
+  const maps=(address)=>{const url=linkDeRota(routeApp,resolverDestinoRota({endereco:address}));if(url)window.open(url,'_blank','noopener,noreferrer');};
 
   return <div className="min-h-[100dvh] overflow-x-hidden bg-slate-950 text-white">
     <DiscardChangesPrompt open={leaveWorkOrder.confirming} onKeepEditing={leaveWorkOrder.keepEditing} onDiscard={leaveWorkOrder.discard} text="O relato técnico digitado ainda não foi salvo nesta OS."/>

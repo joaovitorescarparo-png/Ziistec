@@ -8,7 +8,7 @@ import {
   Phone, MapPin, Trash2, Send, Share2, Pencil, ChevronRight, Clock,
   CircleCheck, Building2, User, CheckCircle2, Circle, AlertTriangle,
   Printer, MoreHorizontal, CalendarClock, Receipt, Banknote, Mic, MicOff,
-  Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles, Navigation,
+  Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles,
   TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building, ChevronDown,
 } from "lucide-react";
 import GlobalSearchModal from "../components/GlobalSearchModal";
@@ -52,6 +52,9 @@ import DraftRestoredNotice from "../components/DraftRestoredNotice";
 import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
 import { abaDeOrigemV2, recursosV2DaAba, semOrigemV2 } from "../lib/recursosV2";
 import { concluidasRecentemente, produtosComEstoqueBaixo } from "../lib/dashboardInicio";
+import RouteButton from "../components/RouteButton";
+import useRoutePreference from "../hooks/useRoutePreference";
+import { linkDeRota, resolverDestinoRota } from "../lib/routeApps";
 import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
 
 /* ================================================================ helpers */
@@ -98,7 +101,6 @@ const acrescimoSobreCusto = (custo, preco) => {
 };
 const soDigitos = (s) => (s || "").replace(/\D/g, "");
 const iniciais = (s = "") => s.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-const mapsUrl = (end) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(end || "")}`;
 const semAcento = (s = "") => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 const UNIDADES = [
@@ -573,14 +575,21 @@ const Linha = ({ children, onClick, className }) => {
 
 /* endereço que abre rota no mapa */
 const Endereco = ({ valor, local, className, compacto }) => {
+  /* O link segue o app de rota que o usuário escolheu (Google Maps é o padrão). */
+  const { app } = useRoutePreference();
   if (!valor) return null;
-  const destino = [local, valor].filter(Boolean).join(", ");
-  return (
-    <a href={mapsUrl(destino)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-      className={cx("inline-flex items-start gap-1.5 text-teal-800 hover:underline", ring, className)}>
+  const href = linkDeRota(app, resolverDestinoRota({ endereco: valor, localServico: local }));
+  const conteudo = (
+    <>
       <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />
       <span className={compacto ? "truncate" : ""}>{local ? `${local} · ${valor}` : valor}</span>
-    </a>
+    </>
+  );
+  return href ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+      className={cx("inline-flex items-start gap-1.5 text-teal-800 hover:underline", ring, className)}>{conteudo}</a>
+  ) : (
+    <span className={cx("inline-flex items-start gap-1.5 text-slate-600", className)}>{conteudo}</span>
   );
 };
 
@@ -3903,10 +3912,7 @@ function OSDetalhe(p) {
                 <Field label="Endereço"><Input value={os.local} onChange={(e) => up({ local: e.target.value })} /></Field>
                 <Field label="Local do serviço" hint="Ex.: Apto 304, Bloco B, Portaria, Loja 4."><Input value={os.localServico || ""} onChange={(e) => up({ localServico: e.target.value })} /></Field>
               </div>
-              <a href={mapsUrl([os.localServico, os.local].filter(Boolean).join(", "))} target="_blank" rel="noreferrer"
-                className={cx("flex items-center justify-center gap-2 w-full rounded-xl bg-slate-900 text-white py-3 text-[14px] font-medium hover:bg-slate-800", ring)}>
-                <Navigation className="w-[18px] h-[18px]" />Abrir rota até o cliente
-              </a>
+              <RouteButton destino={resolverDestinoRota({ endereco: os.local, localServico: os.localServico, cliente: c })} />
             </Panel>
           </section>
 
