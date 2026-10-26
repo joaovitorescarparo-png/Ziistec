@@ -70,7 +70,8 @@
 
 - Logo no PDF: caixa única ~48 × 18 mm (136 × 51 pt, contain) nos quatro PDFs, em `src/lib/pdfLogoBox.js`; a logo normalizada continua PNG nos PDFs gerados no navegador.
 - Rotas da OS: Google Maps, Waze e Apple Maps em `src/lib/routeApps.js`. A preferência é do **usuário**, não da empresa (`user_route_preferences`, migration 0106, RLS `user_id = auth.uid()`, sem company_id). Sem a 0106 a escolha vale só na sessão. Coordenadas só do cadastro do cliente e só quando o endereço do atendimento é o dele.
-- Homologação isolada (H0) e ordem frontend → migrations 0100–0106: `docs/engineering/H0_HOMOLOGATION_PLAN.md`. Nenhuma dessas migrations está aplicada em ambiente real.
+- Homologação isolada (H0) e ordem frontend → migrations 0100–0107: `docs/engineering/H0_HOMOLOGATION_PLAN.md`. Nenhuma dessas migrations está aplicada em ambiente real.
+- Auditoria de segurança V1 (`docs/engineering/SECURITY_AUDIT_V1.md`): a 0107 fecha a escrita do técnico em `maintenance_contract_id`/`contract_cycle` da OS (suprimia a cobrança do ciclo) e entra no mesmo pacote da 0105. Todo campo novo de OS que seja administrativo ou financeiro precisa entrar na lista do guard `zt_guard_work_order_technician_update`. O `postbuild` varre `dist/` atrás de segredo de servidor (`scripts/verify-dist-secrets.mjs`); `VITE_*` é público.
 
 ## Direção de produto aprovada
 
