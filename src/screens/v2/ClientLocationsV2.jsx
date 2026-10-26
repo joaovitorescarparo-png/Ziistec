@@ -1,6 +1,6 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {AlertTriangle,ArrowLeft,Crosshair,ExternalLink,MapPin,RefreshCw,Save,Search,Trash2,X} from 'lucide-react';
-import {buildGoogleMapsUrl,carregarClientesLocaisV2DB,limparLocalClienteV2DB,salvarLocalClienteV2DB} from '../../lib/clientLocationsV2Api';
+import {buildGoogleMapsUrl,carregarClientesLocaisV2DB,limparLocalClienteV2DB,normalizeGoogleMapsUrl,salvarLocalClienteV2DB} from '../../lib/clientLocationsV2Api';
 
 const coord=(v)=>v==null||v===''?'':String(Number(v));
 
@@ -80,7 +80,8 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
   };
 
   const openMap=()=>{
-    const url=form.mapsUrl||currentMap;
+    // maps_url vem do banco e a coluna só limita o tamanho: só abre link HTTPS do Google (nunca javascript:, data: ou outro host).
+    const url=normalizeGoogleMapsUrl(form.mapsUrl)||currentMap;
     if(url)window.open(url,'_blank','noopener,noreferrer');
   };
 
