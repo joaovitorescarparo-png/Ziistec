@@ -69,7 +69,8 @@ adjust "$P1" 5 "$R_SAME" "$OUT_B" "$ERR_B" & p2=$!
 wait "$p1" || { echo "STOCK_CONCURRENCY: first same-request call failed" >&2; cat "$ERR_A" >&2; exit 1; }
 wait "$p2" || { echo "STOCK_CONCURRENCY: second same-request call failed" >&2; cat "$ERR_B" >&2; exit 1; }
 wait "$ph"
-a="$(tr -d '[:space:]' <"$OUT_A")"; b="$(tr -d '[:space:]' <"$OUT_B")"
+# O psql também imprime o retorno do set_config (primeira linha): o saldo é sempre a última.
+a="$(tail -n1 "$OUT_A" | tr -d '[:space:]')"; b="$(tail -n1 "$OUT_B" | tr -d '[:space:]')"
 [[ "$a" == "5.000" && "$b" == "5.000" ]] || { echo "STOCK_CONCURRENCY: same request returned '$a' / '$b' (expected 5.000 / 5.000)" >&2; exit 1; }
 [[ "$(stock_of "$P1")" == "5.000" ]] || { echo "STOCK_CONCURRENCY: stock after the same request twice is $(stock_of "$P1"), expected 5.000" >&2; exit 1; }
 [[ "$(moves_of "client_request_id='$R_SAME'")" == "1" ]] || { echo "STOCK_CONCURRENCY: expected exactly one movement for the same request" >&2; exit 1; }

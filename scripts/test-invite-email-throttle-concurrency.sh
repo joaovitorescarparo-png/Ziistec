@@ -53,7 +53,8 @@ claim "$OUT_B" & p2=$!
 wait "$p1" || { echo "INVITE_THROTTLE_CONCURRENCY: first claim failed" >&2; exit 1; }
 wait "$p2" || { echo "INVITE_THROTTLE_CONCURRENCY: second claim failed" >&2; exit 1; }
 wait "$ph"
-a="$(tr -d '[:space:]' <"$OUT_A")"; b="$(tr -d '[:space:]' <"$OUT_B")"
+# O psql também imprime o retorno do set_config (primeira linha): a decisão é sempre a última.
+a="$(tail -n1 "$OUT_A" | tr -d '[:space:]')"; b="$(tail -n1 "$OUT_B" | tr -d '[:space:]')"
 allowed=0
 if [[ "$a" == "true" ]]; then allowed=$((allowed + 1)); fi
 if [[ "$b" == "true" ]]; then allowed=$((allowed + 1)); fi

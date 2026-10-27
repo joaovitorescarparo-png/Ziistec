@@ -115,7 +115,7 @@ regressions=(
 # Falha de regressão também vira anotação do GitHub (legível sem baixar o log do job).
 annotate_failure() {
   local title="$1" text="$2"
-  echo "::error title=${title}::$(printf '%s' "$text" | grep -E 'ERROR|FAILED|FAIL:|DETAIL|CONTEXT' | head -6 | tr '\n' ' ' | cut -c1-1500)"
+  echo "::error title=${title}::$(printf '%s' "$text" | grep -E 'ERROR|FAILED|FAIL:|DETAIL|CONTEXT|CONCURRENCY' | head -6 | tr '\n' ' ' | cut -c1-1500)"
 }
 
 for sql in "${regressions[@]}"; do
