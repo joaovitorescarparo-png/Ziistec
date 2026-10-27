@@ -70,8 +70,10 @@
 
 - Logo no PDF: caixa única ~48 × 18 mm (136 × 51 pt, contain) nos quatro PDFs, em `src/lib/pdfLogoBox.js`; a logo normalizada continua PNG nos PDFs gerados no navegador.
 - Rotas da OS: Google Maps, Waze e Apple Maps em `src/lib/routeApps.js`. A preferência é do **usuário**, não da empresa (`user_route_preferences`, migration 0106, RLS `user_id = auth.uid()`, sem company_id). Sem a 0106 a escolha vale só na sessão. Coordenadas só do cadastro do cliente e só quando o endereço do atendimento é o dele.
-- Homologação isolada (H0) e ordem frontend → migrations 0100–0107: `docs/engineering/H0_HOMOLOGATION_PLAN.md`. Nenhuma dessas migrations está aplicada em ambiente real.
+- Homologação isolada (H0) e ordem frontend → migrations 0100–0110: `docs/engineering/H0_HOMOLOGATION_PLAN.md`. Nenhuma dessas migrations está aplicada em ambiente real.
 - Auditoria de segurança V1 (`docs/engineering/SECURITY_AUDIT_V1.md`): a 0107 fecha a escrita do técnico em `maintenance_contract_id`/`contract_cycle` da OS (suprimia a cobrança do ciclo) e entra no mesmo pacote da 0105. Todo campo novo de OS que seja administrativo ou financeiro precisa entrar na lista do guard `zt_guard_work_order_technician_update`. O `postbuild` varre `dist/` atrás de segredo de servidor (`scripts/verify-dist-secrets.mjs`); `VITE_*` é público.
+- Segurança V1.1 (0108–0110, definers 142): FK entre tabelas de tenant é sempre composta por `company_id` (fornecedor de produto/compra; a 0108 aborta sem mexer em dados se o ambiente já tiver vínculo cruzado); ajuste manual de estoque exige `p_request` (o overload sem pedido só serve ao executor do Assistente); o e-mail de convite passa por `zt_claim_team_invite_email` antes de enviar (60 s, 5/h por destinatário, 30/h por empresa) e a função `team-invite-email` só entra depois da 0110. Campos livres no HTML do convite são neutralizados, não escapados para entidades: o Auth já usa `html/template`.
+- Fim de linha: `.gitattributes` fixa LF em `*.sql` e `*.sh`. Sem isso um clone limpo no Windows (`core.autocrlf=true`) falhava 1 teste de regex multilinha; confirme `verify:v2` também em worktree limpo.
 
 ## Direção de produto aprovada
 
