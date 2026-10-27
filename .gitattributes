@@ -1,0 +1,12 @@
+# Fim de linha determinístico entre Windows (core.autocrlf=true), Linux (CI) e macOS.
+#
+# Migrations SQL são lidas por testes que casam texto multilinha, aplicadas com psql e conferidas por hash:
+# um CRLF vindo do checkout muda o texto e o md5 sem mudar o comportamento esperado. Em um clone limpo no Windows
+# a 0100 chegava com CRLF e o teste block3_service_receipt falhava (520/521) enquanto o CI Linux passava.
+*.sql text eol=lf
+
+# Preventivo: scripts de shell rodam no CI Linux; `#!/usr/bin/env bash` com CR vira "bad interpreter" e o terminador
+# de heredoc deixa de casar. O Git Bash do Windows tolera CR, por isso não houve falha local.
+*.sh text eol=lf
+
+# Binários (imagens etc.) e os blocos .b64 do legado não são normalizados: nada aqui os marca como texto.
