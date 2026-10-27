@@ -924,7 +924,7 @@ export default function ZiisTec({ contexto }) {
      guardar senha exige hash no servidor, que ainda não existe. */
   const salvarColaborador = async ({ nome, email, telefone, funcao, papel: pp }) => {
     if (real) {
-      try { const eq = await convidarColaboradorDB({ nome, email, telefone, funcao, papel: pp }, empresaId, usuarioAtual?.id); setUsuarios(eq.usuarios); setMembresias(eq.membresias); const emailEnviado = Boolean(eq.emailDelivery?.sent); aviso(emailEnviado ? `Convite ZiisTec enviado para ${email.trim().toLowerCase()}.` : `${nome} foi adicionado como convite pendente. Se já tiver conta, pode entrar com o mesmo e-mail; o acesso só será ativado após a confirmação do e-mail.`); return { convite: true, emailEnviado }; }
+      try { const eq = await convidarColaboradorDB({ nome, email, telefone, funcao, papel: pp }, empresaId, usuarioAtual?.id); setUsuarios(eq.usuarios); setMembresias(eq.membresias); const emailEnviado = Boolean(eq.emailDelivery?.sent); aviso(emailEnviado ? `Convite ZiisTec enviado para ${email.trim().toLowerCase()}.` : eq.emailDelivery?.reason === "rate_limited" ? `O convite para ${email.trim().toLowerCase()} já foi enviado há instantes. Aguarde ${eq.emailDelivery.retryAfterSeconds || 60} segundos para reenviar.` : `${nome} foi adicionado como convite pendente. Se já tiver conta, pode entrar com o mesmo e-mail; o acesso só será ativado após a confirmação do e-mail.`); return { convite: true, emailEnviado }; }
       catch (e) { aviso(mensagemErro(e)); return null; }
     }
     const limpo = email.trim().toLowerCase();

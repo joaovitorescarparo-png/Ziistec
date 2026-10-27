@@ -82,8 +82,16 @@ export async function carregarOSVendaDB(companyId) {
   }));
 }
 
-export async function ajustarEstoqueDB(companyId, productId, delta, notes='') {
-  return n(check(await supabase.rpc('zt_adjust_product_stock',{p_company:companyId,p_product:productId,p_delta:n(delta),p_notes:notes||null})));
+// requestId (obrigatório) identifica o pedido lógico: o banco aplica o ajuste uma vez e repete o saldo em retry
+// (src/lib/stockAdjustment.js). Num banco ainda sem a 0109 o frontend novo cai para o ajuste antigo, sem idempotência.
+export async function ajustarEstoqueDB(companyId, productId, delta, notes='', requestId) {
+  if (!requestId) throw new Error('Identificador do ajuste de estoque ausente.');
+  const args = {p_company:companyId,p_product:productId,p_delta:n(delta),p_notes:notes||null};
+  const result = await supabase.rpc('zt_adjust_product_stock',{...args,p_request:requestId});
+  if (result?.error && ['PGRST202','42883'].includes(String(result.error.code || ''))) {
+    return n(check(await supabase.rpc('zt_adjust_product_stock',args)));
+  }
+  return n(check(result));
 }
 
 export async function venderProdutoNaOSDB(workOrderId, productId, quantidade=1, notes='', requestId=null) {

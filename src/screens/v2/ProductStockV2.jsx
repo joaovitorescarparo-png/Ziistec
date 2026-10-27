@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Boxes, CircleDollarSign, History, ImagePlus, Loader2, Minus, Package,
   Pencil, Plus, RefreshCcw, ScanLine, Search, ShieldCheck, TrendingUp, TriangleAlert, X,
 } from 'lucide-react';
 import { salvarProdutoDB } from '../../lib/dataApi';
 import { estoqueBaixo } from '../../lib/estoque';
+import { createAdjustmentRequestKeeper } from '../../lib/stockAdjustment';
 import {
   ajustarEstoqueDB,
   carregarMovimentosEstoqueDB,
@@ -77,6 +78,8 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
   const [imageFile, setImageFile] = useState(null);
   const [removeImage, setRemoveImage] = useState(false);
   const [stock, setStock] = useState(null);
+  // SEC-04: o id do ajuste vale por operação (produto + quantidade) e só é trocado depois de concluído.
+  const adjustKeeper = useRef(createAdjustmentRequestKeeper());
   const [movementProduct, setMovementProduct] = useState(null);
   const [movements, setMovements] = useState([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
@@ -155,7 +158,8 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
       }
       const initial = Math.max(0, n(form.estoqueInicial));
       if (!editing && saved.controlaEstoque && initial > 0) {
-        await ajustarEstoqueDB(companyId, saved.id, initial, 'Estoque inicial do cadastro');
+        await ajustarEstoqueDB(companyId, saved.id, initial, 'Estoque inicial do cadastro', adjustKeeper.current.idFor(saved.id, initial));
+        adjustKeeper.current.done();
       }
       setForm(null);
       await load();
@@ -173,7 +177,8 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
     if (delta < 0 && qty > stock.produto.estoque) { setError('A saída é maior que o estoque atual.'); return; }
     setSaving(true); setError('');
     try {
-      await ajustarEstoqueDB(companyId, stock.produto.id, delta, stock.obs || (delta > 0 ? 'Entrada manual de estoque' : 'Saída manual de estoque'));
+      await ajustarEstoqueDB(companyId, stock.produto.id, delta, stock.obs || (delta > 0 ? 'Entrada manual de estoque' : 'Saída manual de estoque'), adjustKeeper.current.idFor(stock.produto.id, delta));
+      adjustKeeper.current.done();
       setStock(null);
       await load();
     } catch (e2) { setError(mensagemErro(e2)); }

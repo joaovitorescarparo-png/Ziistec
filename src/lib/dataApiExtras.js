@@ -66,7 +66,15 @@ export async function convidarColaboradorDB(x,companyId,userId){
   let emailDelivery={ok:false,sent:false,reason:'delivery_failed'};
   try{
     const delivery=await supabase.functions.invoke('team-invite-email',{body:{invite_id:inviteId,redirect_to:redirectTo}});
-    if(!delivery.error&&delivery.data) emailDelivery=delivery.data;
+    if(delivery.error){
+      // SEC-05: reenvio em intervalo curto volta 429 com o tempo de espera; o convite pendente continua valendo.
+      const res=delivery.error.context;
+      if(res?.status===429){
+        const body=await res.json().catch(()=>({}));
+        const seconds=Math.ceil(Number(body?.retry_after_seconds));
+        emailDelivery={ok:false,sent:false,reason:'rate_limited',retryAfterSeconds:Number.isFinite(seconds)?Math.min(Math.max(seconds,1),3600):60};
+      }
+    }else if(delivery.data) emailDelivery=delivery.data;
   }catch{}
   const equipe=await carregarEquipeDB(companyId);
   return {...equipe,emailDelivery};
