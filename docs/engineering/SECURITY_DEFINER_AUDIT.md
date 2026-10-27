@@ -30,7 +30,7 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 |---|---|---|---|---|---|---|---|---|
 | `rls_auto_enable()` | baseline | service_role/event trigger | `pg_catalog` | trigger | schema-scoped | n/a | safe identifier format | SAFE |
 | `zt_accept_invites()` | 0080/redefined | authenticated, service_role | `""` | delegated | delegated | contextual | no | SAFE |
-| `zt_adjust_product_stock(p_company uuid, p_product uuid, p_delta numeric, p_notes text)` | 0051+ | authenticated, service_role | `""` | direct | owner/company | protected write | no | SAFE |
+| `zt_adjust_product_stock(p_company uuid, p_product uuid, p_delta numeric, p_notes text)` | 0051+ (EXECUTE revoked in 0109) | none: called only by the Assistant execution definer | `""` | direct | owner/company | protected write; not idempotent by itself, the Assistant ledger is | no | SAFE |
 | `zt_apply_checklist_template(p_wo uuid, p_template uuid)` | 0084 | authenticated, service_role | `""` | direct | OS/company/role | protected write | no | SAFE |
 | `zt_bill_work_order(p_wo uuid, p_due_days integer)` | baseline/redefined | service_role | `zt_private` | delegated | delegated | protected write | no | SAFE |
 | `zt_cancel_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
@@ -74,6 +74,8 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 | `zt_work_order_history_detail(p_wo uuid)` | 0104 | authenticated, service_role | `""` | direct | owner or assigned OS | read; prices/financial owner-only | no | SAFE |
 | `zt_get_service_report(p_wo uuid)` | 0105 | authenticated | `""` | direct | owner or assigned OS | read; technician projection without payment/prices | no | SAFE |
 | `zt_field_work_order_items(p_company uuid, p_wo uuid)` | 0105 | authenticated | `""` | direct | active member; OS assigned to caller; owner gets none | read; no unit_price/unit_cost | no | SAFE |
+| `zt_adjust_product_stock(p_company uuid, p_product uuid, p_delta numeric, p_notes text, p_request uuid)` | 0109 | authenticated, service_role | `""` | direct | owner/company; (company, request) unique, replay returns the first balance, other product/delta rejected | manual stock adjustment, idempotent, row lock | no | SAFE |
+| `zt_claim_team_invite_email(p_invite uuid)` | 0110 | authenticated | `""` | direct | owner of the invite company; same 42501 for unknown and foreign invites; per-company advisory lock | invite e-mail throttle (60 s, 5/h recipient, 30/h company); stores only the e-mail hash | no | SAFE |
 | `zt_quote_seed_from_work_order(p_work_order uuid)` | 0085 | authenticated, service_role | `""` | delegated | owner/company | read | no | SAFE |
 | `zt_reactivate_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
 | `zt_refresh_subscription_status(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |

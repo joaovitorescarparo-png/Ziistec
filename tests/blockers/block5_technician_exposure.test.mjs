@@ -259,7 +259,7 @@ test('Bloco 5: dois definers com search_path vazio e sem SQL dinâmico; teste no
     'tecnico_desativado_perde_acesso', 'convite_equipe_sem_convite_beta', 'convite_beta_nao_e_convite_de_tecnico']) {
     assert.ok(sqlTest.includes(`'${check}'`), `check ${check} presente`);
   }
-  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0105 adds two public definers[\s\S]*if v_total<>140 then/);
+  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0105 adds two public definers[\s\S]*if v_total<>142 then/);
   const audit = read('docs/engineering/SECURITY_DEFINER_AUDIT.md');
   assert.match(audit, /`zt_get_service_report\(p_wo uuid\)` \| 0105/);
   assert.match(audit, /`zt_field_work_order_items\(p_company uuid, p_wo uuid\)` \| 0105/);

@@ -24,7 +24,9 @@ begin
   -- 0101–0104 add three public definers (idempotent technical report; owner-only client history; OS detail for owner/assigned);
   -- their triggers are invoker and zt_save_work_order is replaced.
   -- 0105 adds two public definers (service report projection by role; field items without price for the technician).
-  if v_total<>140 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=140 actual=%',v_total; end if;
+  -- 0108 adds none (composite supplier foreign keys). 0109 adds one public definer (idempotent stock adjustment overload; the old one keeps existing, without browser EXECUTE).
+  -- 0110 adds one public definer (invite e-mail throttle claim).
+  if v_total<>142 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=142 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;

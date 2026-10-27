@@ -434,5 +434,5 @@ test('0106: o teste SQL/RLS existe, termina em ROLLBACK e está no runner de CI 
   assert.match(sqlTest, /owner_nao_altera_a_do_tecnico/); assert.match(sqlTest, /tecnico_salva_propria/); assert.match(sqlTest, /tabela_sem_company_id/);
   assert.match(sqlTest, /anon_nao_grava/); assert.match(sqlTest, /owner_b_salva_propria/);
   assert.ok(read('scripts/run-sql-rls-ci.sh').includes('supabase/tests/v2_wave2_route_preferences_rollback.sql'));
-  assert.deepEqual(fs.readdirSync(new URL('../../supabase/', import.meta.url)).filter((f) => /^01(0[6-9]|[1-9]\d)_/.test(f)), ['0106_user_route_preferences.sql', '0107_technician_contract_cycle_guard.sql'], 'a 0106 é a única migration da Onda 2; a 0107 é da auditoria de segurança');
+  assert.deepEqual(fs.readdirSync(new URL('../../supabase/', import.meta.url)).filter((f) => /^01(0[6-9]|[1-9]\d)_/.test(f)), ['0106_user_route_preferences.sql', '0107_technician_contract_cycle_guard.sql', '0108_supplier_tenant_foreign_keys.sql', '0109_stock_adjustment_idempotency.sql', '0110_team_invite_email_throttle.sql'], 'a 0106 é a única migration da Onda 2; 0107–0110 são das auditorias de segurança V1 e V1.1');
 });
