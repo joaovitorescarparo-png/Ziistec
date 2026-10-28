@@ -33,7 +33,8 @@ Escopo: evitar perda silenciosa de trabalho no celular sem transformar o app em 
 - **Onde:**
   - **Novo cliente:** só cadastro novo; edição não guarda rascunho.
   - **Nova OS:** só no modo real.
-  - Orçamento, lançamento, compra e finalização **não** guardam rascunho, porque carregam preço, custo, financeiro ou fotos.
+  - **Fechamento técnico da OS (`base-tecnica`):** só no modo real e enquanto a OS não está concluída. Guarda apenas o texto de causa, solução, dificuldade, observação técnica e relatório do cliente, ligado ao `workOrderId` (num banco sem a 0111 o fluxo antigo só preenche o relato). Nome de quem recebeu, responsável ausente, materiais, adicionais, fotos e qualquer valor **não** entram no rascunho.
+  - Orçamento, lançamento e compra **não** guardam rascunho, porque carregam preço, custo, financeiro ou fotos.
 - **Armazenamento:**
   - `sessionStorage`: só esta aba, apagado ao fechar a aba;
   - TTL de 2 horas;
@@ -47,6 +48,7 @@ Escopo: evitar perda silenciosa de trabalho no celular sem transformar o app em 
   - allowlist por formulário, só texto operacional:
     - cliente: tipo, nome, fantasia, responsável, telefone, WhatsApp, endereço, observação;
     - OS: cliente, orçamento vinculado, local, descrição, data/hora, responsável, observação e o `requestId` da tentativa de save dessa mesma OS (salvar de novo não duplica);
+    - fechamento técnico: OS, causa, solução, dificuldade, observação técnica e relatório (texto);
   - ficam fora: CPF/CNPJ, itens com preço ou custo, margens, coordenadas, arquivos, fotos e blobs, ids de registro existente, tokens e qualquer campo não listado;
   - o conteúdo é sanitizado de novo na leitura.
 - **Ciclo de vida:**

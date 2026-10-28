@@ -9,7 +9,7 @@
 Provar, num ambiente **descartável e separado**, que a próxima versão (branch `claude/blocks34-port-beta-v1`) funciona de ponta
 a ponta com banco e frontend juntos, antes de qualquer decisão sobre o Beta Live:
 
-1. as migrations **0100–0110** aplicam limpas, na ordem, sobre um banco no estado do Beta Live (**0099**);
+1. as migrations **0100–0111** aplicam limpas, na ordem, sobre um banco no estado do Beta Live (**0099**);
 2. o frontend novo continua utilizável contra o banco 0099 (modo reduzido) e fica completo depois das migrations;
 3. proprietário e técnico executam o fluxo real em aparelhos reais (Android e iPhone), com o técnico sem acesso a preços;
 4. o plano de volta (restaurar backup) foi ensaiado;
@@ -32,9 +32,10 @@ Critério de saída: roteiro da seção 9 inteiro marcado, sem falha P0/P1 abert
 | Fornecedor sempre da mesma empresa | 0108 | FK composta `(supplier_id, company_id)` em produtos e compras; **aborta sem alterar nada** se o ambiente já tiver vínculo cruzado (SEC-03) |
 | Ajuste de estoque idempotente | 0109 | `zt_adjust_product_stock(..., p_request)`: o mesmo pedido altera o estoque uma vez; o overload antigo perde o EXECUTE do navegador (SEC-04) |
 | Limite de reenvio do convite | 0110 | `zt_claim_team_invite_email`: 60 s por convite/destinatário, 5/h por destinatário, 30/h por empresa; guarda só hash do e-mail (SEC-05) |
-| Frontend | Blocos 6 e 7, Onda 1, Onda 2 | formulários protegidos, rascunho, V2 no app principal, logo nos PDFs, Início, rotas |
+| Fechamento técnico, relatório com IA e confirmação | 0111 | Base Técnica interna por OS (causa, solução, dificuldade, observação), confirmação de quem recebeu, livro de gerações de IA (máx. 3 por OS) e sete funções definer; a OS continua finalizável sem IA (Field Execution Intelligence V1, `FIELD_EXECUTION_INTELLIGENCE.md`) |
+| Frontend | Blocos 6 e 7, Onda 1, Onda 2, Field Execution V1 | formulários protegidos, rascunho, V2 no app principal, logo nos PDFs, Início, rotas, Meu dia do técnico, cronômetro de atendimento, fechamento em etapas |
 
-Estado esperado do banco: **definers = 134** no 0099, **140** depois da 0105 e **140** depois da 0106 (a 0106 não cria função) e **140** depois da 0107 (ela só substitui uma função de trigger existente). A 0108 não cria função; a 0109 e a 0110 criam uma cada: **142** depois da 0110.
+Estado esperado do banco: **definers = 134** no 0099, **140** depois da 0105 e **140** depois da 0106 (a 0106 não cria função) e **140** depois da 0107 (ela só substitui uma função de trigger existente). A 0108 não cria função; a 0109 e a 0110 criam uma cada: **142** depois da 0110. A 0111 cria sete funções definer: **149** depois da 0111.
 
 ## 3. Ordem segura: frontend novo → migrations
 
@@ -50,18 +51,21 @@ Sequência do ensaio no H0:
    - telas abrem, OS e agenda funcionam, nada mostra erro técnico;
    - Comprovante, histórico por local e preferência persistente aparecem como "ainda não disponível na sua conta" (ou valem só na sessão);
    - "Abrir rota" funciona com o app padrão (Google Maps) e a troca de app vale só na sessão.
-4. Aplicar **0100 → 0101 → 0102 → 0103 → 0104 → 0105 → 0106 → 0107 → 0108 → 0109 → 0110**, um arquivo por vez, cada um em uma transação
+   - Field Execution V1 sem a 0111: o técnico vê o fechamento **antigo** (relato primeiro, sem Base Técnica, sem confirmação, sem botão de IA); "Meu dia" funciona, o tempo aparece só como "Em atendimento" (sem `started_at` antes da 0101) e a conclusão continua funcionando.
+4. Aplicar **0100 → 0101 → 0102 → 0103 → 0104 → 0105 → 0106 → 0107 → 0108 → 0109 → 0110 → 0111**, um arquivo por vez, cada um em uma transação
    (`psql -v ON_ERROR_STOP=1 -1 -f <arquivo>`), conferindo a seção 4 depois de cada passo.
 5. Recarregar o frontend novo e executar o roteiro completo (seção 9).
 6. Publicar a função `team-invite-email` desta branch **somente depois da 0110**: sem a reserva de envio ela recusa o envio (503, falha fechada).
    Antes da 0109, o frontend novo ajusta estoque pelo overload antigo (sem idempotência); depois dela, só pelo novo, com o mesmo `p_request` em cada nova tentativa.
+7. Publicar a função `api/work-order-report` desta branch **somente depois da 0111** (falha fechada: sem as tabelas ela responde "indisponível" e o app usa o texto padrão). A IA do relatório só liga quando a IA externa está habilitada no ambiente (mesma chave do gateway `api/_aiGateway.js`) e há cota; no H0 use chave própria de teste do H0, nunca a do cliente real. Sem a chave, o relatório cai no texto padrão.
 
 ## 4. Verificações depois das migrations (somente leitura)
 
 Rodar no H0, nunca no Beta Live:
 
-- as onze migrations aparecem em ordem e sem erro (a 0108 só falha se o ambiente já tiver fornecedor de outra empresa em produto/compra: nada é alterado, e a mensagem traz a consulta de somente leitura para tratar o caso);
-- `select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosecdef;` → **142**;
+- as doze migrations aparecem em ordem e sem erro (a 0108 só falha se o ambiente já tiver fornecedor de outra empresa em produto/compra: nada é alterado, e a mensagem traz a consulta de somente leitura para tratar o caso);
+- `select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosecdef;` → **149**;
+- `work_order_technical_base`, `work_order_attendance_confirmations` e `work_order_ai_reports`: RLS ligada, `anon` sem privilégio, `authenticated` sem INSERT/UPDATE/DELETE nas três (escrita só pelas funções); `work_order_ai_reports` sem policy de leitura;
 - `has_table_privilege('authenticated','public.work_orders','SELECT')` é falso para a tabela inteira e verdadeiro por coluna (exceto `approved_*`);
 - `user_route_preferences`: RLS ligada, `anon` sem privilégio, `authenticated` sem DELETE, três policies com `user_id = auth.uid()`;
 - o pacote `supabase/tests/*_rollback.sql` roda no CI descartável (`bash scripts/run-sql-rls-ci.sh`); no H0 só consulta de catálogo, sem escrita.
@@ -73,6 +77,7 @@ anterior. Não há reversa automática para 0100–0104 (criam tabelas, colunas,
 
 Se for preciso desfazer só uma etapa no H0 (ensaio manual; conferir cada policy em `pg_policies` antes):
 
+- **0111:** `drop function` das sete funções `zt_save_work_order_technical_base`, `zt_save_attendance_confirmation`, `zt_work_order_report_facts`, `zt_claim_work_order_ai_report`, `zt_complete_work_order_ai_report`, `zt_mark_work_order_ai_report_used` e `zt_work_order_ai_report_usage`, depois `drop table` das três tabelas (`work_order_ai_reports`, `work_order_attendance_confirmations`, `work_order_technical_base`). Conferir assinaturas em `pg_proc` antes. Nada de OS, financeiro ou estoque é tocado; o frontend volta sozinho ao fechamento antigo e a função `api/work-order-report` passa a responder "indisponível".
 - **0110:** `drop function public.zt_claim_team_invite_email(uuid); drop table public.team_invite_email_sends;`. A função `team-invite-email` nova passa a recusar o envio (503) sem a reserva: reverter a função junto.
 - **0109:** `drop function public.zt_adjust_product_stock(uuid,uuid,numeric,text,uuid);` e devolver o EXECUTE do overload antigo a `authenticated, service_role`. As colunas `client_request_id` e `balance_after` podem ficar. O frontend novo cai sozinho para o ajuste antigo.
 - **0108:** voltar as FKs simples: `alter table public.products drop constraint products_supplier_company_fk, add constraint products_supplier_id_fkey foreign key (supplier_id) references public.suppliers(id) on delete set null;` (idem `purchases`). Só para ensaio: reabre o SEC-03.
@@ -158,6 +163,18 @@ Marcar cada item com aparelho, data e evidência. Falha = registrar P0/P1/P2 com
 - [ ] OS **sem endereço:** botão desligado e mensagem "Este atendimento ainda não possui um endereço disponível para abrir a rota." sem texto técnico.
 - [ ] Endereço com acento, espaço, `&` e `#`: o destino chega inteiro ao app.
 - [ ] Antes da 0106 (passo 3): trocar de app vale só na sessão, sem erro.
+
+**Fechamento técnico e relatório (Field Execution V1, técnico no iPhone)**
+- [ ] **Meu dia:** cartões com cliente, local, horário, endereço, telefone, resumo e botão "Iniciar/Continuar atendimento"; ordem: em andamento → horário marcado → demais; nenhum valor financeiro.
+- [ ] **Cronômetro:** "Em atendimento · 1h 24min" aparece depois de iniciar; não trava a tela; atendimento antigo mostra o aviso discreto de "em andamento há bastante tempo" sem fechar nada sozinho.
+- [ ] **Base Técnica:** preencher causa, solução, dificuldade, necessita retorno e observação técnica final; usar **Ditar** em cada campo (negar a permissão do microfone não apaga o texto).
+- [ ] Fechamento interrompido (voltar, Esc, trocar de aba, fechar o app): pergunta antes de descartar e o rascunho volta depois de recarregar.
+- [ ] Rede cortada na hora de concluir: mensagem amigável, nada se perde, tentar de novo não duplica Base Técnica nem confirmação, e a OS conclui uma só vez.
+- [ ] **Relatório com IA:** gerar, editar, gerar de novo (até 3), descartar; a 4ª tentativa informa o limite e oferece o texto padrão; recarregar a página não devolve tentativas.
+- [ ] **Anti-alucinação:** com causa vazia o texto não inventa causa; só aparecem materiais da OS; nenhum custo, margem ou valor no relatório.
+- [ ] Sem a IA externa no ambiente (ou com a cota esgotada): "Montar texto padrão" funciona e a OS conclui normalmente.
+- [ ] **Confirmação:** nome de quem recebeu ou "Responsável ausente"; sem nenhum dos dois o botão pede a confirmação; evidências mostram "N evidências anexadas".
+- [ ] Proprietário A vê a Base Técnica dessa OS no detalhe; Proprietário B não vê a da empresa A; um técnico não vê a Base Técnica de OS atribuída a outro.
 
 **Resiliência móvel**
 - [ ] **Formulário com alteração não salva:** fechar, Esc, Voltar do Android e troca de aba perguntam antes de descartar; Cancelar e salvar não perguntam.
