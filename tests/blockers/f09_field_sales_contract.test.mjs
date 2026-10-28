@@ -75,7 +75,8 @@ test('F09 backend API: frontend não envia preço e retry usa client_request_id 
   assert.match(api, /zt_sell_product_on_work_order/);
   assert.match(api, /zt_field_sale_client_contexts/);
   assert.match(api, /origin,work_order_id,work_order_item_id,financial_entry_id/);
-  assert.match(v2Api, /p_request:requestId\|\|crypto\.randomUUID\(\)/);
+  // Um único cliente do RPC de venda em OS (fieldSalesApi, com ensureRequestId): o wrapper antigo de v2Api, com id aleatório por chamada, foi removido.
+  assert.doesNotMatch(v2Api, /rpc\(\s*'zt_sell_product_on_work_order'/);
 });
 
 test('F09 código: nenhuma chamada de venda volta às assinaturas RPC legadas', async () => {

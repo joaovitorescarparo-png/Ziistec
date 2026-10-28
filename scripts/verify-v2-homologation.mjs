@@ -224,7 +224,8 @@ const fakePaymentAction = /<Btn[^>]*>[\s\S]{0,180}(?:Forma de pagamento|Checkout
   || /onClick\s*=\s*\{[^}]{0,220}(?:pagamento|checkout)/i.test(settings);
 if (fakePaymentAction) fail('Settings V2 contém ação clicável de pagamento não integrada');
 else ok('Settings V2 não expõe ação clicável de checkout/pagamento fictício');
-requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions', 'cancelarAssinaturaDB', 'reativarAssinaturaDB']);
+// cancelar/reativar assinatura não são chamados por SettingsV2 (a ação real é do shell, via subscriptionApi); os marcadores dos wrappers mortos saíram na consolidação V1.
+requireText('src/lib/settingsV2Api.js', ['companies', 'subscriptions']);
 
 // 10) Runbooks e política de custo precisam acompanhar o código.
 requireText('docs/V2_HOMOLOGATION_RUNBOOK.md', [
