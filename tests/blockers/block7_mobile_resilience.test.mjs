@@ -468,5 +468,5 @@ test('Bloco 5 intacto: 0105, projeções e regras de preço do técnico não mud
   assert.match(migration, /a\.attname not in \('approved_subtotal','approved_discount','approved_surcharge','approved_total'\)/);
   // O Bloco 7 não criou migration. A única posterior prevista é a preferência de rota da Onda 2 (0106), documentada à parte.
   const posteriores = fs.readdirSync(new URL('../../supabase/', import.meta.url)).filter((f) => /^01(0[6-9]|[1-9]\d)_/.test(f));
-  assert.deepEqual(posteriores, ['0106_user_route_preferences.sql', '0107_technician_contract_cycle_guard.sql', '0108_supplier_tenant_foreign_keys.sql', '0109_stock_adjustment_idempotency.sql', '0110_team_invite_email_throttle.sql'], 'só a preferência de rota (Onda 2) e as migrations das auditorias de segurança V1 e V1.1');
+  assert.deepEqual(posteriores, ['0106_user_route_preferences.sql', '0107_technician_contract_cycle_guard.sql', '0108_supplier_tenant_foreign_keys.sql', '0109_stock_adjustment_idempotency.sql', '0110_team_invite_email_throttle.sql', '0111_field_execution_intelligence.sql'], 'só a preferência de rota (Onda 2) e as migrations das auditorias de segurança V1 e V1.1');
 });

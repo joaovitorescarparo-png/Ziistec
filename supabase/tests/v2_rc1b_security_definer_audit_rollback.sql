@@ -26,7 +26,8 @@ begin
   -- 0105 adds two public definers (service report projection by role; field items without price for the technician).
   -- 0108 adds none (composite supplier foreign keys). 0109 adds one public definer (idempotent stock adjustment overload; the old one keeps existing, without browser EXECUTE).
   -- 0110 adds one public definer (invite e-mail throttle claim).
-  if v_total<>142 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=142 actual=%',v_total; end if;
+  -- 0111 adds seven public definers (technical base save; attendance confirmation save; report facts; AI report claim/complete/mark-used/usage).
+  if v_total<>149 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=149 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;

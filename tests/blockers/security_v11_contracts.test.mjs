@@ -106,7 +106,7 @@ test('as migrations 0108–0110 existem, são sequenciais e não reutilizam núm
   const files = readdirSync(path.join(root, 'supabase')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   const numbers = files.map((f) => f.slice(0, 4));
   for (const n of ['0108', '0109', '0110']) assert.equal(numbers.filter((x) => x === n).length, 1, `número ${n} único`);
-  assert.deepEqual(files.filter((f) => /^01(0[8-9]|1\d)/.test(f)), ['0108_supplier_tenant_foreign_keys.sql', '0109_stock_adjustment_idempotency.sql', '0110_team_invite_email_throttle.sql']);
+  assert.deepEqual(files.filter((f) => /^01(0[8-9]|1\d)/.test(f)), ['0108_supplier_tenant_foreign_keys.sql', '0109_stock_adjustment_idempotency.sql', '0110_team_invite_email_throttle.sql', '0111_field_execution_intelligence.sql']);
 });
 
 test('0108: FK composta por empresa, falha fechada e nenhuma mudança de dados', () => {
@@ -197,7 +197,7 @@ test('os testes SQL e de concorrência novos estão no runner do CI e os scripts
 
 test('o inventário de SECURITY DEFINER do gate acompanha as duas funções novas', () => {
   const audit = read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql');
-  assert.match(audit, /0109 adds one public definer[\s\S]*-- 0110 adds one public definer[\s\S]*if v_total<>142 then/);
+  assert.match(audit, /0109 adds one public definer[\s\S]*-- 0110 adds one public definer[\s\S]*if v_total<>149 then/);
   const doc = read('docs/engineering/SECURITY_DEFINER_AUDIT.md');
   assert.match(doc, /`zt_adjust_product_stock\(p_company uuid, p_product uuid, p_delta numeric, p_notes text, p_request uuid\)` \| 0109/);
   assert.match(doc, /`zt_claim_team_invite_email\(p_invite uuid\)` \| 0110/);

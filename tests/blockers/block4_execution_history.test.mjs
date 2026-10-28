@@ -237,6 +237,6 @@ test('Bloco 4: definers com search_path explícito, sem SQL dinâmico; regressõ
     assert.ok(runner.includes(`supabase/tests/${file}`), `${file} registrado no gate SQL/RLS`);
     assert.match(read(`supabase/tests/${file}`), /\nrollback;\s*$/);
   }
-  // 138 com o Bloco 4; 140 depois dos dois definers da 0105 (Bloco 5); 142 com a 0109 e a 0110 (Segurança V1.1).
-  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0101–0104 add three public definers[\s\S]*if v_total<>142 then/);
+  // 138 com o Bloco 4; 140 depois dos dois definers da 0105 (Bloco 5); 142 com a 0109 e a 0110 (Segurança V1.1); 149 com a 0111 (Field Execution Intelligence).
+  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0101–0104 add three public definers[\s\S]*if v_total<>149 then/);
 });

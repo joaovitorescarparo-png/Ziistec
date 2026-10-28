@@ -110,6 +110,7 @@ regressions=(
   supabase/tests/v2_security_v11_supplier_tenant_fk_rollback.sql
   supabase/tests/v2_security_v11_stock_idempotency_rollback.sql
   supabase/tests/v2_security_v11_invite_email_throttle_rollback.sql
+  supabase/tests/v2_field_execution_intelligence_rollback.sql
 )
 
 # Falha de regressão também vira anotação do GitHub (legível sem baixar o log do job).
@@ -150,6 +151,12 @@ printf '%s\n' "$out"
 if ! out="$(bash scripts/test-invite-email-throttle-concurrency.sh 2>&1)"; then
   printf '%s\n' "$out"
   annotate_failure "Invite email throttle concurrency failed" "$out"
+  exit 3
+fi
+printf '%s\n' "$out"
+if ! out="$(bash scripts/test-ai-report-concurrency.sh 2>&1)"; then
+  printf '%s\n' "$out"
+  annotate_failure "AI report concurrency failed" "$out"
   exit 3
 fi
 printf '%s\n' "$out"
