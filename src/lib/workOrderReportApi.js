@@ -32,6 +32,8 @@ export async function gerarRelatorioIA({ workOrderId, requestId, materiais = [],
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ workOrderId, requestId, materials: materiaisParaRelatorio(materiais) }),
+      // Servidor: 15 s de leitura + 25 s do provedor. Passou disso, trata como sem conexão: o retry repete o mesmo pedido e recebe a geração já feita.
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
     });
   } catch {
     throw new ReportApiError('Sem conexão agora.', { kind: 'network' });
