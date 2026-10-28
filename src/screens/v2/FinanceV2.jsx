@@ -7,15 +7,13 @@ import {
 import { carregarFinanceiroV2DB } from '../../lib/financeV2Api';
 import { gerarResumoFinanceiroV2IA, montarSnapshotFinanceiroV2 } from '../../lib/financeAiV2Api';
 import { mensagemErro } from '../../lib/supabase';
+import { hojeISO as hoje, addDiasISO as addDays, dataBR } from '../../lib/dates';
 
 const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-const hoje=()=>new Date().toISOString().slice(0,10);
 const mesAtual=()=>hoje().slice(0,7);
-const dataBR=(v)=>v?v.split('-').reverse().join('/'):'—';
 const mesNome=(m)=>{const [a,n]=m.split('-');return `${['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][Number(n)-1]} de ${a}`;};
 const mudarMes=(m,delta)=>{const [a,n]=m.split('-').map(Number);const d=new Date(a,n-1+delta,1,12);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;};
 const noMes=(date,month)=>String(date||'').slice(0,7)===month;
-const addDays=(base,days)=>{const d=new Date(`${base}T12:00:00`);d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);};
 
 function Btn({children,onClick,disabled=false,variant='secondary'}){const cls=variant==='primary'?'bg-emerald-700 text-white hover:bg-emerald-800':'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50';return <button type="button" onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition disabled:opacity-50 ${cls}`}>{children}</button>;}
 function Kpi({label,value,detail,icon:Icon,tone='normal'}){const toneClass=tone==='good'?'text-emerald-700':tone==='bad'?'text-rose-700':'text-slate-900';return <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p><p className={`mt-1 break-words text-lg font-bold min-[390px]:text-xl ${toneClass}`}>{value}</p>{detail&&<p className="mt-1 text-[11px] leading-relaxed text-slate-500">{detail}</p>}</div><div className="rounded-xl bg-slate-50 p-2.5 text-slate-500"><Icon size={18}/></div></div></div>;}

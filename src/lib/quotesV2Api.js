@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { atualizarStatusOrcamentoDB } from './dataApi';
 import { carregarEquipeDB, duplicarOrcamentoDB } from './dataApiExtras';
+import { hojeISO, addDiasISO as addDays } from './dates';
 
 const n=(v)=>Number(v||0);
 const STATUS_FROM_DB={draft:'rascunho',sent:'enviado',approved:'aprovado',declined:'recusado',expired:'vencido'};
@@ -8,7 +9,6 @@ const missingRpcCodes=new Set(['PGRST202','42883','42P01']);
 
 const check=(r)=>{if(r?.error)throw r.error;return r?.data||[];};
 const dateOnly=(v)=>String(v||'').slice(0,10);
-const addDays=(base,days)=>{const d=new Date(`${base}T12:00:00`);d.setDate(d.getDate()+Number(days||0));return d.toISOString().slice(0,10);};
 
 export function conversaoQuoteV2AindaNaoMigrada(error){
   const code=String(error?.code||'');
@@ -92,7 +92,7 @@ export async function duplicarOrcamentoSeguroV2DB(quote,companyId,userId){
   const issue=new Date(`${quote.data||dateOnly(quote.criadoEm)}T12:00:00`);
   const valid=quote.validade?new Date(`${quote.validade}T12:00:00`):null;
   const days=valid&&Number.isFinite(valid.getTime())?Math.max(1,Math.round((valid-issue)/86400000)):15;
-  const newValid=addDays(new Date().toISOString().slice(0,10),days);
+  const newValid=addDays(hojeISO(),days);
   return duplicarOrcamentoDB({
     id:quote.id,requestId:quote.requestId,numero:quote.numero,clienteId:quote.clienteId,status:quote.status,
     data:quote.data,validade:quote.validade,desconto:quote.desconto,acrescimo:quote.acrescimo,

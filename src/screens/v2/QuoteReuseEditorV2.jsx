@@ -5,8 +5,8 @@ import {carregarBaseOrcamentoV2DB} from '../../lib/quoteV2Api';
 import {hasBlockingReuseItems,normalizeReuseItem} from '../../lib/quoteReuseMerge';
 import {novoQuoteReuseRequestId,salvarOrcamentoReutilizavelV2DB} from '../../lib/quoteReuseV2Api';
 
-const today=()=>new Date().toISOString().slice(0,10);
-const addDays=(base,days)=>{const d=new Date(`${base}T12:00:00`);d.setDate(d.getDate()+Number(days||0));return d.toISOString().slice(0,10);};
+import {hojeISO as today,addDiasISO as addDays} from '../../lib/dates';
+
 const money=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 
 export default function QuoteReuseEditorV2({companyId,seed,setSeed,onClose,onUseTemplate,onAddKit,onManage}){

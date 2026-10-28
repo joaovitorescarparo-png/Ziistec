@@ -11,10 +11,10 @@ import {
   verificarComprasV2DisponiveisDB,
 } from '../../lib/purchaseV2Api';
 import { mensagemErro } from '../../lib/supabase';
+import { hojeISO as today } from '../../lib/dates';
 
 const brl = (value) => Number(value || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
 const number = (value) => Number(String(value ?? '').replace(',', '.')) || 0;
-const today = () => new Date().toISOString().slice(0,10);
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const newItem = () => ({ key:uid(), produtoId:'', nome:'', qtd:1, custo:'' });
 const emptyPurchase = () => ({ fornecedor:'', data:today(), vencimento:'', forma:'', pago:false, obs:'', itens:[newItem()] });

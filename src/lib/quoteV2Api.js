@@ -1,14 +1,9 @@
 import { supabase } from './supabase';
 import { chamarIAReal } from './aiApi';
 import { salvarClienteDB, salvarOrcamentoDB } from './dataApi';
+import { hojeISO as today, addDiasISO as addDays } from './dates';
 
 const n = (v) => Number(v || 0);
-const today = () => new Date().toISOString().slice(0,10);
-const addDays = (base, days) => {
-  const d = new Date(`${base}T12:00:00`);
-  d.setDate(d.getDate() + Number(days || 0));
-  return d.toISOString().slice(0,10);
-};
 const check = (r) => { if (r?.error) throw r.error; return r?.data || []; };
 const strip = (v='') => String(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const STOP = new Set(['para','com','uma','umas','uns','por','que','dos','das','de','do','da','e','em','no','na','ao','aos','as','os','um','o','a','r$','reais','real']);

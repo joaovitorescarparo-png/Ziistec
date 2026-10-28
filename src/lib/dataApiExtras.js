@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { carregarOSPorIdDB, salvarOSDB, salvarOrcamentoDB } from './dataApi';
 import { ensureRequestId, idempotentWrite } from './reliability';
+import { hojeISO } from './dates';
 import { redirectAuthAtual } from './authRedirect';
 
 const n=(v)=>Number(v||0);
@@ -11,7 +12,7 @@ const papelToDb={proprietario:'owner',tecnico:'technician'};
 const fromPurchase=(x)=>({id:x.id,requestId:x.client_request_id||null,empresaId:x.company_id,numero:x.number,fornecedor:x.supplier_name,data:x.purchase_date,forma:x.payment_method||'',vencimento:x.due_date||'',obs:x.notes||'',lancamentoId:x.entry_id,itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)}))});
 
 export async function salvarCompraDB(x,companyId,userId){
-  const row={supplier_name:x.fornecedor?.trim()||'Fornecedor',purchase_date:x.data||new Date().toISOString().slice(0,10),payment_method:x.forma||null,due_date:x.vencimento||null,notes:x.obs||null,paid:Boolean(x.jaPago)};
+  const row={supplier_name:x.fornecedor?.trim()||'Fornecedor',purchase_date:x.data||hojeISO(),payment_method:x.forma||null,due_date:x.vencimento||null,notes:x.obs||null,paid:Boolean(x.jaPago)};
   const items=(x.itens||[]).map(i=>({product_id:i.catalogoId||null,name:i.nome||'Item',quantity:n(i.qtd)||1,unit_cost:n(i.custo)}));
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_purchase_idempotent',{p_company:companyId,p_purchase:x.id||null,p_request:req,p_row:row,p_items:items}));
@@ -21,7 +22,7 @@ export async function salvarCompraDB(x,companyId,userId){
 }
 
 export async function duplicarOrcamentoDB(x,companyId,userId,validUntil){
-  return salvarOrcamentoDB({...x,id:null,requestId:null,numero:null,status:'rascunho',data:new Date().toISOString().slice(0,10),validade:validUntil||x.validade,itens:(x.itens||[]).map(i=>({...i,id:null})),osId:null},companyId,userId);
+  return salvarOrcamentoDB({...x,id:null,requestId:null,numero:null,status:'rascunho',data:hojeISO(),validade:validUntil||x.validade,itens:(x.itens||[]).map(i=>({...i,id:null})),osId:null},companyId,userId);
 }
 export async function criarOSDeOrcamentoDB(orc,companyId,userId,defaults={}){
   void defaults;

@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { LOGO_BOX, desenharLogoNaCaixa, ajustarTextoNaLargura } from './pdfLogoBox';
+import { hojeISO } from './dates';
 
 /* Recibo / documento de cobrança para o cliente.
  *
@@ -39,7 +40,7 @@ export async function montarReciboPDF(dados) {
   const {
     empresa = {}, cliente = {}, numero = '', titulo = 'RECIBO', origem = '', itens = [],
     valor = 0, vencimento = null, pagoEm = null, forma = null,
-    observacoes = '', emitidoEm = new Date().toISOString().slice(0, 10),
+    observacoes = '', emitidoEm = hojeISO(),
     logoBytes = null, logoTipo = '',
   } = dados || {};
 

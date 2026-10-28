@@ -11,11 +11,7 @@ import {
   verificarProdutoV2DisponivelDB,
 } from '../../lib/v2Api';
 import { mensagemErro } from '../../lib/supabase';
-
-const hoje = () => new Date().toISOString().slice(0,10);
-const addDays = (base, days) => { const d=new Date(`${base}T12:00:00`); d.setDate(d.getDate()+Number(days||0)); return d.toISOString().slice(0,10); };
-const addMonths = (base, months) => { const d=new Date(`${base}T12:00:00`); d.setMonth(d.getMonth()+Number(months||0)); return d.toISOString().slice(0,10); };
-const dataBR = (v) => v ? v.split('-').reverse().join('/') : '—';
+import { hojeISO as hoje, addDiasISO as addDays, addMesesISO as addMonths, dataBR } from '../../lib/dates';
 
 const VAZIO = { clienteId:'', tipo:'produto', produtoId:'', servicoId:'', descricao:'', inicio:hoje(), ate:addMonths(hoje(),12), serie:'', local:'', obs:'' };
 

@@ -12,12 +12,11 @@ import {
   salvarContratoDB,
 } from '../../lib/v2Api';
 import { mensagemErro } from '../../lib/supabase';
+import { hojeISO as isoToday, addMesesISO, dataBR } from '../../lib/dates';
 
-const isoToday=()=>new Date().toISOString().slice(0,10);
 const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-const dataBR=(v)=>v?v.split('-').reverse().join('/'):'—';
 const n=(v)=>Number(String(v??'').replace(',','.'))||0;
-const addMonths=(base,m)=>{const d=new Date(`${base}T12:00:00`);d.setMonth(d.getMonth()+Number(m||1));return d.toISOString().slice(0,10);};
+const addMonths=(base,m)=>addMesesISO(base,Number(m||1));
 const STATUS={active:'Ativo',paused:'Pausado',canceled:'Cancelado'};
 const VAZIO={clienteId:'',nome:'',status:'active',valor:'',periodicidadeMeses:1,diaCobranca:10,proximaVisita:isoToday(),proximaCobranca:isoToday(),responsavelId:'',cobertura:'',obs:''};
 
