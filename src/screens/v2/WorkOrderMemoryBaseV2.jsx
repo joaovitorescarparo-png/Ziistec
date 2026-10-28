@@ -15,7 +15,7 @@ import useRoutePreference from '../../hooks/useRoutePreference';
 import { linkDeRota, resolverDestinoRota } from '../../lib/routeApps';
 import { useDiscardGuard } from '../../hooks/useUnsavedChanges';
 
-const money=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import { brl as money } from '../../lib/money';
 const date=(v)=>v?new Date(`${String(v).slice(0,10)}T12:00:00`).toLocaleDateString('pt-BR'):'—';
 const dateTime=(v)=>v?new Date(v).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'—';
 const openStatus=new Set(['unscheduled','scheduled','in_progress']);

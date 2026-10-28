@@ -21,7 +21,7 @@ import {
 import { mensagemErro } from '../../lib/supabase';
 import BarcodeScanner from '../../components/BarcodeScanner';
 
-const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+import { brl } from '../../lib/money';
 const n = (v) => Number(String(v ?? '').replace(',', '.')) || 0;
 const hojeHora = (v) => v ? new Date(v).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' }) : '—';
 

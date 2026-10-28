@@ -7,7 +7,7 @@ import {novoQuoteReuseRequestId,salvarOrcamentoReutilizavelV2DB} from '../../lib
 
 import {hojeISO as today,addDiasISO as addDays} from '../../lib/dates';
 
-const money=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import { brl as money } from '../../lib/money';
 
 export default function QuoteReuseEditorV2({companyId,seed,setSeed,onClose,onUseTemplate,onAddKit,onManage}){
   const [base,setBase]=useState(null);const [loading,setLoading]=useState(true);const [saving,setSaving]=useState(false);const [error,setError]=useState('');const [saved,setSaved]=useState(null);const requestId=useRef(null);

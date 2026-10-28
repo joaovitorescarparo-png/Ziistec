@@ -14,7 +14,7 @@ import {
 import { mensagemErro } from '../../lib/supabase';
 import { hojeISO as isoToday, addMesesISO, dataBR } from '../../lib/dates';
 
-const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import { brl } from '../../lib/money';
 const n=(v)=>Number(String(v??'').replace(',','.'))||0;
 const addMonths=(base,m)=>addMesesISO(base,Number(m||1));
 const STATUS={active:'Ativo',paused:'Pausado',canceled:'Cancelado'};

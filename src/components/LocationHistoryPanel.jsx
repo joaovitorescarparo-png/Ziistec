@@ -3,7 +3,7 @@ import {ChevronDown,ChevronUp,Loader2,RotateCcw,ShieldCheck} from 'lucide-react'
 import {carregarDetalheHistoricoOSDB,carregarHistoricoAtendimentosDB} from '../lib/locationHistoryApi';
 
 const STATUS={unscheduled:'Aguardando',scheduled:'Agendada',in_progress:'Em andamento',done:'Concluída'};
-const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import { brl } from '../lib/money';
 const data=(v)=>v?new Date(`${String(v).slice(0,10)}T12:00:00`).toLocaleDateString('pt-BR'):'—';
 const ring='focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500';
 

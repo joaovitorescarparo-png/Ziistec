@@ -3,7 +3,7 @@ import {Download,FileText,Loader2,RefreshCw,Share2} from 'lucide-react';
 import {carregarComprovantesOSDB,emitirComprovanteServicoDB,novoRequestIdComprovante} from '../lib/serviceReceiptApi';
 import {AVISO_NAO_FISCAL,baixarComprovanteServicoPDF,compartilharComprovanteServicoPDF,linkWhatsAppComprovante} from '../lib/serviceReceiptPdf';
 
-const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import { brl } from '../lib/money';
 const dataHora=(v)=>v?new Date(v).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'—';
 const btn='inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3.5 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 disabled:opacity-50';
 const campo='w-full rounded-xl bg-white px-3 py-2.5 text-[14px] ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500';

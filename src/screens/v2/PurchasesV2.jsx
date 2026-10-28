@@ -13,7 +13,7 @@ import {
 import { mensagemErro } from '../../lib/supabase';
 import { hojeISO as today } from '../../lib/dates';
 
-const brl = (value) => Number(value || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+import { brl } from '../../lib/money';
 const number = (value) => Number(String(value ?? '').replace(',', '.')) || 0;
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const newItem = () => ({ key:uid(), produtoId:'', nome:'', qtd:1, custo:'' });

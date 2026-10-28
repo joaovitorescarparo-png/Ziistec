@@ -9,7 +9,7 @@ import { gerarResumoFinanceiroV2IA, montarSnapshotFinanceiroV2 } from '../../lib
 import { mensagemErro } from '../../lib/supabase';
 import { hojeISO as hoje, addDiasISO as addDays, dataBR } from '../../lib/dates';
 
-const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import { brl } from '../../lib/money';
 const mesAtual=()=>hoje().slice(0,7);
 const mesNome=(m)=>{const [a,n]=m.split('-');return `${['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][Number(n)-1]} de ${a}`;};
 const mudarMes=(m,delta)=>{const [a,n]=m.split('-').map(Number);const d=new Date(a,n-1+delta,1,12);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;};
