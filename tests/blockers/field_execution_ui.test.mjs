@@ -176,7 +176,7 @@ test('contratos de código do fechamento técnico', () => {
   assert.match(concluir, /if \(concluindo\) return;/, 'duplo toque não repete a conclusão');
   assert.match(concluir, /if \(falha\) \{ setErroFechamento\(falha\); return; \}/, 'falha ao salvar mantém tudo na tela');
   assert.equal((legacy.match(/finalizarOSDB\(/g) || []).length, 1, 'uma única chamada de conclusão atômica: nenhuma segunda lógica');
-  assert.match(legacy, /const concluiu = await finalizarOS\(os\.id, extras\);\n\s+if \(concluiu === false\) return false;/);
+  assert.match(legacy, /const concluiu = await finalizarOS\(os\.id, extras\);\s+if \(concluiu === false\) return false;/);
   assert.match(legacy, /catch\(e\)\{ aviso\(mensagemErro\(e\)\); return false; \}/);
   const salvar = legacy.slice(legacy.indexOf('const salvarFechamento = async () => {'), legacy.indexOf('const aplicarRelatorio'));
   assert.match(salvar, /idsBase\.idFor\(limpa\)/);
