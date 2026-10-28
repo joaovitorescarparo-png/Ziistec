@@ -319,7 +319,7 @@ export default function App() {
   if (workspaceV2 === "financeiro" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo financeiro"/>}><FinanceV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "configuracoes" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo configurações"/>}><SettingsV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "pos-venda" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo pós-venda"/>}><PostSaleV2 {...workspaceProps} onClose={() => fecharWorkspace(null)}/></Suspense>);
-  if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps} owner={owner}/></Suspense>);
   if (workspaceV2 === "memoria-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo memória técnica"/>}><WorkOrderMemoryV2 {...workspaceProps} owner={owner} initialWorkOrderId={new URLSearchParams(window.location.search).get("wo")}/></Suspense>);
 
   return comConexao(

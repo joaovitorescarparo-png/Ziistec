@@ -84,4 +84,3 @@ export async function alternarColaboradorDB(m){
   if(m.inviteId){if(m.ativo) check(await supabase.from('company_invites').delete().eq('id',m.inviteId));return;}
   check(await supabase.from('company_members').update({status:m.ativo?'disabled':'active'}).eq('id',m.id));
 }
-export async function atualizarFuncaoColaboradorDB(membershipId,funcao){check(await supabase.from('company_members').update({job_title:funcao||null}).eq('id',membershipId));}
