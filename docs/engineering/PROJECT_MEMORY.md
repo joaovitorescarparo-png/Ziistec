@@ -76,6 +76,13 @@
 - Field Execution Intelligence V1 (0111, definers 149; detalhes em `docs/engineering/FIELD_EXECUTION_INTELLIGENCE.md`): Base Técnica interna por OS (causa, solução, dificuldade, observação) + confirmação de quem recebeu + livro de gerações de IA. `needs_return` e `started_at` são reutilizados (nenhum segundo booleano nem contador de duração no banco). O relatório do cliente só recebe fatos confirmados lidos pelo **banco** (nunca custo, margem, financeiro ou texto livre do navegador), no máximo 3 gerações por OS, e sempre tem o texto padrão determinístico como fallback: a IA nunca bloqueia a conclusão. Base Técnica e confirmação são gravadas **antes** da finalização atômica (que continua com uma única chamada). O frontend novo cai sozinho no fluxo antigo quando o banco não tem a 0111. Assinatura desenhada: PENDENTE; assinatura por link de WhatsApp: só design documentado.
 - Fim de linha: `.gitattributes` fixa LF em `*.sh` e `*.sql`. Sem isso um clone limpo no Windows (`core.autocrlf=true`) falhava 1 teste de regex multilinha; confirme `verify:v2` também em worktree limpo.
 
+## Consolidação V1 e preparação fiscal (2026-10-28)
+
+- Auditoria ampla em `docs/engineering/SYSTEM_CONSOLIDATION_V1.md`: 14 duplicações achadas, 4 removidas, 8 funções mortas apagadas, 1 bug P2 corrigido. O que sobrou (Compras, Configurações e Orçamentos com duas telas; `speech-patch.js` × `useSpeechInput`; escopo de auth repetido em `api/ai.js` e `api/finance-ai.js`) só muda depois da H0 e da decisão do dono.
+- "Hoje" é sempre `hojeISO()` de `src/lib/dates.js` (dia do aparelho); nunca `toISOString().slice(0,10)`, que dá o dia UTC e erra das 21h às 24h no Brasil (teste varre `src/`). Moeda é sempre `brl` de `src/lib/money.js`.
+- Antes de apagar função "sem uso", procure também no texto dos testes e dos `verify-*`: vários gates leem o código-fonte como string e quebram sem aviso do compilador.
+- Fiscal: só desenho em `docs/engineering/FISCAL_ARCHITECTURE_V1.md`. O Comprovante de Serviço (0100) é documento **não fiscal** e continua separado de qualquer NFS-e (`fiscal_documents` futuro, referenciando `billing_entry_id`, nunca criando receita). Nenhum provedor contratado, nenhuma credencial, nada emitido; a F1 (sandbox) exige autorização própria.
+
 ## Direção de produto aprovada
 
 - Histórico técnico deve evoluir para Cliente → Local → Ativos → Histórico de serviços.
