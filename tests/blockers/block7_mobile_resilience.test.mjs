@@ -439,19 +439,21 @@ test('OS relida do banco mantém relato, checklist, fotos, histórico e materiai
 test('legado: Modal usa useModalDismiss; save em andamento trava o fechamento nos formulários', () => {
   assert.match(legacy, /const guard = useModalDismiss\(\{ open, dirty, busy, onClose, overlayRef: overlay \}\);/);
   for (const marker of ['busy={salvandoCliente}', 'busy={criando}', 'busy={salvando} title="Agendar atendimento"',
-    'busy={concluindo} wide title="Editar registro do atendimento"', 'busy={concluindo} wide title={atual.titulo}',
+    'busy={concluindo} wide title="Editar registro do atendimento"', 'busy={concluindo || gerando} wide title={atual.titulo}',
     'busy={salvandoLancamento}', 'busy={salvandoCompra}']) assert.ok(legacy.includes(marker), marker);
 });
 
 test('legado: rascunho só em Novo cliente e Nova OS (real); aviso permite descartar; status/agenda preservam a OS', () => {
   assert.match(legacy, /useFormDraft\(\{ formType: "cliente-novo", enabled: Boolean\(form && !form\.id\), value: form, dirty,/);
   assert.match(legacy, /useFormDraft\(\{ formType: "os-nova", enabled: real, value: \{ \.\.\.f, requestId: requestIdRef\.current \}, dirty,/);
-  assert.equal((legacy.match(/useFormDraft\(\{/g) || []).length, 2, 'nenhum outro formulário (orçamento, lançamento, finalização) guarda rascunho');
+  // Field Execution V1: a finalização passa a guardar só a Base Técnica (texto) e o relatório; orçamento e lançamento seguem sem rascunho.
+  assert.equal((legacy.match(/useFormDraft\(\{/g) || []).length, 3, 'só Novo cliente, Nova OS e a Base Técnica da finalização guardam rascunho');
+  assert.match(legacy, /useFormDraft\(\{ formType: "base-tecnica", enabled: real && !jaConcluida,/);
   assert.match(legacy, /<DraftRestoredNotice savedAt=\{rascunho\.restoredAt\} onDiscard=\{\(\) => setForm\(rascunho\.discardDraft\(\) \|\| \{ tipo: "PF" \}\)\} \/>/);
   assert.match(legacy, /<DraftRestoredNotice savedAt=\{rascunho\.restoredAt\} onDiscard=\{descartarRascunho\}/);
   assert.match(legacy, /x\.id===osId\?\{\.\.\.mesclarOSRelida\(x,salvo\),responsavel\}:x/);
   assert.match(legacy, /status:'unscheduled'\}\); setOrdens\(\(l\)=>l\.map\(\(x\)=>x\.id===osId\?mesclarOSRelida\(x,salvo\):x\)\);/);
-  assert.match(legacy, /setOrdens\(\(l\)=>l\.map\(\(x\)=>x\.id===os\.id\?mesclarOSRelida\(x,salvo\):x\)\);/);
+  assert.match(legacy, /setOrdens\(\(l\)=>l\.map\(\(x\)=>x\.id===os\.id\?mesclarOSRelida\(x,inicio\?\{\.\.\.salvo,iniciadaEm:inicio\}:salvo\):x\)\);/);
   assert.match(legacy, /lista\.map\(\(x\) => x\.id === salvo\.id \? mesclarOSRelida\(x, salvo\) : x\)/);
 });
 

@@ -25,9 +25,19 @@ import {
 } from "../lib/dataApiExtras";
 import { atualizarColaboradorDB } from "../lib/teamApi";
 import {
-  hidratarComplementosDB, persistirEdicaoOSDB, prepararFinalizacaoOSDB,
+  hidratarComplementosDB, persistirEdicaoOSDB, prepararFinalizacaoOSDB, lerInicioAtendimentoDB,
   uploadDocumentosCompraDB, uploadLogoEmpresaDB,
 } from "../lib/runtimeApi";
+import {
+  attendanceTimerLabel, buildStandardReportText, createContentRequestIds, createReportRequestIds, difficultyLabel, DIFFICULTY_OPTIONS,
+  emptyTechnicalBase, evidenceCountLabel, isStaleAttendance, mergeDictation, normalizeConfirmation, normalizeTechnicalBase,
+  REPORT_PROVENANCE_LABEL, reportFallbackMessage, reportProvenance, reportUsageLabel, sortTechnicianDay, STALE_ATTENDANCE_MESSAGE,
+  technicalBaseChanged, technicalBaseHasContent, technicalBaseTooLong, TECHNICAL_BASE_MAX, technicianCardModel,
+} from "../lib/fieldExecution";
+import {
+  carregarFechamentoTecnico, carregarUsoRelatorioIADB, marcarRelatorioIAUsadoDB, salvarBaseTecnicaDB, salvarConfirmacaoDB,
+} from "../lib/technicalBaseApi";
+import { gerarRelatorioIA } from "../lib/workOrderReportApi";
 import { cancelarAssinaturaDB, reativarAssinaturaDB } from "../lib/subscriptionApi";
 import MinhaConta from "../components/MinhaConta";
 import { seloBetaAtivo } from "../lib/betaFlags";
@@ -308,6 +318,8 @@ function mesclarOSRelida(anterior, salvo) {
     checklist: salvo.checklist?.length ? salvo.checklist : anterior.checklist || [],
     fotos: salvo.fotos?.length ? salvo.fotos : anterior.fotos || [],
     itens: [...itensSalvos, ...materiais],
+    /* início do atendimento (0101): o select da OS não traz a coluna; vale enquanto a OS segue em andamento */
+    iniciadaEm: salvo.iniciadaEm ?? (salvo.status === "andamento" ? anterior.iniciadaEm || null : null),
   };
 }
 
@@ -608,12 +620,13 @@ function usarReconhecimento() {
 /* Componente único de ditado. Usado em TODO campo de texto livre do ZiisTec.
    A voz complementa o campo: o texto ditado é acrescentado ao que já existe,
    nunca substitui, e continua editável à mão. */
-function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica }) {
+function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica, rotuloVoz, maxLength }) {
   const { suportado, ouvindo, processando, sucesso, erro, iniciar, parar, cancelar } = usarReconhecimento();
   const baseRef = useRef("");
   const comecar = () => {
     baseRef.current = valor.trim() ? valor.trimEnd() + " " : "";
-    iniciar((t) => onChange((baseRef.current + t).trimEnd()));
+    /* ditado só acrescenta: transcrição vazia ou falha nunca troca nem apaga o que já está escrito */
+    iniciar((t) => onChange(mergeDictation(baseRef.current, t)));
   };
   const ativo = ouvindo || processando;
   const alternar = () => (ouvindo ? parar() : processando ? cancelar() : comecar());
@@ -621,9 +634,9 @@ function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica 
   return (
     <div>
       <div className="relative">
-        <Textarea rows={rows} value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
-          className={cx(suportado && !destaque && "pr-14", ativo && "ring-2 ring-teal-600")} />
-        {suportado && !destaque && (
+        <Textarea rows={rows} value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} maxLength={maxLength}
+          className={cx(suportado && !destaque && !rotuloVoz && "pr-14", ativo && "ring-2 ring-teal-600")} />
+        {suportado && !destaque && !rotuloVoz && (
           <button type="button" onClick={alternar} aria-label={ouvindo ? "Parar ditado" : processando ? "Cancelar transcrição" : "Ditar por voz"}
             title={ouvindo ? "Parar ditado" : processando ? "Cancelar transcrição" : "Ditar por voz"}
             className={cx("absolute right-2.5 bottom-2.5 min-h-11 min-w-11 p-2.5 rounded-lg transition-colors", ring,
@@ -632,6 +645,12 @@ function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica 
           </button>
         )}
       </div>
+
+      {suportado && !destaque && rotuloVoz && (
+        <Btn size="sm" variant={ativo ? "dark" : "soft"} icon={ativo ? MicOff : Mic} className="mt-2" onClick={alternar}>
+          {ouvindo ? "Parar" : processando ? "Transcrevendo…" : rotuloVoz}
+        </Btn>
+      )}
 
       {suportado && destaque && (
         <div className="mt-3 grid gap-2 min-[390px]:grid-cols-[1fr_auto]">
@@ -1135,7 +1154,11 @@ export default function ZiisTec({ contexto }) {
   const mudarStatusOS = async (os, status) => {
     if (real) {
       const mapa={aguardando:'unscheduled',agendada:'scheduled',andamento:'in_progress',concluida:'done',cancelada:'canceled'};
-      try { const salvo=await atualizarOSDB(os.id,{status:mapa[status]||'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===os.id?mesclarOSRelida(x,salvo):x)); }
+      try {
+        const salvo=await atualizarOSDB(os.id,{status:mapa[status]||'unscheduled'});
+        const inicio=status==='andamento'?await lerInicioAtendimentoDB(os.id):null;
+        setOrdens((l)=>l.map((x)=>x.id===os.id?mesclarOSRelida(x,inicio?{...salvo,iniciadaEm:inicio}:salvo):x));
+      }
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
@@ -1156,8 +1179,8 @@ export default function ZiisTec({ contexto }) {
         await finalizarOSDB(osId,extras);
         await recarregarDados();
         aviso("Atendimento finalizado e sincronizado com financeiro/garantias.");
-      } catch(e){ aviso(mensagemErro(e)); }
-      return;
+        return true;
+      } catch(e){ aviso(mensagemErro(e)); return false; }
     }
     const atual = ordens.find((o) => o.id === osId);
     if (!atual || atual.status === "concluida" || atual.cobrancaId) { aviso("Esta ordem já foi finalizada."); return; }
@@ -1557,8 +1580,132 @@ function BuscaGlobal({ onClose, clientes, orcamentos, ordens, compras, nomeClien
   );
 }
 
+/* =============================================== Field Execution Intelligence V1 · Meu dia, tempo de atendimento e Base Técnica */
+/* Relógio só de tela: recalcula a cada minuto enquanto há atendimento em andamento. Nada é gravado e nada fecha por tempo. */
+function useAgora(ativo, passoMs = 60000) {
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ativo) return undefined;
+    setAgora(Date.now());
+    const id = setInterval(() => setAgora(Date.now()), passoMs);
+    return () => clearInterval(id);
+  }, [ativo, passoMs]);
+  return agora;
+}
+
+function TimerAtendimento({ os, agora, className }) {
+  if (os.status !== "andamento") return null;
+  return (
+    <span className={cx("inline-flex items-center gap-1.5 text-[12.5px] font-medium text-amber-800 tabular-nums", className)}>
+      <Clock className="w-3.5 h-3.5" aria-hidden="true" />{attendanceTimerLabel(os.iniciadaEm, agora)}
+    </span>
+  );
+}
+
+function AvisoAtendimentoLongo({ os, agora, className }) {
+  if (os.status !== "andamento" || !isStaleAttendance(os.iniciadaEm, agora)) return null;
+  return (
+    <p role="status" className={cx("text-[12.5px] leading-relaxed text-amber-900 bg-amber-50 ring-1 ring-amber-200/70 rounded-xl px-3 py-2", className)}>
+      {STALE_ATTENDANCE_MESSAGE}
+    </p>
+  );
+}
+
+/* Cartão do técnico em "Meu dia": cliente, local, horário, endereço, telefone, resumo e o próximo passo.
+   Nenhum valor financeiro. A prioridade da OS não existe no produto e não foi criada aqui. */
+function CartaoMeuDia({ os, nomeCliente, cliente, abrirOS, mudarStatusOS, agora }) {
+  const [abrindo, setAbrindo] = useState(false);
+  const c = cliente ? cliente(os.clienteId) : null;
+  const modelo = technicianCardModel(os, { clienteNome: nomeCliente(os.clienteId), telefone: c?.whatsapp || c?.telefone || "", resumo: resumoOS(os) });
+  const cta = modelo.cta;
+  const acionar = async () => {
+    if (abrindo) return;
+    setAbrindo(true);
+    try {
+      if (cta?.kind === "start") await mudarStatusOS(os, "andamento");
+      abrirOS(os.id);
+    } finally { setAbrindo(false); }
+  };
+  return (
+    <Linha>
+      <div className="flex items-start gap-4">
+        <button onClick={() => abrirOS(os.id)} className={cx("w-[52px] shrink-0 text-left", ring)}>
+          <p className="text-[17px] font-semibold text-slate-900 leading-none tabular-nums">{modelo.hora || "—"}</p>
+          <p className="text-[11px] text-slate-400 mt-1.5">{modelo.numero}</p>
+        </button>
+        <button onClick={() => abrirOS(os.id)} className={cx("min-w-0 flex-1 text-left", ring)}>
+          <p className="font-medium text-slate-900 truncate">{modelo.cliente}</p>
+          <p className="text-[13px] text-slate-500 line-clamp-2">{modelo.resumo}</p>
+        </button>
+        <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
+      </div>
+      <div className="pl-[68px] mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+        <Endereco valor={modelo.endereco} local={modelo.local} compacto />
+        {modelo.telefoneHref && (
+          <a href={modelo.telefoneHref} onClick={(e) => e.stopPropagation()}
+            className={cx("inline-flex items-center gap-1.5 min-h-11 sm:min-h-0 text-teal-800 hover:underline", ring)}>
+            <Phone className="w-3.5 h-3.5" aria-hidden="true" />{modelo.telefone}
+          </a>
+        )}
+      </div>
+      {modelo.emAndamento && <div className="pl-[68px] mt-2"><TimerAtendimento os={os} agora={agora} /></div>}
+      <AvisoAtendimentoLongo os={os} agora={agora} className="mt-2 ml-[68px]" />
+      {cta && (
+        <div className="pl-[68px] mt-3">
+          <Btn size="sm" variant={cta.kind === "start" ? "primary" : "dark"} icon={ArrowRight} disabled={abrindo} onClick={acionar} className="w-full sm:w-auto">
+            {abrindo ? "Abrindo…" : cta.label}
+          </Btn>
+        </div>
+      )}
+    </Linha>
+  );
+}
+
+/* Consulta da Base Técnica (interna) dentro da OS. Somente leitura: proprietário e técnico da OS; o banco decide quem lê. */
+function BaseTecnicaPainel({ os, real, recarregar }) {
+  const [dados, setDados] = useState(null);
+  const [uso, setUso] = useState(null);
+  useEffect(() => {
+    if (!real) return undefined;
+    let vivo = true;
+    Promise.all([carregarFechamentoTecnico(os.id).catch(() => null), carregarUsoRelatorioIADB(os.id).catch(() => null)])
+      .then(([r, u]) => { if (vivo) { setDados(r); setUso(u); } });
+    return () => { vivo = false; };
+  }, [real, os.id, os.status, recarregar]);
+  if (!real || !dados?.available) return null;
+  const { base, confirmation } = dados;
+  const temConfirmacao = Boolean(confirmation.name || confirmation.absent);
+  if (!technicalBaseHasContent(base) && !temConfirmacao) return null;
+  const linhas = [
+    ["Causa encontrada", base.cause],
+    ["Solução aplicada", base.solution],
+    ["Nível de dificuldade", difficultyLabel(base.difficulty)],
+    ["Observação técnica final", base.learning],
+  ].filter(([, texto]) => texto);
+  return (
+    <section>
+      <Rotulo acao={<span className="text-[12px] text-slate-400">Uso interno</span>}>Base Técnica</Rotulo>
+      <Panel className="p-5 space-y-3">
+        {linhas.map(([titulo, texto]) => (
+          <div key={titulo}>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-0.5">{titulo}</p>
+            <p className="text-[14px] text-slate-700 whitespace-pre-line leading-relaxed">{texto}</p>
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-slate-600">
+          <span>Necessita retorno: <strong className="font-medium text-slate-800">{os.precisaRetorno ? "Sim" : "Não"}</strong></span>
+          <span>{evidenceCountLabel(os.fotos?.length)}</span>
+          {temConfirmacao && <span>Recebido por: <strong className="font-medium text-slate-800">{confirmation.absent ? "responsável ausente" : confirmation.name}</strong></span>}
+        </div>
+        {uso?.lastUsedAt && <p className="text-[12px] text-slate-400">Relatório do cliente: {REPORT_PROVENANCE_LABEL}{uso.lastUsedEdited ? " · editado depois" : ""}.</p>}
+        <p className="text-[12px] text-slate-400 leading-relaxed">Esta seção é interna: não aparece para o cliente nem nos documentos enviados.</p>
+      </Panel>
+    </section>
+  );
+}
+
 /* =============================================================== Dashboard */
-function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso, produtos, abrirV2 }) {
+function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarStatusOS, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso, produtos, abrirV2 }) {
   const verFinanceiro = permitido("financeiro");
   const [revisoesInicio, setRevisoesInicio] = useState([]);
   useEffect(() => {
@@ -1569,6 +1716,9 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
   }, [real, empresaId, papel]);
   const hojeOS = ordens.filter((o) => o.data === HOJE && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
   const proximas = ordens.filter((o) => o.data > HOJE && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 3);
+  /* Meu dia (técnico): 1 em andamento, 2 horário marcado, 3 demais atribuídas. O que já está em andamento aparece mesmo de outro dia. */
+  const meuDia = sortTechnicianDay(ordens.filter((o) => o.status === "andamento" || o.data === HOJE));
+  const agora = useAgora(meuDia.some((o) => o.status === "andamento"));
 
   const mes = mesRef(HOJE);
   const noMes = (l) => mesRef(l.pago ? l.pagoEm : l.vencimento) === mes;
@@ -1654,7 +1804,10 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
               {verFinanceiro ? "O que tenho para hoje" : "Meus atendimentos de hoje"}
             </Rotulo>
             <Panel className="divide-y divide-slate-100 overflow-hidden">
-              {hojeOS.length === 0 ? <Empty icon={CalendarDays} title="Nenhum atendimento hoje" sub="Aproveite para colocar os orçamentos em dia." />
+              {(verFinanceiro ? hojeOS : meuDia).length === 0 ? <Empty icon={CalendarDays} title="Nenhum atendimento hoje" sub="Aproveite para colocar os orçamentos em dia." />
+                : !verFinanceiro ? meuDia.map((os) => (
+                  <CartaoMeuDia key={os.id} os={os} nomeCliente={nomeCliente} cliente={cliente} abrirOS={abrirOS} mudarStatusOS={mudarStatusOS} agora={agora} />
+                ))
                 : hojeOS.map((os) => (
                   <Linha key={os.id}>
                     <div className="flex items-start gap-4">
@@ -3506,6 +3659,7 @@ function OrdensServico(p) {
   const soMinhas = !permitido("todasOS");
   const [filtro, setFiltro] = useState("dia");
   const [criando, setCriando] = useState(false);
+  const agora = useAgora(ordens.some((o) => o.status === "andamento"));
 
   if (osAberta) {
     const os = ordens.find((o) => o.id === osAberta);
@@ -3513,7 +3667,9 @@ function OrdensServico(p) {
   }
 
   const viva = (o) => o.status !== "concluida" && o.status !== "cancelada";
-  const hoje = ordens.filter((o) => viva(o) && o.data === HOJE).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const hojeBase = ordens.filter((o) => viva(o) && o.data === HOJE);
+  /* técnico: em andamento primeiro, depois horário marcado, depois as demais atribuídas */
+  const hoje = soMinhas ? sortTechnicianDay(hojeBase) : hojeBase.sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
   const proximos = ordens.filter((o) => viva(o) && o.data > HOJE).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
   const atrasadas = ordens.filter((o) => viva(o) && o.data && o.data < HOJE);
   const semData = ordens.filter((o) => viva(o) && !o.data);
@@ -3532,6 +3688,8 @@ function OrdensServico(p) {
             </div>
             <p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
             <p className="text-[12px] text-slate-400 mt-1">{os.data ? `${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : "Sem agendamento"}{empresa.temEquipe ? ` · ${nomeResponsavelOS(os, equipe, usuarioAtual)}` : ""}</p>
+            <TimerAtendimento os={os} agora={agora} className="mt-1" />
+            <AvisoAtendimentoLongo os={os} agora={agora} className="mt-2" />
             <div className="mt-2.5">
               <Trilha etapas={[
                 { label: orc ? orc.numero : "OS direta", feito: true },
@@ -3770,6 +3928,7 @@ function OSDetalhe(p) {
   const [agendando, setAgendando] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
   const [comprovanteAberto, setComprovanteAberto] = useState(false);
+  const agora = useAgora(os.status === "andamento");
   const orc = orcamentos.find((o) => o.id === os.orcamentoId);
   const cobranca = lancamentos.find((l) => l.origemTipo === "os" && l.origemId === os.id);
   const gar = garantias.filter((g) => g.osId === os.id);
@@ -3830,6 +3989,7 @@ function OSDetalhe(p) {
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{os.numero}</h1>
           <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
+          <TimerAtendimento os={os} agora={agora} />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {acaoPrincipal && <Btn icon={acaoPrincipal.icon} onClick={acaoPrincipal.fn}>{acaoPrincipal.label}</Btn>}
@@ -3845,6 +4005,8 @@ function OSDetalhe(p) {
           )}
         </div>
       </div>
+
+      <AvisoAtendimentoLongo os={os} agora={agora} className="mb-5" />
 
       <Panel className="p-4 sm:p-5 mb-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -4070,6 +4232,8 @@ function OSDetalhe(p) {
             </section>
           )}
 
+          <BaseTecnicaPainel os={os} real={real} recarregar={finalizando} />
+
           <section>
             <Rotulo acao={os.relato ? <span className="text-[12px] text-slate-400">salvo automaticamente</span> : null}>O que foi feito</Rotulo>
             <Panel className="p-5">
@@ -4233,11 +4397,15 @@ function OSDetalhe(p) {
               if(real) await marcarRetornoOSV2DB({workOrderId:os.id,reason:extras.retornoMotivo,materialNeeded:extras.retornoMaterial,notes:extras.retornoObs,priority:extras.retornoPrioridade,expectedReturnDate:extras.retornoPrevisao,requestId:extras.retornoRequestId});
               setOrdens(l=>l.map(x=>x.id===os.id?{...x,precisaRetorno:true,pendencia:extras.pendencia||x.pendencia,historico:[...(x.historico||[]),{id:uid(),quando:HOJE,texto:`Precisa retornar · ${extras.retornoMotivo}` }]}:x));
               setFinalizando(false);
-            }catch(e){aviso(mensagemErro(e));}
-            return;
+              return true;
+            }catch(e){aviso(mensagemErro(e)); return false;}
           }
-          finalizarOS(os.id, extras); setFinalizando(false);
-        }} jaConcluida={os.status === "concluida"} verValores={verValores} />}
+          /* a conclusão só fecha o fechamento quando deu certo; se falhar, o texto continua na tela para tentar de novo */
+          const concluiu = await finalizarOS(os.id, extras);
+          if (concluiu === false) return false;
+          setFinalizando(false);
+          return true;
+        }} jaConcluida={os.status === "concluida"} verValores={verValores} real={real} />}
     </div>
   );
 }
@@ -4267,8 +4435,8 @@ function BlocoRelato({ valor, onChange, placeholder, destaque = true, rows = 5 }
 }
 
 /* --------------------------------------------------- finalizar atendimento */
-function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servicos = [], produtos, jaConcluida, verValores = true }) {
-  const [etapa, setEtapa] = useState(0);
+function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servicos = [], produtos, jaConcluida, verValores = true, real = false, fechamentoInicial, etapaInicial = 0 }) {
+  const [etapa, setEtapa] = useState(etapaInicial);
   const [relato, setRelato] = useState(os.relato || "");
   const [materiais, setMateriais] = useState([]);
   const [temAdicional, setTemAdicional] = useState((os.adicionais || []).length > 0 ? true : null);
@@ -4291,7 +4459,123 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
   const { dirty: registroAlterado } = useFormDirty({ relato, materiais, temAdicional, adicionais, custosExtras, temPendencia, pendencia, resultado,
     retornoMotivo, retornoMaterial, retornoObs, retornoPrioridade, retornoPrevisao, fotos, garantiaOverrides });
 
-  const anexarFotos = (ev, categoria) => {
+  /* ---- Field Execution Intelligence V1: Base Técnica (interna), relatório do cliente e confirmação de recebimento ----
+     O banco decide quem pode gravar. Sem a migration 0111 o fechamento segue exatamente como antes (fechamento = "indisponivel"). */
+  const [fechamento, setFechamento] = useState(fechamentoInicial ?? (real && !jaConcluida ? "carregando" : "indisponivel"));
+  const [base, setBase] = useState(emptyTechnicalBase);
+  const [noBanco, setNoBanco] = useState({ base: emptyTechnicalBase(), recebidoPor: "", ausente: false });
+  const [recebidoPor, setRecebidoPor] = useState("");
+  const [ausente, setAusente] = useState(false);
+  const [usoIA, setUsoIA] = useState(null);
+  const [idsBase] = useState(() => createContentRequestIds());
+  const [idsConfirmacao] = useState(() => createContentRequestIds());
+  const [idsRelatorio] = useState(() => createReportRequestIds());
+  const [iaGerada, setIaGerada] = useState(null);
+  const [relatoAntes, setRelatoAntes] = useState(null);
+  const [gerando, setGerando] = useState(false);
+  const [avisoIA, setAvisoIA] = useState("");
+  const [erroIA, setErroIA] = useState("");
+  const [erroFechamento, setErroFechamento] = useState("");
+  const confirmacao = normalizeConfirmation({ name: recebidoPor, absent: ausente });
+  const fechamentoAlterado = technicalBaseChanged(base, noBanco.base) || (recebidoPor.trim() !== noBanco.recebidoPor) || ausente !== noBanco.ausente;
+  const alterado = registroAlterado || fechamentoAlterado;
+  useFormDraft({ formType: "base-tecnica", enabled: real && !jaConcluida,
+    value: { workOrderId: os.id, cause: base.cause, solution: base.solution, difficulty: base.difficulty, learning: base.learning, relato }, dirty: alterado,
+    onRestore: (d) => {
+      if (d.workOrderId !== os.id) return;
+      setBase((atual) => normalizeTechnicalBase({ cause: d.cause ?? atual.cause, solution: d.solution ?? atual.solution, difficulty: d.difficulty ?? atual.difficulty, learning: d.learning ?? atual.learning }));
+      if (d.relato) setRelato(d.relato);
+    } });
+  useEffect(() => {
+    if (!real || jaConcluida) return undefined;
+    let vivo = true;
+    Promise.all([carregarFechamentoTecnico(os.id), carregarUsoRelatorioIADB(os.id).catch(() => null)])
+      .then(([r, uso]) => {
+        if (!vivo) return;
+        if (!r.available) { setFechamento("indisponivel"); return; }
+        const confirmada = r.confirmationSaved ? r.confirmation : { name: "", absent: false };
+        setNoBanco({ base: r.baseSaved ? r.base : emptyTechnicalBase(), recebidoPor: confirmada.name, ausente: confirmada.absent });
+        /* o que o técnico já digitou (ou o rascunho restaurado) vale mais que o que veio do banco */
+        setBase((atual) => (technicalBaseHasContent(atual) ? atual : r.base));
+        setRecebidoPor((atual) => atual || confirmada.name);
+        setAusente((atual) => atual || confirmada.absent);
+        setUsoIA(uso);
+        setFechamento("disponivel");
+      })
+      .catch(() => { if (vivo) setFechamento("disponivel"); });
+    return () => { vivo = false; };
+  }, [real, os.id, jaConcluida]);
+
+  const mudarBase = (campo, valor) => setBase((atual) => ({ ...atual, [campo]: campo === "difficulty" ? valor : String(valor).slice(0, TECHNICAL_BASE_MAX) }));
+
+  /* Grava Base Técnica e confirmação antes de qualquer passo que dependa delas (relatório com IA, conclusão, salvar sem concluir).
+     Mesmo conteúdo reaproveita o mesmo identificador (retry não duplica); falha devolve a mensagem e a tela continua como está. */
+  const salvarFechamento = async () => {
+    if (fechamento !== "disponivel") return "";
+    if (technicalBaseTooLong(base)) return `Cada campo da Base Técnica aceita até ${TECHNICAL_BASE_MAX} caracteres.`;
+    try {
+      const limpa = normalizeTechnicalBase(base);
+      let proximo = noBanco;
+      if (technicalBaseChanged(limpa, noBanco.base)) {
+        const r = await salvarBaseTecnicaDB({ workOrderId: os.id, base: limpa, requestId: idsBase.idFor(limpa) });
+        if (r.unavailable) { setFechamento("indisponivel"); return ""; }
+        proximo = { ...proximo, base: limpa };
+      }
+      if (confirmacao.ok && (confirmacao.absent !== proximo.ausente || confirmacao.name !== proximo.recebidoPor)) {
+        const r = await salvarConfirmacaoDB({ workOrderId: os.id, name: confirmacao.name, absent: confirmacao.absent, requestId: idsConfirmacao.idFor({ name: confirmacao.name, absent: confirmacao.absent }) });
+        if (r.unavailable) { setFechamento("indisponivel"); return ""; }
+        proximo = { ...proximo, recebidoPor: confirmacao.name, ausente: confirmacao.absent };
+      }
+      setNoBanco(proximo);
+      return "";
+    } catch (e) {
+      return mensagemErro(e) || "Não foi possível salvar agora. Seus dados continuam aqui; toque para tentar de novo.";
+    }
+  };
+
+  const aplicarRelatorio = (texto, origem, requestId = null) => {
+    setRelatoAntes((anterior) => (anterior === null ? relato : anterior));
+    setRelato(texto);
+    setIaGerada({ source: origem, text: texto, requestId });
+  };
+  const usarTextoPadrao = () => {
+    setAvisoIA(""); setErroIA("");
+    aplicarRelatorio(buildStandardReportText(os, { base, extraMaterials: materiais, returnNeeded: resultado === "retorno", returnReason: retornoMotivo }), "standard");
+  };
+  const descartarGerado = () => {
+    setRelato(relatoAntes ?? ""); setRelatoAntes(null); setIaGerada(null); setAvisoIA(""); setErroIA("");
+  };
+  const gerarRelatorio = async () => {
+    if (gerando) return;
+    setGerando(true); setAvisoIA(""); setErroIA("");
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroIA(falha); return; }
+      let resposta;
+      const requestId = idsRelatorio.current();
+      try {
+        resposta = await gerarRelatorioIA({ workOrderId: os.id, requestId, materiais });
+      } catch (e) {
+        /* sem resposta do servidor (rede) ou geração em andamento: mantém o identificador para o retry não gastar outra vaga */
+        if (e.kind === "network" || e.kind === "busy") { setErroIA(e.kind === "network" ? reportFallbackMessage("network") : e.message); return; }
+        idsRelatorio.settle();
+        if (e.kind === "unavailable") { aplicarRelatorio(buildStandardReportText(os, { base, extraMaterials: materiais }), "standard"); setAvisoIA("O relatório com IA ainda não está habilitado neste ambiente. Montamos um texto padrão com os fatos confirmados da OS."); return; }
+        setErroIA(e.message || "Não foi possível gerar o relatório agora.");
+        return;
+      }
+      idsRelatorio.settle();
+      if (resposta.usage) setUsoIA(resposta.usage);
+      aplicarRelatorio(resposta.text, resposta.source === "ai" ? "ai" : "standard", resposta.source === "ai" ? requestId : null);
+      if (resposta.source === "fallback") setAvisoIA(reportFallbackMessage(resposta.reason));
+    } finally { setGerando(false); }
+  };
+  /* auditoria: qual geração virou o relato salvo e se foi editada depois; nunca bloqueia a conclusão */
+  const registrarUsoIA = async () => {
+    if (iaGerada?.source !== "ai" || !iaGerada.requestId || !relato.trim()) return;
+    await marcarRelatorioIAUsadoDB({ workOrderId: os.id, requestId: iaGerada.requestId, finalText: relato });
+  };
+
+  const anexarFotos =(ev, categoria) => {
     const arquivos = Array.from(ev.target.files || []);
     setFotos((f) => [...f, ...arquivos.map((a) => ({ id: uid(), nome: a.name, categoria, url: URL.createObjectURL(a), arquivo: a }))]);
   };
@@ -4373,6 +4657,16 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
     );
   }
 
+  /* consulta rápida ao banco antes de montar as etapas: evita trocar o número de etapas com o técnico no meio do fluxo */
+  if (fechamento === "carregando") {
+    return (
+      <Modal open onClose={onClose} wide title="Preparando o fechamento" sub={os.numero}
+        footer={<Btn variant="ghost" onClick={onClose}>Cancelar</Btn>}>
+        <p className="flex items-center gap-2 text-[14px] text-slate-500"><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />Carregando os dados do atendimento…</p>
+      </Modal>
+    );
+  }
+
   const SimNao = ({ valor, onChange, sim = "Sim", nao = "Não" }) => (
     <div className="flex gap-2">
       {[[false, nao], [true, sim]].map(([v, label]) => (
@@ -4385,7 +4679,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
     </div>
   );
 
-  const etapas = [
+  const etapasLegado = [
     {
       titulo: "O que foi feito?",
       sub: "Fale naturalmente. Você revisa antes de salvar.",
@@ -4623,12 +4917,153 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
     },
   ];
 
+  /* ---- Fluxo com Base Técnica (0111 disponível): Diagnóstico → Materiais → Evidências → registros → Relatório → Confirmação ----
+     Sem a migration, `etapasLegado` segue como era. A conclusão continua sendo a mesma chamada atômica de sempre. */
+  const novoFluxo = fechamento === "disponivel";
+  const etapaBase = {
+    titulo: "Diagnóstico",
+    fase: "Diagnóstico",
+    sub: "Uso interno da empresa. Não aparece para o cliente.",
+    pular: null,
+    conteudo: (
+      <div className="space-y-5">
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Causa encontrada</p>
+          <CampoVoz rows={3} valor={base.cause} onChange={(v) => mudarBase("cause", v)} placeholder="Ex.: fonte da fechadura queimada" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Solução aplicada</p>
+          <CampoVoz rows={3} valor={base.solution} onChange={(v) => mudarBase("solution", v)} placeholder="Ex.: substituí a fonte e testei a abertura" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Nível de dificuldade</p>
+          <div className="grid grid-cols-3 gap-2" role="group" aria-label="Nível de dificuldade">
+            {DIFFICULTY_OPTIONS.map((opcao) => (
+              <button key={opcao.value} type="button" aria-pressed={base.difficulty === opcao.value}
+                onClick={() => mudarBase("difficulty", base.difficulty === opcao.value ? "" : opcao.value)}
+                className={cx("min-h-11 py-3 rounded-xl text-[14px] font-medium transition-colors", ring,
+                  base.difficulty === opcao.value ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+                {opcao.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Necessita retorno?</p>
+          <SimNao valor={resultado === "retorno"} onChange={(v) => setResultado(v ? "retorno" : (resultado === "retorno" ? "finalizado" : resultado))} />
+          {resultado === "retorno" && (
+            <p className="text-[12.5px] text-slate-500 mt-2 leading-relaxed">O motivo, o material necessário e a previsão do retorno você informa na última etapa.</p>
+          )}
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Observação técnica final</p>
+          <CampoVoz rows={3} valor={base.learning} onChange={(v) => mudarBase("learning", v)} placeholder="Algo útil para a próxima vez neste local ou equipamento" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        {fechamentoAlterado && <p className="text-[12px] text-slate-400">Será salva ao gerar o relatório, concluir ou salvar o atendimento.</p>}
+      </div>
+    ),
+  };
+  const etapaEvidencias = {
+    titulo: "Evidências do atendimento",
+    fase: "Evidências",
+    sub: "Opcional. Ajuda em garantia e em qualquer dúvida futura do cliente.",
+    pular: "Sem fotos",
+    conteudo: (
+      <>
+        <p className="text-[13px] font-medium text-slate-600 mb-3">{evidenceCountLabel(fotos.length)}</p>
+        <FotosDoAtendimento fotos={fotos} anexar={anexarFotos} />
+      </>
+    ),
+  };
+  const proveniencia = reportProvenance({ source: iaGerada?.source === "ai" ? "ai" : null, generatedText: iaGerada?.text, finalText: relato });
+  const iaEsgotada = Boolean(usoIA) && Number(usoIA.remaining) <= 0;
+  const etapaRelatorio = {
+    titulo: "Relatório do atendimento",
+    fase: "Relatório",
+    sub: "Texto para o cliente. Revise e edite antes de seguir.",
+    pular: null,
+    conteudo: (
+      <div className="space-y-3">
+        <CampoVoz rows={8} valor={relato} onChange={setRelato} placeholder="Descreva o que foi feito no atendimento" rotuloVoz="Ditar" />
+        {proveniencia.label && (
+          <p className="inline-flex items-center gap-1.5 text-[12px] text-slate-500"><Sparkles className="w-3.5 h-3.5" aria-hidden="true" />{proveniencia.label}</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Btn icon={gerando ? Loader2 : Sparkles} disabled={gerando || resultado !== "finalizado" || iaEsgotada} onClick={gerarRelatorio}>
+            {gerando ? "Gerando…" : iaGerada ? "Gerar novamente com IA" : "Gerar relatório com IA"}
+          </Btn>
+          <Btn variant="soft" disabled={gerando} onClick={usarTextoPadrao}>Montar texto padrão</Btn>
+          {relatoAntes !== null && <Btn variant="ghost" disabled={gerando} onClick={descartarGerado}>Descartar texto gerado</Btn>}
+        </div>
+        {usoIA && <p className="text-[12px] text-slate-500">{reportUsageLabel(usoIA)}</p>}
+        {resultado !== "finalizado" && (
+          <p className="text-[12.5px] text-slate-500 leading-relaxed">Com retorno previsto ou sem concluir, o relatório final do cliente é feito quando o serviço for concluído. O texto padrão e o ditado continuam disponíveis.</p>
+        )}
+        {avisoIA && <p role="status" className="text-[12.5px] text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-xl px-3 py-2 leading-relaxed">{avisoIA}</p>}
+        {erroIA && <p role="alert" className="text-[12.5px] text-rose-700 leading-relaxed">{erroIA}</p>}
+        <p className="text-[12px] text-slate-400 leading-relaxed">
+          A IA só organiza o que está confirmado nesta OS: serviço, causa, solução, materiais e retorno. Ela não vê valores, custos nem as observações internas.
+          O relatório é opcional: a OS pode ser concluída sem ele.
+        </p>
+      </div>
+    ),
+  };
+  const blocoConfirmacao = (
+    <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-3">
+      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em]">Confirmação do atendimento</p>
+      <div>
+        <label htmlFor="recebido-por" className="block text-[13px] font-medium text-slate-600 mb-1.5">Nome de quem recebeu o serviço</label>
+        <Input id="recebido-por" value={recebidoPor} disabled={ausente} autoComplete="off" maxLength={120} placeholder="Ex.: Maria Souza"
+          onChange={(e) => setRecebidoPor(e.target.value.slice(0, 120))} />
+      </div>
+      <button type="button" aria-pressed={ausente} onClick={() => { setAusente(!ausente); setRecebidoPor(""); }}
+        className={cx("w-full min-h-11 py-3 rounded-xl text-[14px] font-medium transition-colors", ring,
+          ausente ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+        Responsável ausente
+      </button>
+      <p className="text-[12px] text-slate-400">{evidenceCountLabel(fotos.length)}.</p>
+    </div>
+  );
+  const etapaConfirmacao = { ...etapasLegado[5], fase: "Confirmação", conteudo: <div className="space-y-4">{blocoConfirmacao}{etapasLegado[5].conteudo}</div> };
+  const etapas = novoFluxo
+    ? [etapaBase, { ...etapasLegado[1], fase: "Diagnóstico" }, etapaEvidencias, { ...etapasLegado[3], fase: "Registro" }, { ...etapasLegado[4], fase: "Registro" }, etapaRelatorio, etapaConfirmacao]
+    : etapasLegado;
+
   const atual = etapas[etapa];
   const ultima = etapa === etapas.length - 1;
 
+  /* Concluir: grava Base Técnica e confirmação primeiro (o técnico não consegue gravar depois que a OS fecha) e só então chama a
+     mesma conclusão atômica de sempre. Falha de rede em qualquer ponto mantém tudo na tela e permite tentar de novo. */
+  const concluir = async () => {
+    if (concluindo) return;
+    setErroFechamento("");
+    if (resultado === "retorno" && !retornoMotivo.trim()) { setErroFechamento("Informe o motivo do retorno para salvar."); return; }
+    if (novoFluxo && resultado === "finalizado" && !confirmacao.ok) { setErroFechamento(confirmacao.error); return; }
+    setConcluindo(true);
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroFechamento(falha); return; }
+      await registrarUsoIA();
+      const ok = await onFinalizar(extras);
+      if (ok === false) setErroFechamento("Não foi possível concluir agora. Seus dados continuam aqui; toque para tentar de novo. Se já concluiu antes, feche e confira a OS.");
+    } finally { setConcluindo(false); }
+  };
+  const salvarSemConcluir = async () => {
+    if (concluindo) return;
+    setErroFechamento("");
+    setConcluindo(true);
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroFechamento(falha); return; }
+      await registrarUsoIA();
+      onSalvarParcial({ relato, fotos, pendencia: temPendencia ? pendencia : "" });
+      onClose();
+    } finally { setConcluindo(false); }
+  };
+
   return (
     <>
-      <Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title={atual.titulo} sub={atual.sub}
+      <Modal open onClose={onClose} dirty={alterado} busy={concluindo || gerando} wide title={atual.titulo} sub={atual.sub}
         footer={(requestClose) =>
           <div className="flex items-center justify-between gap-3 w-full">
             <Btn variant="ghost" disabled={concluindo} onClick={() => { if (!concluindo) etapa === 0 ? requestClose() : setEtapa(etapa - 1); }}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
@@ -4636,11 +5071,10 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
               {atual.pular && <Btn variant="ghost" onClick={() => setEtapa(etapa + 1)}>{atual.pular}</Btn>}
               {ultima
                 ? (resultado === "naoFinalizado"
-                    ? <Btn variant="soft" icon={Check} onClick={() => { onSalvarParcial({ relato, fotos, pendencia: temPendencia ? pendencia : "" }); onClose(); }}>
-                        Salvar sem concluir
+                    ? <Btn variant="soft" icon={Check} disabled={concluindo} onClick={salvarSemConcluir}>
+                        {concluindo ? "Salvando…" : "Salvar sem concluir"}
                       </Btn>
-                    : <Btn icon={Check} disabled={concluindo}
-                        onClick={async () => { if (concluindo) return; setConcluindo(true); try { await onFinalizar(extras); } finally { setConcluindo(false); } }}>
+                    : <Btn icon={Check} disabled={concluindo} onClick={concluir}>
                         {concluindo ? "Concluindo…" : resultado === "retorno" ? "Salvar retorno sem concluir" : "Concluir atendimento"}
                       </Btn>)
                 : <Btn icon={ArrowRight} disabled={!!atual.bloqueio} onClick={() => setEtapa(etapa + 1)}>Continuar</Btn>}
@@ -4652,8 +5086,10 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
             <span key={i} className={cx("h-1 flex-1 rounded-full", i <= etapa ? "bg-teal-600" : "bg-slate-200")} aria-hidden="true" />
           ))}
         </div>
+        {novoFluxo && atual.fase && <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Etapa {etapa + 1} de {etapas.length} · {atual.fase}</p>}
         {atual.conteudo}
         {atual.bloqueio && <p className="text-[12.5px] text-slate-400">{atual.bloqueio}</p>}
+        {erroFechamento && <p role="alert" className="text-[13px] text-rose-700 bg-rose-50 ring-1 ring-rose-200/70 rounded-xl px-3.5 py-3 leading-relaxed">{erroFechamento}</p>}
       </Modal>
 
       {addProduto && (
@@ -6543,4 +6979,5 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
 
 /* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
 
-export { OSDetalhe, NovaOS, OrdensServico, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado, mesclarOSRelida };
+export { OSDetalhe, NovaOS, OrdensServico, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado, mesclarOSRelida,
+  Inicio, CartaoMeuDia, TimerAtendimento, AvisoAtendimentoLongo, BaseTecnicaPainel, FinalizarAtendimento, CampoVoz };

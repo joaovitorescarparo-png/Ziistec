@@ -193,7 +193,7 @@ test('legado: Modal guarda fundo e X; formulários críticos informam alteraçã
     '<Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCliente} title={form.id ? "Editar cliente" : "Novo cliente"}',
     '<Modal open onClose={onClose} dirty={dirty} busy={criando} wide title="Nova ordem de serviço"',
     '<Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title="Editar registro do atendimento"',
-    '<Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title={atual.titulo}',
+    '<Modal open onClose={onClose} dirty={alterado} busy={concluindo || gerando} wide title={atual.titulo}',
     '<Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} busy={salvandoLancamento} title="Novo lançamento"',
     '<Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCompra} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}',
   ]) assert.ok(legacy.includes(marker), `formulário ligado ao guard: ${marker}`);

@@ -18,8 +18,10 @@ const FIELDS = Object.freeze({
   'cliente-novo': ['tipo', 'nome', 'fantasia', 'responsavel', 'telefone', 'whatsapp', 'endereco', 'obs'],
   'os-nova': ['clienteId', 'orcamentoId', 'descricaoLivre', 'local', 'localServico', 'localId', 'data', 'hora',
     'responsavel', 'responsavelId', 'obs', 'requestId'],
+  // Field Execution Intelligence V1: Base Técnica e texto do relatório do fechamento. Sem nome de quem recebeu, fotos ou valores.
+  'base-tecnica': ['workOrderId', 'cause', 'solution', 'difficulty', 'learning', 'relato'],
 });
-const ID_FIELDS = new Set(['clienteId', 'orcamentoId', 'localId', 'responsavelId', 'requestId']);
+const ID_FIELDS = new Set(['clienteId', 'orcamentoId', 'localId', 'responsavelId', 'requestId', 'workOrderId']);
 
 let scope = null;
 
