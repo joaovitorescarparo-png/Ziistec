@@ -112,6 +112,7 @@ regressions=(
   supabase/tests/v2_security_v11_invite_email_throttle_rollback.sql
   supabase/tests/v2_field_execution_intelligence_rollback.sql
   supabase/tests/v2_release_hardening_v12_rollback.sql
+  supabase/tests/v2_first_customers_golden_path_rollback.sql
 )
 
 # Falha de regressão também vira anotação do GitHub (legível sem baixar o log do job).
