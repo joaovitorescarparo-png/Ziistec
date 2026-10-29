@@ -68,16 +68,20 @@ Não removido de propósito: migrations (histórico), codemods Round 3.x (arqueo
 |---|---|---|---|
 | B1 | **P2** | "Hoje" em UTC: entre 21h e 24h (Brasil) lançamentos, orçamentos, compras e recibos recebiam a data do dia seguinte; validade e vencimento derivados eram deslocados | **Corrigido** com teste em `TZ=America/Sao_Paulo` |
 | B2 | P3 | Moeda com entrada não numérica aparecia como "R$ NaN" | **Corrigido** (R$ 0,00) |
-| B3 | P3 | Shell: `HOJE` é calculado uma vez, na carga do módulo; app aberto atravessando a meia-noite mostra o dia anterior até recarregar | Documentado, não corrigido (toca o legado compilado) |
-| B4 | P3 | Somar meses a uma data nos dias 29–31 transborda (31/jan + 1 mês = 3/mar), como no `Date` do JS | Preservado e testado; regra de negócio a decidir |
+| B3 | P3 | Shell: `HOJE` era calculado uma vez, na carga do módulo; app aberto atravessando a meia-noite mostrava o dia anterior (vencimento, "vence hoje", data de pagamento) até recarregar | **Corrigido na V1.1** (ver §6) |
+| B4 | P3 | Somar meses a uma data nos dias 29–31 transbordava (31/jan + 1 mês = 3/mar), como no `Date` do JS; o banco já limitava ao último dia (`interval '1 month'`) | **Corrigido na V1.1** (ver §6) |
 
-P0: 0 · P1: 0 · P2: 1 · P3: 3. Risco não reproduzido (não contado como bug): conflito do `speech-patch` (D8).
+P0: 0 · P1: 0 · P2: 1 · P3: 3 (encontrados) · **4 corrigidos, 0 em aberto**. Risco não reproduzido (não contado como bug): conflito do `speech-patch` (D8).
 
 Varredura de duplo clique: nenhum handler de escrita sem trava em `src/screens/v2` (os 7 handlers analisados têm guarda; `FinanceV2` é só leitura e o botão de IA desabilita durante a chamada). Sem laços com `await` em consulta (N+1), sem polling (o único `setInterval` é o relógio da interface).
 
 ## 6. Bugs corrigidos
 
 B1 e B2. Evidência: `consolidation_v1_dates.test.mjs` (7) e `consolidation_v1_money.test.mjs` (3), ambos escritos antes da troca e verdes depois.
+
+**B3 (V1.1).** Causa: `const HOJE = iso(new Date())` no escopo do módulo do shell. Correção: as 81 regras que liam `HOJE` agora leem `hojeISO()` (`src/lib/dates.js`, dia local, sem UTC) **na hora em que rodam**; `HOJE_SEED` sobrou só para os dados de demonstração e para nada mais. A tela não ganha timer: o hook `src/hooks/useDiaLocal.js` re-renderiza o shell quando o app volta a ficar visível, recebe foco ou reaparece (`visibilitychange`, `focus`, `pageshow`), então a aba que dormiu atravessando a meia-noite mostra o dia novo ao ser usada. A mesma classe de bug apareceu em dois formulários V2 (`MaintenanceContractsV2`, `ManualWarrantyV2`, datas iniciais fixadas na carga do módulo); passaram a `formVazio()`, lido a cada abertura. Evidência: `consolidation_v11_dates.test.mjs` — relógio simulado cruzando a meia-noite (antes do conserto o status continuava "A receber"/"vence hoje"), regras reais extraídas do shell, varredura por AST de leitura de relógio no escopo de módulo (só `HOJE_SEED` permitido) e o hook exercitado com React falso.
+
+**B4 (V1.1).** Mapa dos usos de soma de meses em `src/`: shell (`addMeses` local, duas chamadas de garantia: `ate` da garantia ao concluir OS e a garantia do fabricante), `MaintenanceContractsV2` (próxima visita em 1 mês) e `ManualWarrantyV2` (garantia do produto, padrão de 12 meses). Todos passam por `addMesesISO`, que fixa o último dia válido do mês de destino: 31/01+1 → 28/02 (29/02 em bissexto), 31/03+1 → 30/04, 30/11+3 → último dia de fevereiro. `moverMes` do shell (navegação do calendário) ajusta o dia para 1 antes de somar o mês e **não** é regra de negócio; ficou como estava e é o único `.setMonth(` restante. Sem mudança de SQL: o banco já limitava ao último dia. Evidência: tabela de casos em três fusos, anos bissextos e propriedade sobre seis anos em `consolidation_v11_dates.test.mjs`; guarda para `setMonth` fora da navegação.
 
 ## 7. Decisões preservadas
 
@@ -89,8 +93,8 @@ B1 e B2. Evidência: `consolidation_v1_dates.test.mjs` (7) e `consolidation_v1_m
 
 ## 8. Dívidas técnicas
 
-1. Escolher a tela principal de Compras, Configurações e Orçamentos (D6, D7) depois da homologação H0 e então apagar a outra.
-2. `speech-patch.js` × `useSpeechInput` (D8): testar em aparelho antes de mexer.
+1. Escolher a tela principal de Compras, Configurações e Orçamentos (D6, D7) depois da homologação H0 e então apagar a outra. **Registrado, não consolidado nem apagado na V1.1:** `PurchasesV2`, `SettingsV2` e `QuotesManagementV2` (a escolha entre shell e V2 depende de H0 e de teste humano).
+2. `speech-patch.js` × `useSpeechInput` (D8): testar em aparelho antes de mexer. Registrados e **não tocados** na V1.1, junto com ele: geração de PDFs, a autenticação/cota repetida da IA no servidor (item 3) e o legado grande (item 6).
 3. Extrair a autenticação/cota repetida de `api/ai.js` e `api/finance-ai.js`, atualizando os dois gates textuais no mesmo commit.
 4. `check` e `n` repetidos (D5) e `select('*')` em ~26 pontos de `src/lib` (a segurança vem de RLS/projeções, não do `select`).
 5. Marcador textual dos gates `verify-*`: vários validam strings, não comportamento.

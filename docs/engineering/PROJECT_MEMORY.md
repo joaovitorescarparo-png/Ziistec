@@ -78,10 +78,11 @@
 
 ## Consolidação V1 e preparação fiscal (2026-10-28)
 
-- Auditoria ampla em `docs/engineering/SYSTEM_CONSOLIDATION_V1.md`: 14 duplicações achadas, 4 removidas, 8 funções mortas apagadas, 1 bug P2 corrigido. O que sobrou (Compras, Configurações e Orçamentos com duas telas; `speech-patch.js` × `useSpeechInput`; escopo de auth repetido em `api/ai.js` e `api/finance-ai.js`) só muda depois da H0 e da decisão do dono.
+- Auditoria ampla em `docs/engineering/SYSTEM_CONSOLIDATION_V1.md`: 14 duplicações achadas, 4 removidas, 8 funções mortas apagadas, 4 bugs (1 P2, 3 P3) corrigidos entre a V1 e a V1.1. O que sobrou (Compras, Configurações e Orçamentos com duas telas; `speech-patch.js` × `useSpeechInput`; escopo de auth repetido em `api/ai.js` e `api/finance-ai.js`) só muda depois da H0 e da decisão do dono.
 - "Hoje" é sempre `hojeISO()` de `src/lib/dates.js` (dia do aparelho); nunca `toISOString().slice(0,10)`, que dá o dia UTC e erra das 21h às 24h no Brasil (teste varre `src/`). Moeda é sempre `brl` de `src/lib/money.js`.
+- Datas (V1.1): nenhuma constante de módulo guarda "hoje" (um teste lê o código por AST e só aceita a semente de demonstração do shell); o shell relê o dia com `useDiaLocal` ao voltar a ser usado, sem timer. Somar meses é sempre `addMesesISO` (limita ao último dia do mês de destino, como o `interval` do Postgres); nunca `setMonth` em regra de negócio.
 - Antes de apagar função "sem uso", procure também no texto dos testes e dos `verify-*`: vários gates leem o código-fonte como string e quebram sem aviso do compilador.
-- Fiscal: só desenho em `docs/engineering/FISCAL_ARCHITECTURE_V1.md`. O Comprovante de Serviço (0100) é documento **não fiscal** e continua separado de qualquer NFS-e (`fiscal_documents` futuro, referenciando `billing_entry_id`, nunca criando receita). Nenhum provedor contratado, nenhuma credencial, nada emitido; a F1 (sandbox) exige autorização própria.
+- Fiscal: só desenho em `docs/engineering/FISCAL_ARCHITECTURE_V1.md`. O Comprovante de Serviço (0100) é documento **não fiscal** e continua separado de qualquer NFS-e (`fiscal_documents` futuro, referenciando `billing_entry_id`, nunca criando receita). Nenhum provedor contratado, nenhuma credencial, nada emitido; a F1 (sandbox) exige autorização própria. Regulatório conferido em fonte oficial (gov.br, 2026-10-29): ME/EPP do Simples emitem pelo Emissor Nacional a partir de **01/11/2026** (Resolução CGSN 191/2026), então NFS-e Nacional é requisito eliminatório; IBS/CBS no Simples vale em 01/01/2027. Provedor **não escolhido**: Spedy (preço da API PENDENTE) e Focus NFe são candidatos, comparados só com o que as páginas oficiais provam.
 
 ## Direção de produto aprovada
 
