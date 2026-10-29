@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { supabaseServidor } from './_supabaseServerConfig.js';
+import { quotaUserMessage } from './_apiErrors.js';
 import { shouldBreakPdfBlock, canKeepClosingTogether } from './quotePdfLayout.js';
 import { LOGO_BOX, desenharLogoNaCaixa } from '../src/lib/pdfLogoBox.js';
 
@@ -120,7 +121,7 @@ export default async function handler(req, res) {
     }).catch(() => null);
     if (!quota?.ok) {
       const detail = quota ? await quota.json().catch(() => ({})) : {};
-      const msg = detail?.message || 'Limite de geração de PDF atingido.';
+      const msg = quotaUserMessage(detail, 'Limite de geração de PDF atingido.');
       const status = quota?.status === 401 ? 401 : quota?.status === 403 ? 403 : quota ? 429 : 502;
       return res.status(status).json({ error: msg });
     }

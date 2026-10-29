@@ -106,7 +106,7 @@ test('as migrations 0108–0110 existem, são sequenciais e não reutilizam núm
   const files = readdirSync(path.join(root, 'supabase')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   const numbers = files.map((f) => f.slice(0, 4));
   for (const n of ['0108', '0109', '0110']) assert.equal(numbers.filter((x) => x === n).length, 1, `número ${n} único`);
-  assert.deepEqual(files.filter((f) => /^01(0[8-9]|1\d)/.test(f)), ['0108_supplier_tenant_foreign_keys.sql', '0109_stock_adjustment_idempotency.sql', '0110_team_invite_email_throttle.sql', '0111_field_execution_intelligence.sql']);
+  assert.deepEqual(files.filter((f) => /^01(0[8-9]|1\d)/.test(f)), ['0108_supplier_tenant_foreign_keys.sql', '0109_stock_adjustment_idempotency.sql', '0110_team_invite_email_throttle.sql', '0111_field_execution_intelligence.sql', '0112_company_member_identity_guard.sql']);
 });
 
 test('0108: FK composta por empresa, falha fechada e nenhuma mudança de dados', () => {

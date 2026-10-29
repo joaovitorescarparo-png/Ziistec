@@ -9,7 +9,7 @@
 Provar, num ambiente **descartável e separado**, que a próxima versão (branch `claude/blocks34-port-beta-v1`) funciona de ponta
 a ponta com banco e frontend juntos, antes de qualquer decisão sobre o Beta Live:
 
-1. as migrations **0100–0111** aplicam limpas, na ordem, sobre um banco no estado do Beta Live (**0099**);
+1. as migrations **0100–0112** aplicam limpas, na ordem, sobre um banco no estado do Beta Live (**0099**);
 2. o frontend novo continua utilizável contra o banco 0099 (modo reduzido) e fica completo depois das migrations;
 3. proprietário e técnico executam o fluxo real em aparelhos reais (Android e iPhone), com o técnico sem acesso a preços;
 4. o plano de volta (restaurar backup) foi ensaiado;
@@ -33,9 +33,10 @@ Critério de saída: roteiro da seção 9 inteiro marcado, sem falha P0/P1 abert
 | Ajuste de estoque idempotente | 0109 | `zt_adjust_product_stock(..., p_request)`: o mesmo pedido altera o estoque uma vez; o overload antigo perde o EXECUTE do navegador (SEC-04) |
 | Limite de reenvio do convite | 0110 | `zt_claim_team_invite_email`: 60 s por convite/destinatário, 5/h por destinatário, 30/h por empresa; guarda só hash do e-mail (SEC-05) |
 | Fechamento técnico, relatório com IA e confirmação | 0111 | Base Técnica interna por OS (causa, solução, dificuldade, observação), confirmação de quem recebeu, livro de gerações de IA (máx. 3 por OS) e sete funções definer; a OS continua finalizável sem IA (Field Execution Intelligence V1, `FIELD_EXECUTION_INTELLIGENCE.md`) |
+| Vínculo da equipe imutável | 0112 | trigger recusa mudança de `id`, `company_id` e `user_id` em `company_members` (hardening V1.2, SEC-V12-02); sem função definer nova |
 | Frontend | Blocos 6 e 7, Onda 1, Onda 2, Field Execution V1 | formulários protegidos, rascunho, V2 no app principal, logo nos PDFs, Início, rotas, Meu dia do técnico, cronômetro de atendimento, fechamento em etapas |
 
-Estado esperado do banco: **definers = 134** no 0099, **140** depois da 0105 e **140** depois da 0106 (a 0106 não cria função) e **140** depois da 0107 (ela só substitui uma função de trigger existente). A 0108 não cria função; a 0109 e a 0110 criam uma cada: **142** depois da 0110. A 0111 cria sete funções definer: **149** depois da 0111.
+Estado esperado do banco: **definers = 134** no 0099, **140** depois da 0105 e **140** depois da 0106 (a 0106 não cria função) e **140** depois da 0107 (ela só substitui uma função de trigger existente). A 0108 não cria função; a 0109 e a 0110 criam uma cada: **142** depois da 0110. A 0111 cria sete funções definer: **149** depois da 0111. A 0112 só cria uma função de trigger (invoker): **149** depois da 0112.
 
 ## 3. Ordem segura: frontend novo → migrations
 
@@ -52,7 +53,7 @@ Sequência do ensaio no H0:
    - Comprovante, histórico por local e preferência persistente aparecem como "ainda não disponível na sua conta" (ou valem só na sessão);
    - "Abrir rota" funciona com o app padrão (Google Maps) e a troca de app vale só na sessão.
    - Field Execution V1 sem a 0111: o técnico vê o fechamento **antigo** (relato primeiro, sem Base Técnica, sem confirmação, sem botão de IA); "Meu dia" funciona, o tempo aparece só como "Em atendimento" (sem `started_at` antes da 0101) e a conclusão continua funcionando.
-4. Aplicar **0100 → 0101 → 0102 → 0103 → 0104 → 0105 → 0106 → 0107 → 0108 → 0109 → 0110 → 0111**, um arquivo por vez, cada um em uma transação
+4. Aplicar **0100 → 0101 → 0102 → 0103 → 0104 → 0105 → 0106 → 0107 → 0108 → 0109 → 0110 → 0111 → 0112**, um arquivo por vez, cada um em uma transação
    (`psql -v ON_ERROR_STOP=1 -1 -f <arquivo>`), conferindo a seção 4 depois de cada passo.
 5. Recarregar o frontend novo e executar o roteiro completo (seção 9).
 6. Publicar a função `team-invite-email` desta branch **somente depois da 0110**: sem a reserva de envio ela recusa o envio (503, falha fechada).
@@ -77,6 +78,7 @@ anterior. Não há reversa automática para 0100–0104 (criam tabelas, colunas,
 
 Se for preciso desfazer só uma etapa no H0 (ensaio manual; conferir cada policy em `pg_policies` antes):
 
+- **0112:** `drop trigger trg_guard_company_member_identity on public.company_members; drop function public.zt_guard_company_member_identity();`. Só para ensaio: reabre o SEC-V12-02 (o proprietário volta a reescrever `user_id` do vínculo).
 - **0111:** `drop function` das sete funções `zt_save_work_order_technical_base`, `zt_save_attendance_confirmation`, `zt_work_order_report_facts`, `zt_claim_work_order_ai_report`, `zt_complete_work_order_ai_report`, `zt_mark_work_order_ai_report_used` e `zt_work_order_ai_report_usage`, depois `drop table` das três tabelas (`work_order_ai_reports`, `work_order_attendance_confirmations`, `work_order_technical_base`). Conferir assinaturas em `pg_proc` antes. Nada de OS, financeiro ou estoque é tocado; o frontend volta sozinho ao fechamento antigo e a função `api/work-order-report` passa a responder "indisponível".
 - **0110:** `drop function public.zt_claim_team_invite_email(uuid); drop table public.team_invite_email_sends;`. A função `team-invite-email` nova passa a recusar o envio (503) sem a reserva: reverter a função junto.
 - **0109:** `drop function public.zt_adjust_product_stock(uuid,uuid,numeric,text,uuid);` e devolver o EXECUTE do overload antigo a `authenticated, service_role`. As colunas `client_request_id` e `balance_after` podem ficar. O frontend novo cai sozinho para o ajuste antigo.

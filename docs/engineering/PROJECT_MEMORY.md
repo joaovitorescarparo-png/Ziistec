@@ -84,6 +84,8 @@
 - Antes de apagar função "sem uso", procure também no texto dos testes e dos `verify-*`: vários gates leem o código-fonte como string e quebram sem aviso do compilador.
 - Fiscal: só desenho em `docs/engineering/FISCAL_ARCHITECTURE_V1.md`. O Comprovante de Serviço (0100) é documento **não fiscal** e continua separado de qualquer NFS-e (`fiscal_documents` futuro, referenciando `billing_entry_id`, nunca criando receita). Nenhum provedor contratado, nenhuma credencial, nada emitido; a F1 (sandbox) exige autorização própria. Regulatório conferido em fonte oficial (gov.br, 2026-10-29): ME/EPP do Simples emitem pelo Emissor Nacional a partir de **01/11/2026** (Resolução CGSN 191/2026), então NFS-e Nacional é requisito eliminatório; IBS/CBS no Simples vale em 01/01/2027. Provedor **não escolhido**: Spedy (preço da API PENDENTE) e Focus NFe são candidatos, comparados só com o que as páginas oficiais provam.
 
+- Hardening adversarial V1.2 (0112, definers 149; `docs/engineering/RELEASE_HARDENING_V12.md`): 1 P2 e 7 P3, 2 corrigidos. `company_members` não aceita mudar `id`, `company_id` nem `user_id` (o dono podia reescrever `user_id` e puxar qualquer usuário para a própria empresa); as rotas `api/*` nunca repassam o corpo de erro do banco (`api/_apiErrors.js`: só as frases exatas das RPCs de cota). Nova rota que mostre erro do banco ao navegador deve usar o mesmo padrão. 0112 não aplicada em ambiente real; H0 e Fiscal seguem não iniciados.
+
 ## Direção de produto aprovada
 
 - Histórico técnico deve evoluir para Cliente → Local → Ativos → Histórico de serviços.

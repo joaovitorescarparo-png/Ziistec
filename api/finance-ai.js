@@ -1,5 +1,6 @@
 import { supabaseServidor } from './_supabaseServerConfig.js';
 import { externalAiEnabled, externalAiReady, requestAiText } from './_aiGateway.js';
+import { quotaUserMessage } from './_apiErrors.js';
 
 const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 
@@ -134,7 +135,7 @@ export default async function handler(req, res) {
   if (!quota?.ok) {
     const detail = quota ? await quota.json().catch(() => ({})) : {};
     const status = quota?.status === 401 ? 401 : quota?.status === 403 ? 403 : quota ? 429 : 502;
-    return res.status(status).json({ error:detail?.message || 'IA indisponível para esta conta.' });
+    return res.status(status).json({ error:quotaUserMessage(detail, 'IA indisponível para esta conta.') });
   }
 
   const prompt = `Você é um copiloto financeiro de uma pequena empresa brasileira de serviços em campo.
