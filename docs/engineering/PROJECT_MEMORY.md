@@ -88,6 +88,8 @@
 
 - First 10 Customers · Fase 1 (`docs/engineering/FIRST_CUSTOMERS_PHASE1.md`): o fluxo cliente → orçamento → OS → execução → conclusão → financeiro → comprovante → histórico tem um teste de jornada no banco (`v2_first_customers_golden_path_rollback.sql`, 32 checks) além dos testes por recurso. O PDF do Comprovante de Serviço abre com a frase exata "Comprovante de serviço — documento não fiscal." (`IDENTIFICACAO_NAO_FISCAL`, desenhada direto: `clean()` trocaria o travessão por hífen). Pendências que não são de código: 0100–0112 não aplicadas em nenhum ambiente, Production em 0049 e vazia, H0 em aparelho real e E2E autenticado sem credenciais.
 
+- H0 (`docs/engineering/H0_ENVIRONMENT_REQUIRED.md`, 2026-10-29): o H0 **não existe**. Na org Supabase há 3 projetos: Production `diztevlpbcfqleizswxr`, Beta Live `xadoktssibuuebzzjrhv` (hoje **pausado**) e `uvjovxrpnvxsxrlvngpj`, sem nenhuma referência no repo, nas docs nem no git: identidade não provada, não usar. O H0 precisa de projeto novo, vazio, sa-east-1 (conector informou US$ 0/mês), criado pelo proprietário. As guardas só aceitam dois pares (Production e Staging) e a CSP da `vercel.json` só os dois refs: o H0 entra como terceiro par isolado, só nesta branch (bloqueador de merge para a `main`). Ensaio local 0099→0112 com dados: 54/54, definers 134→140→142→149, 0108 aborta com vínculo cruzado sem alterar nada, banco atualizado no lugar passa 42/42.
+
 ## Direção de produto aprovada
 
 - Histórico técnico deve evoluir para Cliente → Local → Ativos → Histórico de serviços.

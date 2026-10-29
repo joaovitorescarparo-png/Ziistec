@@ -3,6 +3,7 @@
 > **Este documento é só um plano.** O H0 não foi criado nem executado. Nada aqui autoriza tocar o Beta Live
 > (`xadoktssibuuebzzjrhv`, `beta.ziistec.com`), a Production, a `main`, Auth, domínio ou dados do cliente real.
 > Criar o projeto H0 pode gerar custo e precisa de decisão explícita do proprietário do produto.
+> Estado em 2026-10-29: o H0 ainda não existe; evidências, pedido de ambiente e ensaio local em `H0_ENVIRONMENT_REQUIRED.md`.
 
 ## 1. Objetivo
 
