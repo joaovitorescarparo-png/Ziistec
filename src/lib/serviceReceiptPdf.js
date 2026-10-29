@@ -8,6 +8,9 @@ import { LOGO_BOX, desenharLogoNaCaixa, ajustarTextoNaLargura } from './pdfLogoB
 // emissão (0100). O PDF não é armazenado; reemitir cria nova versão no banco, e cada versão
 // (ativa ou anterior) gera o próprio PDF a partir do snapshot dela.
 export const AVISO_NAO_FISCAL='Documento não fiscal';
+// Frase exata que identifica o documento no topo do PDF. O travessão cabe no WinAnsi da Helvetica
+// padrão, por isso é desenhado direto, sem passar por clean() (que o trocaria por hífen).
+export const IDENTIFICACAO_NAO_FISCAL='Comprovante de serviço — documento não fiscal.';
 
 const numeroComprovante=(receipt)=>{
   const doc=receipt?.snapshot?.document||{};
@@ -95,7 +98,7 @@ export async function montarComprovanteServicoPDF(receipt){
   y-=5;divider();
 
   page.drawRectangle({x:MARGIN,y:y-27,width,height:32,color:soft});
-  page.drawText(clean(AVISO_NAO_FISCAL.toUpperCase()),{x:MARGIN+10,y:y-8,size:8.5,font:bold,color:accent});
+  page.drawText(IDENTIFICACAO_NAO_FISCAL,{x:MARGIN+10,y:y-8,size:9,font:bold,color:accent});
   page.drawText('Comprova o serviço executado e a situação financeira na data de emissão.',{x:MARGIN+10,y:y-20,size:8,font:regular,color:muted});
   y-=42;
 

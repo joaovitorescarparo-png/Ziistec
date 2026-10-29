@@ -94,7 +94,8 @@ function pdfTexts(bytes) {
     if (chunk.length && chunk[chunk.length - 1] === 0x0d) chunk = chunk.subarray(0, chunk.length - 1);
     try {
       const content = zlib.inflateSync(chunk).toString('latin1');
-      for (const hit of content.matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)) texts.push(Buffer.from(hit[1], 'hex').toString('latin1'));
+      // Helvetica padrão usa WinAnsi: o travessão (U+2014) é o byte 0x97, que o latin1 devolve como controle C1.
+      for (const hit of content.matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)) texts.push(Buffer.from(hit[1], 'hex').toString('latin1').replace(/\x97/g, '—'));
     } catch { /* stream não comprimido ou de imagem */ }
     marker.lastIndex = end;
   }
@@ -128,7 +129,9 @@ test('Comprovante de Serviço em PDF: título, número/versão, aviso não fisca
   const texts = pdfTexts(await apis.receiptPdf.montarComprovanteServicoPDF(receiptFixture()));
   const all = texts.join('\n');
   assert.ok(texts.includes('COMPROVANTE DE SERVIÇO'), all);
-  assert.ok(texts.includes('DOCUMENTO NÃO FISCAL'), all);
+  // Frase exata exigida para o First 10 Customers, desenhada com o travessão e não rebaixada para hífen.
+  assert.ok(texts.includes('Comprovante de serviço — documento não fiscal.'), all);
+  assert.equal(apis.receiptPdf.IDENTIFICACAO_NAO_FISCAL, 'Comprovante de serviço — documento não fiscal.');
   assert.ok(texts.includes('Nº CS-0001 v2'), all);
   assert.ok(texts.some((t) => t.startsWith('Documento não fiscal · Comprovante CS-0001 v2')), all);
   assert.ok(texts.includes('R$ 280,00'), 'total do comprovante');
@@ -138,6 +141,16 @@ test('Comprovante de Serviço em PDF: título, número/versão, aviso não fisca
   assert.ok(texts.includes('Condomínio Aurora') && texts.includes('Bloco A · Apto 12'), 'cliente e local do snapshot');
   assert.ok(!/nota fiscal|NFS-e/i.test(all), 'comprovante não se apresenta como nota fiscal');
   await assert.rejects(() => apis.receiptPdf.montarComprovanteServicoPDF({ snapshot: reportSnapshot() }), /Comprovante de Serviço inválido/);
+});
+
+test('Comprovante de Serviço em PDF traz empresa, cliente, data, serviço, itens, valor, técnico, observações e a OS', async () => {
+  const all = pdfTexts(await apis.receiptPdf.montarComprovanteServicoPDF(receiptFixture())).join('\n');
+  for (const [campo, trecho] of [
+    ['empresa', 'Empresa Teste'], ['cliente', 'Condomínio Aurora'], ['identificação da OS', 'OS-0042'],
+    ['data de conclusão', '08/10/2026'], ['serviço pedido', 'Troca de fechadura'], ['relato do técnico', 'Fechadura trocada e testada com o síndico.'],
+    ['item/material 1', 'Fechadura digital'], ['item/material 2', 'Mão de obra'], ['valor total', 'R$ 280,00'],
+    ['técnico responsável', 'Carlos Técnico'], ['observações', 'Garantia de 90 dias no serviço'],
+  ]) assert.ok(all.includes(trecho), `${campo}: "${trecho}" ausente no PDF\n${all}`);
 });
 
 test('mensagem de WhatsApp do comprovante usa número do cliente e aviso não fiscal', () => {
