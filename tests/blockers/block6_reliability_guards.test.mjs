@@ -176,7 +176,7 @@ test('legado: lançamento bloqueia envio duplicado e guarda o requestId no formu
   assert.match(legacy, /<Btn disabled=\{!form\.descricao \|\| !form\.valor \|\| salvandoLancamento\}/);
   assert.match(legacy, /if \(salvandoLancamento\) return;/);
   assert.match(legacy, /let requestId = form\.requestId;[\s\S]{0,260}requestId = globalThis\.crypto\.randomUUID\(\);\s*setForm\(\(f\) => \(f \? \{ \.\.\.f, requestId \} : f\)\);/);
-  assert.match(legacy, /await salvarLancamentoDB\(\{ \.\.\.form, requestId, pagoEm: form\.pago \? HOJE : null \}, empresaId\)/);
+  assert.match(legacy, /await salvarLancamentoDB\(\{ \.\.\.form, requestId, pagoEm: form\.pago \? hojeISO\(\) : null \}, empresaId\)/);
   assert.match(legacy, /finally \{ setSalvandoLancamento\(false\); \}/);
 });
 

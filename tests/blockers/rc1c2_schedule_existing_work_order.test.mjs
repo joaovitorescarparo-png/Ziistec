@@ -33,7 +33,7 @@ function mountModal(onSalvar, os = { id: 'os-4', numero: 'OS-0004', data: '', ho
     empresa: { responsavel: 'Owner', temEquipe: true }, diaSugerido: '2026-09-20' };
   const component = vm.runInNewContext(modalCode, {
     React: { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), Fragment: 'Fragment' },
-    Modal: 'Modal', Btn: 'Btn', Field: 'Field', Input: 'Input', Select: 'Select', HOJE: '2026-09-19',
+    Modal: 'Modal', Btn: 'Btn', Field: 'Field', Input: 'Input', Select: 'Select', hojeISO: () => '2026-09-19',
     useState(initial) {
       const index = cursor++;
       if (!(index in slots)) slots[index] = initial;
@@ -151,7 +151,7 @@ function scheduling({ status = 'aguardando', real = true, update } = {}) {
   const forbiddenCalls = [];
   const forbidden = (name) => () => { forbiddenCalls.push(name); throw new Error(`Forbidden: ${name}`); };
   const schedule = vm.runInNewContext(`${scheduleSource}\nagendarOS;`, {
-    real, HOJE: '2026-09-19', uid: () => 'history-1', dataBR: (date) => date, mesclarOSRelida,
+    real, hojeISO: () => '2026-09-19', uid: () => 'history-1', dataBR: (date) => date, mesclarOSRelida,
     mensagemErro: (error) => error.message, aviso: (text) => notices.push(text),
     setOrdens: (apply) => { orders = apply(orders); },
     atualizarOSDB: async (id, patch) => {

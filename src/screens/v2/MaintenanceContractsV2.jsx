@@ -18,7 +18,7 @@ import { brl } from '../../lib/money';
 const n=(v)=>Number(String(v??'').replace(',','.'))||0;
 const addMonths=(base,m)=>addMesesISO(base,Number(m||1));
 const STATUS={active:'Ativo',paused:'Pausado',canceled:'Cancelado'};
-const VAZIO={clienteId:'',nome:'',status:'active',valor:'',periodicidadeMeses:1,diaCobranca:10,proximaVisita:isoToday(),proximaCobranca:isoToday(),responsavelId:'',cobertura:'',obs:''};
+const formVazio=()=>({clienteId:'',nome:'',status:'active',valor:'',periodicidadeMeses:1,diaCobranca:10,proximaVisita:isoToday(),proximaCobranca:isoToday(),responsavelId:'',cobertura:'',obs:''});
 
 function Btn({children,onClick,disabled=false,variant='primary',type='button',className=''}){const cls=variant==='primary'?'bg-emerald-700 text-white hover:bg-emerald-800':variant==='warning'?'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100':'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50';return <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${cls} ${className}`}>{children}</button>;}
 const control='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
@@ -37,7 +37,7 @@ export default function MaintenanceContractsV2({companyId,companyName='Sua empre
   const recurring=active.reduce((t,x)=>t+x.valor,0);
   const dueSoon=active.filter(x=>x.proximaVisita&&x.proximaVisita<=addMonths(isoToday(),1)).length;
 
-  const openNew=()=>setForm({...VAZIO,clienteId:clients[0]?.id||'',responsavelId:team[0]?.id||''});
+  const openNew=()=>setForm({...formVazio(),clienteId:clients[0]?.id||'',responsavelId:team[0]?.id||''});
   const openEdit=(c)=>setForm({...c,diaCobranca:c.diaCobranca||10,responsavelId:c.responsavelId||''});
   const save=async(e)=>{e.preventDefault();setError('');setSuccess('');if(!form.clienteId||!form.nome.trim()){setError('Informe cliente e nome do contrato.');return;}if(n(form.valor)<0){setError('O valor não pode ser negativo.');return;}setSaving(true);try{await salvarContratoDB({...form,valor:n(form.valor),periodicidadeMeses:Math.max(1,Number(form.periodicidadeMeses||1)),diaCobranca:form.diaCobranca?Number(form.diaCobranca):null},companyId,userId);setForm(null);setSuccess('Contrato salvo.');await load();}catch(e2){if(recursoV2AindaNaoMigrado(e2))setAvailable(false);setError(mensagemErro(e2));}finally{setSaving(false);}};
   const generate=async(e)=>{e.preventDefault();setError('');setSuccess('');setSaving(true);try{const r=await gerarCicloContratoDB(cycle.contrato.id,cycle.ciclo,{serviceOn:cycle.visita||null,dueOn:cycle.vencimento||null});setSuccess(r?.reused?'Este ciclo já existia; os registros foram reutilizados sem duplicar.':'Ciclo gerado: visita preventiva e cobrança criadas de forma idempotente.');setCycle(null);await load();}catch(e2){setError(mensagemErro(e2));}finally{setSaving(false);}};

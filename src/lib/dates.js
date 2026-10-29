@@ -2,7 +2,8 @@
  *
  * Nunca use o corte do `toISOString()` para obter "hoje": esse é o dia em UTC e, no Brasil (UTC-3),
  * vira "amanhã" entre 21h e 24h (vencimento, data de pagamento e início de garantia saíam um dia à frente).
- * As somas de dias/meses usam o meio-dia local para não mudar de dia por horário de verão. */
+ * As somas de dias usam o meio-dia local para não mudar de dia por horário de verão; a de meses é
+ * aritmética de calendário. "Hoje" lê o relógio a cada chamada: nunca guarde o resultado em constante de módulo. */
 
 const dois = (n) => String(n).padStart(2, '0');
 
@@ -32,12 +33,19 @@ export function addDiasISO(base, dias) {
   return dataLocalISO(d);
 }
 
-/** Soma meses a uma data AAAA-MM-DD (dia 31 + 1 mês cai no mês seguinte, como o Date do JavaScript). */
+/** Soma meses a uma data AAAA-MM-DD. Se o mês de destino é mais curto, fica no último dia dele
+ * (31/01 + 1 mês = 28/02 ou 29/02; 31/03 + 1 mês = 30/04), igual a `data + interval 'N months'` do Postgres,
+ * que calcula as garantias e os ciclos de contrato no banco. Fração de mês é descartada; quantidade
+ * não numérica devolve ''. */
 export function addMesesISO(base, meses) {
   const d = meioDiaLocal(base);
-  if (!d) return '';
-  d.setMonth(d.getMonth() + Number(meses || 0));
-  return dataLocalISO(d);
+  const n = Number(meses || 0);
+  if (!d || !Number.isFinite(n)) return '';
+  const total = d.getFullYear() * 12 + d.getMonth() + Math.trunc(n);
+  const ano = Math.floor(total / 12);
+  const mes = total - ano * 12;
+  const ultimoDia = new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate();
+  return `${String(ano).padStart(4, '0')}-${dois(mes + 1)}-${dois(Math.min(d.getDate(), ultimoDia))}`;
 }
 
 /** AAAA-MM-DD (ou carimbo ISO) para DD/MM/AAAA; `vazio` é o texto quando não há data válida. */

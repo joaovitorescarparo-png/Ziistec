@@ -66,6 +66,8 @@ import RouteButton from "../components/RouteButton";
 import useRoutePreference from "../hooks/useRoutePreference";
 import { linkDeRota, resolverDestinoRota } from "../lib/routeApps";
 import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
+import { hojeISO, addMesesISO } from "../lib/dates";
+import useDiaLocal from "../hooks/useDiaLocal";
 
 /* ================================================================ helpers */
 const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -75,9 +77,8 @@ const iso = (d) => {
   const x = new Date(d);
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 };
-const HOJE = iso(new Date());
+const HOJE_SEED = hojeISO(); // só para os dados de demonstração, montados uma vez; as regras leem hojeISO() na hora
 const addDays = (base, n) => { const d = new Date(base + "T12:00:00"); d.setDate(d.getDate() + n); return iso(d); };
-const addMeses = (base, n) => { const d = new Date(base + "T12:00:00"); d.setMonth(d.getMonth() + n); return iso(d); };
 const dataBR = (s) => (s ? s.split("-").reverse().join("/") : "—");
 const dataCurta = (s) => (s ? s.slice(8) + "/" + s.slice(5, 7) : "—");
 const DIAS = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
@@ -130,7 +131,7 @@ const PRAZOS_GARANTIA = [
 ];
 const diasEntre = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 86400000);
 const statusGarantia = (g) => {
-  const d = diasEntre(HOJE, g.ate);
+  const d = diasEntre(hojeISO(), g.ate);
   return d >= 0
     ? { ativa: true, label: "Ativa", tone: "sucesso", detalhe: d === 0 ? "vence hoje" : `${d} dia${d > 1 ? "s" : ""} restante${d > 1 ? "s" : ""}` }
     : { ativa: false, label: "Expirada", tone: "neutro", detalhe: `expirada há ${Math.abs(d)} dia${Math.abs(d) > 1 ? "s" : ""}` };
@@ -183,10 +184,10 @@ const S = (id) => SERVICOS_SEED.find((s) => s.id === id);
 const P = (id) => PRODUTOS_SEED.find((p) => p.id === id);
 
 const ORCAMENTOS_SEED = [
-  { id: "o1", numero: "ORC-0007", clienteId: "c1", status: "enviado", data: addDays(HOJE, -3), validade: addDays(HOJE, 12), itens: [itemServico(S("s1"), 4), itemProduto(P("p1"), 4), itemServico(S("s3"), 1)], desconto: 150, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Instalação nas portarias social e de serviço.", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portarias social e de serviço", osId: null },
-  { id: "o2", numero: "ORC-0006", clienteId: "c2", status: "aprovado", data: addDays(HOJE, -6), validade: addDays(HOJE, 9), itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], desconto: 0, acrescimo: 0, condicao: "Pagamento à vista via Pix na conclusão.", obs: "Porta de madeira maciça.", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", osId: "os3" },
-  { id: "o3", numero: "ORC-0005", clienteId: "c4", status: "rascunho", data: addDays(HOJE, -1), validade: addDays(HOJE, 14), itens: [itemServico(S("s4"), 4), itemProduto(P("p2"), 4)], desconto: 0, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Prioridade nas câmeras do estoque.", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Estoque e área de produção", osId: null },
-  { id: "o4", numero: "ORC-0004", clienteId: "c3", status: "aprovado", data: addDays(HOJE, -14), validade: addDays(HOJE, 1), itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], desconto: 0, acrescimo: 0, condicao: "Boleto em 15 dias.", obs: "", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", osId: "os2" },
+  { id: "o1", numero: "ORC-0007", clienteId: "c1", status: "enviado", data: addDays(HOJE_SEED, -3), validade: addDays(HOJE_SEED, 12), itens: [itemServico(S("s1"), 4), itemProduto(P("p1"), 4), itemServico(S("s3"), 1)], desconto: 150, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Instalação nas portarias social e de serviço.", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portarias social e de serviço", osId: null },
+  { id: "o2", numero: "ORC-0006", clienteId: "c2", status: "aprovado", data: addDays(HOJE_SEED, -6), validade: addDays(HOJE_SEED, 9), itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], desconto: 0, acrescimo: 0, condicao: "Pagamento à vista via Pix na conclusão.", obs: "Porta de madeira maciça.", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", osId: "os3" },
+  { id: "o3", numero: "ORC-0005", clienteId: "c4", status: "rascunho", data: addDays(HOJE_SEED, -1), validade: addDays(HOJE_SEED, 14), itens: [itemServico(S("s4"), 4), itemProduto(P("p2"), 4)], desconto: 0, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Prioridade nas câmeras do estoque.", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Estoque e área de produção", osId: null },
+  { id: "o4", numero: "ORC-0004", clienteId: "c3", status: "aprovado", data: addDays(HOJE_SEED, -14), validade: addDays(HOJE_SEED, 1), itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], desconto: 0, acrescimo: 0, condicao: "Boleto em 15 dias.", obs: "", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", osId: "os2" },
 ];
 
 const osBase = {
@@ -196,33 +197,33 @@ const osBase = {
 };
 
 const ORDENS_SEED = [
-  { ...osBase, id: "os1", numero: "OS-0001", clienteId: "c1", orcamentoId: null, status: "andamento", data: HOJE, hora: "14:00", responsavel: "Jonas Ribeiro", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Garagem — subsolo 1", itens: [itemServico(S("s4"), 3), itemProduto(P("p2"), 3)], obs: "Substituir 3 câmeras da garagem. Elevador de serviço até 17h.", checklist: [{ id: "k1", texto: "Conferir cabeamento existente", feito: true }, { id: "k2", texto: "Instalar câmeras", feito: false }, { id: "k3", texto: "Ajustar ângulo e gravação", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE, -1), texto: "Ordem de serviço criada" }] },
-  { ...osBase, id: "os2", numero: "OS-0002", clienteId: "c3", orcamentoId: "o4", status: "concluida", data: addDays(HOJE, -4), hora: "09:00", responsavel: "Diego Farias", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], obs: "", relato: "Diagnóstico\nTrês interfones do bloco B sem áudio de retorno.\n\nServiço executado\nLimpeza de contatos, troca de dois cabos e recadastramento de tags.\n\nResultado\nTestado em todos os apartamentos e funcionando.", checklist: [{ id: "k4", texto: "Testar interfones", feito: true }, { id: "k5", texto: "Cadastrar tags novas", feito: true }], custosExtras: 40, cobrancaId: "l1", historico: [{ id: uid(), quando: addDays(HOJE, -8), texto: "Gerada a partir do ORC-0004" }, { id: uid(), quando: addDays(HOJE, -4), texto: "Serviço concluído" }] },
-  { ...osBase, id: "os3", numero: "OS-0003", clienteId: "c2", orcamentoId: "o2", status: "agendada", data: HOJE, hora: "09:00", responsavel: "Jonas Ribeiro", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], obs: "Porta de madeira maciça. Cliente prefere manhã.", checklist: [{ id: "k6", texto: "Levar furadeira e brocas", feito: false }, { id: "k7", texto: "Cadastrar digitais da família", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE, -5), texto: "Gerada a partir do ORC-0006" }] },
-  { ...osBase, id: "os4", numero: "OS-0004", clienteId: "c1", orcamentoId: null, status: "agendada", data: addDays(HOJE, 1), hora: "10:30", responsavel: "Diego Farias", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portaria social", itens: [itemServico(S("s6"), 1)], obs: "Vistoria mensal do contrato.", checklist: [], historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] },
-  { ...osBase, id: "os5", numero: "OS-0005", clienteId: "c4", orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: "Jonas Ribeiro", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Entrada de serviço", itens: [itemServico(S("s5"), 1)], obs: "Interfone com ruído.", checklist: [], historico: [{ id: uid(), quando: addDays(HOJE, -2), texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os1", numero: "OS-0001", clienteId: "c1", orcamentoId: null, status: "andamento", data: HOJE_SEED, hora: "14:00", responsavel: "Jonas Ribeiro", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Garagem — subsolo 1", itens: [itemServico(S("s4"), 3), itemProduto(P("p2"), 3)], obs: "Substituir 3 câmeras da garagem. Elevador de serviço até 17h.", checklist: [{ id: "k1", texto: "Conferir cabeamento existente", feito: true }, { id: "k2", texto: "Instalar câmeras", feito: false }, { id: "k3", texto: "Ajustar ângulo e gravação", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -1), texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os2", numero: "OS-0002", clienteId: "c3", orcamentoId: "o4", status: "concluida", data: addDays(HOJE_SEED, -4), hora: "09:00", responsavel: "Diego Farias", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], obs: "", relato: "Diagnóstico\nTrês interfones do bloco B sem áudio de retorno.\n\nServiço executado\nLimpeza de contatos, troca de dois cabos e recadastramento de tags.\n\nResultado\nTestado em todos os apartamentos e funcionando.", checklist: [{ id: "k4", texto: "Testar interfones", feito: true }, { id: "k5", texto: "Cadastrar tags novas", feito: true }], custosExtras: 40, cobrancaId: "l1", historico: [{ id: uid(), quando: addDays(HOJE_SEED, -8), texto: "Gerada a partir do ORC-0004" }, { id: uid(), quando: addDays(HOJE_SEED, -4), texto: "Serviço concluído" }] },
+  { ...osBase, id: "os3", numero: "OS-0003", clienteId: "c2", orcamentoId: "o2", status: "agendada", data: HOJE_SEED, hora: "09:00", responsavel: "Jonas Ribeiro", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], obs: "Porta de madeira maciça. Cliente prefere manhã.", checklist: [{ id: "k6", texto: "Levar furadeira e brocas", feito: false }, { id: "k7", texto: "Cadastrar digitais da família", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -5), texto: "Gerada a partir do ORC-0006" }] },
+  { ...osBase, id: "os4", numero: "OS-0004", clienteId: "c1", orcamentoId: null, status: "agendada", data: addDays(HOJE_SEED, 1), hora: "10:30", responsavel: "Diego Farias", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portaria social", itens: [itemServico(S("s6"), 1)], obs: "Vistoria mensal do contrato.", checklist: [], historico: [{ id: uid(), quando: HOJE_SEED, texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os5", numero: "OS-0005", clienteId: "c4", orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: "Jonas Ribeiro", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Entrada de serviço", itens: [itemServico(S("s5"), 1)], obs: "Interfone com ruído.", checklist: [], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -2), texto: "Ordem de serviço criada" }] },
 ];
 
 const LANCAMENTOS_SEED = [
-  { id: "l1", tipo: "receita", descricao: "OS-0002 · Prime Imóveis", clienteId: "c3", valor: 1180, vencimento: addDays(HOJE, 11), pago: false, origemTipo: "os", origemId: "os2", categoria: "Serviços" },
-  { id: "l2", tipo: "receita", descricao: "Manutenção interfone · Cond. Jardins", clienteId: "c1", valor: 540, vencimento: addDays(HOJE, -9), pago: true, pagoEm: addDays(HOJE, -9), forma: "Pix", origemTipo: "manual", categoria: "Serviços" },
-  { id: "l3", tipo: "receita", descricao: "Instalação CFTV · Padaria Pão Nosso", clienteId: "c4", valor: 750, vencimento: addDays(HOJE, -2), pago: true, pagoEm: addDays(HOJE, -2), forma: "Transferência", origemTipo: "manual", categoria: "Serviços" },
-  { id: "l7", tipo: "receita", descricao: "Configuração de tags · Cond. Jardins", clienteId: "c1", valor: 640, vencimento: addDays(HOJE, -6), pago: false, origemTipo: "manual", categoria: "Serviços" },
-  { id: "l4", tipo: "despesa", descricao: "Compra CMP-0002 · Casa das Fontes", valor: 760, vencimento: addDays(HOJE, -7), pago: true, pagoEm: addDays(HOJE, -7), forma: "Pix", origemTipo: "compra", origemId: "cp2", categoria: "Materiais" },
-  { id: "l5", tipo: "despesa", descricao: "Combustível", valor: 320, vencimento: addDays(HOJE, -5), pago: true, pagoEm: addDays(HOJE, -5), forma: "Dinheiro", origemTipo: "manual", categoria: "Deslocamento" },
-  { id: "l6", tipo: "despesa", descricao: "Plano de celular e internet", valor: 189, vencimento: addDays(HOJE, 4), pago: false, origemTipo: "manual", categoria: "Fixas" },
-  { id: "l8", tipo: "despesa", descricao: "Compra CMP-0001 · Distribuidora Eletro Sul", valor: 1842.5, vencimento: addDays(HOJE, 9), pago: false, origemTipo: "compra", origemId: "cp1", categoria: "Materiais" },
+  { id: "l1", tipo: "receita", descricao: "OS-0002 · Prime Imóveis", clienteId: "c3", valor: 1180, vencimento: addDays(HOJE_SEED, 11), pago: false, origemTipo: "os", origemId: "os2", categoria: "Serviços" },
+  { id: "l2", tipo: "receita", descricao: "Manutenção interfone · Cond. Jardins", clienteId: "c1", valor: 540, vencimento: addDays(HOJE_SEED, -9), pago: true, pagoEm: addDays(HOJE_SEED, -9), forma: "Pix", origemTipo: "manual", categoria: "Serviços" },
+  { id: "l3", tipo: "receita", descricao: "Instalação CFTV · Padaria Pão Nosso", clienteId: "c4", valor: 750, vencimento: addDays(HOJE_SEED, -2), pago: true, pagoEm: addDays(HOJE_SEED, -2), forma: "Transferência", origemTipo: "manual", categoria: "Serviços" },
+  { id: "l7", tipo: "receita", descricao: "Configuração de tags · Cond. Jardins", clienteId: "c1", valor: 640, vencimento: addDays(HOJE_SEED, -6), pago: false, origemTipo: "manual", categoria: "Serviços" },
+  { id: "l4", tipo: "despesa", descricao: "Compra CMP-0002 · Casa das Fontes", valor: 760, vencimento: addDays(HOJE_SEED, -7), pago: true, pagoEm: addDays(HOJE_SEED, -7), forma: "Pix", origemTipo: "compra", origemId: "cp2", categoria: "Materiais" },
+  { id: "l5", tipo: "despesa", descricao: "Combustível", valor: 320, vencimento: addDays(HOJE_SEED, -5), pago: true, pagoEm: addDays(HOJE_SEED, -5), forma: "Dinheiro", origemTipo: "manual", categoria: "Deslocamento" },
+  { id: "l6", tipo: "despesa", descricao: "Plano de celular e internet", valor: 189, vencimento: addDays(HOJE_SEED, 4), pago: false, origemTipo: "manual", categoria: "Fixas" },
+  { id: "l8", tipo: "despesa", descricao: "Compra CMP-0001 · Distribuidora Eletro Sul", valor: 1842.5, vencimento: addDays(HOJE_SEED, 9), pago: false, origemTipo: "compra", origemId: "cp1", categoria: "Materiais" },
 ];
 
 const COMPRAS_SEED = [
-  { id: "cp1", numero: "CMP-0001", fornecedor: "Distribuidora Eletro Sul", data: addDays(HOJE, -6), itens: [{ id: uid(), nome: "Fechadura digital biométrica · Intelbras FR 320", qtd: 2, custo: 620 }, { id: uid(), nome: "Câmera bullet Full HD · Intelbras VHD 1220 B", qtd: 2, custo: 210 }, { id: uid(), nome: "Tag de proximidade RFID · Intelbras TH 2000", qtd: 40, custo: 4.5 }], forma: "Boleto", vencimento: addDays(HOJE, 9), anexos: [{ id: uid(), nome: "boleto-eletro-sul-08.pdf" }], lancamentoId: "l8", obs: "Pedido 88412." },
-  { id: "cp2", numero: "CMP-0002", fornecedor: "Casa das Fontes", data: addDays(HOJE, -7), itens: [{ id: uid(), nome: "Fonte colmeia 12V 10A · Vetti VT-1210", qtd: 8, custo: 95 }], forma: "Pix", vencimento: addDays(HOJE, -7), anexos: [], lancamentoId: "l4", obs: "" },
+  { id: "cp1", numero: "CMP-0001", fornecedor: "Distribuidora Eletro Sul", data: addDays(HOJE_SEED, -6), itens: [{ id: uid(), nome: "Fechadura digital biométrica · Intelbras FR 320", qtd: 2, custo: 620 }, { id: uid(), nome: "Câmera bullet Full HD · Intelbras VHD 1220 B", qtd: 2, custo: 210 }, { id: uid(), nome: "Tag de proximidade RFID · Intelbras TH 2000", qtd: 40, custo: 4.5 }], forma: "Boleto", vencimento: addDays(HOJE_SEED, 9), anexos: [{ id: uid(), nome: "boleto-eletro-sul-08.pdf" }], lancamentoId: "l8", obs: "Pedido 88412." },
+  { id: "cp2", numero: "CMP-0002", fornecedor: "Casa das Fontes", data: addDays(HOJE_SEED, -7), itens: [{ id: uid(), nome: "Fonte colmeia 12V 10A · Vetti VT-1210", qtd: 8, custo: 95 }], forma: "Pix", vencimento: addDays(HOJE_SEED, -7), anexos: [], lancamentoId: "l4", obs: "" },
 ];
 
 const GARANTIAS_SEED = [
-  { id: "g1", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s5", descricao: "Manutenção de interfone", local: "Bloco B", inicio: addDays(HOJE, -4), dias: 30, ate: addDays(HOJE, 26), serie: "" },
-  { id: "g2", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s2", descricao: "Configuração de controle de acesso", local: "Bloco B", inicio: addDays(HOJE, -4), dias: 90, ate: addDays(HOJE, 86), serie: "" },
-  { id: "g3", clienteId: "c4", osId: null, tipo: "servico", servicoId: "s4", descricao: "Instalação de câmera CFTV", local: "Área de produção", inicio: addDays(HOJE, -120), dias: 90, ate: addDays(HOJE, -30), serie: "" },
+  { id: "g1", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s5", descricao: "Manutenção de interfone", local: "Bloco B", inicio: addDays(HOJE_SEED, -4), dias: 30, ate: addDays(HOJE_SEED, 26), serie: "" },
+  { id: "g2", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s2", descricao: "Configuração de controle de acesso", local: "Bloco B", inicio: addDays(HOJE_SEED, -4), dias: 90, ate: addDays(HOJE_SEED, 86), serie: "" },
+  { id: "g3", clienteId: "c4", osId: null, tipo: "servico", servicoId: "s4", descricao: "Instalação de câmera CFTV", local: "Área de produção", inicio: addDays(HOJE_SEED, -120), dias: 90, ate: addDays(HOJE_SEED, -30), serie: "" },
 ];
 
 /* ============================================ empresa · usuários · acesso
@@ -236,35 +237,35 @@ const PLATFORM_ADMIN = "platform_admin";
 const ehPlataforma = (u) => u?.papelPlataforma === PLATFORM_ADMIN;
 
 const EMPRESAS_SEED = [
-  { ...EMPRESA_SEED, id: "e1", criadaEm: addDays(HOJE, -240) },
+  { ...EMPRESA_SEED, id: "e1", criadaEm: addDays(HOJE_SEED, -240) },
   {
     id: "e2", nome: "Carlos Elétrica", documento: "29.110.884/0001-30",
     atividade: "Instalações elétricas prediais", telefone: "(11) 3411-9080",
     whatsapp: "(11) 98330-1177", email: "contato@carloseletrica.com.br",
     endereco: "Rua Tuiuti, 210 — Tatuapé, São Paulo/SP", responsavel: "Carlos Prado",
-    temEquipe: false, validadePadrao: 10, criadaEm: addDays(HOJE, -35),
+    temEquipe: false, validadePadrao: 10, criadaEm: addDays(HOJE_SEED, -35),
     condicaoPadrao: "Pagamento à vista na conclusão.", observacaoPadrao: "",
   },
 ];
 
 const USUARIOS_SEED = [
-  { id: "u1", nome: "Jonas Ribeiro", email: "jonas@jrservicostecnicos.com.br", ultimoAcesso: HOJE },
-  { id: "u2", nome: "Diego Farias", email: "diego@jrservicostecnicos.com.br", telefone: "(11) 97744-2019", funcao: "Técnico instalador", ultimoAcesso: addDays(HOJE, -1) },
-  { id: "u3", nome: "Carlos Prado", email: "carlos@carloseletrica.com.br", ultimoAcesso: addDays(HOJE, -4) },
-  { id: "u0", nome: "João — ZiisTec", email: "joao@ziistec.com.br", papelPlataforma: PLATFORM_ADMIN, ultimoAcesso: HOJE },
+  { id: "u1", nome: "Jonas Ribeiro", email: "jonas@jrservicostecnicos.com.br", ultimoAcesso: HOJE_SEED },
+  { id: "u2", nome: "Diego Farias", email: "diego@jrservicostecnicos.com.br", telefone: "(11) 97744-2019", funcao: "Técnico instalador", ultimoAcesso: addDays(HOJE_SEED, -1) },
+  { id: "u3", nome: "Carlos Prado", email: "carlos@carloseletrica.com.br", ultimoAcesso: addDays(HOJE_SEED, -4) },
+  { id: "u0", nome: "João — ZiisTec", email: "joao@ziistec.com.br", papelPlataforma: PLATFORM_ADMIN, ultimoAcesso: HOJE_SEED },
 ];
 
 /* vínculo usuário ⇄ empresa: é aqui que mora o papel */
 const MEMBRESIAS_SEED = [
-  { id: "m1", usuarioId: "u1", empresaId: "e1", papel: "proprietario", ativo: true, desde: addDays(HOJE, -240) },
-  { id: "m2", usuarioId: "u2", empresaId: "e1", papel: "tecnico", ativo: true, desde: addDays(HOJE, -90) },
-  { id: "m3", usuarioId: "u3", empresaId: "e2", papel: "proprietario", ativo: true, desde: addDays(HOJE, -35) },
+  { id: "m1", usuarioId: "u1", empresaId: "e1", papel: "proprietario", ativo: true, desde: addDays(HOJE_SEED, -240) },
+  { id: "m2", usuarioId: "u2", empresaId: "e1", papel: "tecnico", ativo: true, desde: addDays(HOJE_SEED, -90) },
+  { id: "m3", usuarioId: "u3", empresaId: "e2", papel: "proprietario", ativo: true, desde: addDays(HOJE_SEED, -35) },
 ];
 
 const PLANO = { nome: "Profissional", valor: 79.9 };
 const ASSINATURAS_SEED = [
-  { id: "a1", empresaId: "e1", plano: PLANO.nome, valor: PLANO.valor, status: "ativa", inicio: addDays(HOJE, -240), proximaCobranca: addDays(HOJE, 12) },
-  { id: "a2", empresaId: "e2", plano: PLANO.nome, valor: PLANO.valor, status: "pendente", inicio: addDays(HOJE, -35), proximaCobranca: addDays(HOJE, -3) },
+  { id: "a1", empresaId: "e1", plano: PLANO.nome, valor: PLANO.valor, status: "ativa", inicio: addDays(HOJE_SEED, -240), proximaCobranca: addDays(HOJE_SEED, 12) },
+  { id: "a2", empresaId: "e2", plano: PLANO.nome, valor: PLANO.valor, status: "pendente", inicio: addDays(HOJE_SEED, -35), proximaCobranca: addDays(HOJE_SEED, -3) },
 ];
 const ST_ASSINATURA = {
   trial: { label: "Avaliação", tone: "marca", libera: true },
@@ -292,7 +293,7 @@ const senhaTemporaria = () => {
 const DADOS_E2 = {
   clientes: [{ id: "c9", empresaId: "e2", tipo: "PF", nome: "Ricardo Menezes", documento: "512.900.331-07", telefone: "(11) 4002-8922", whatsapp: "(11) 99120-4455", endereco: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", obs: "" }],
   servicos: [{ id: "s9", empresaId: "e2", nome: "Troca de disjuntor", categoria: "Elétrica", unidade: "unidade", preco: 150, custo: 45, descricao: "Substituição com teste de carga.", ativo: true, garantiaDias: 90, retornoDias: 0 }],
-  ordens: [{ ...osBase, id: "os9", empresaId: "e2", numero: "OS-0001", clienteId: "c9", orcamentoId: null, status: "agendada", data: HOJE, hora: "15:00", responsavelId: "u3", responsavel: "Carlos Prado", local: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", localServico: "Quadro geral", itens: [], descricaoLivre: "Quadro desarmando ao ligar o chuveiro. Verificar disjuntor e fiação.", obs: "", checklist: [], historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] }],
+  ordens: [{ ...osBase, id: "os9", empresaId: "e2", numero: "OS-0001", clienteId: "c9", orcamentoId: null, status: "agendada", data: HOJE_SEED, hora: "15:00", responsavelId: "u3", responsavel: "Carlos Prado", local: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", localServico: "Quadro geral", itens: [], descricaoLivre: "Quadro desarmando ao ligar o chuveiro. Verificar disjuntor e fiação.", obs: "", checklist: [], historico: [{ id: uid(), quando: HOJE_SEED, texto: "Ordem de serviço criada" }] }],
 };
 
 /* toda entidade empresarial carrega empresaId desde a origem */
@@ -384,7 +385,7 @@ const ST_OS = {
   concluida: { label: "Concluída", tone: "sucesso" },
   cancelada: { label: "Cancelada", tone: "erro" },
 };
-const statusLanc = (l) => (l.pago ? { label: l.tipo === "receita" ? "Recebido" : "Pago", tone: "sucesso" } : l.vencimento < HOJE ? { label: "Vencido", tone: "erro" } : { label: l.tipo === "receita" ? "A receber" : "A pagar", tone: "atencao" });
+const statusLanc = (l) => (l.pago ? { label: l.tipo === "receita" ? "Recebido" : "Pago", tone: "sucesso" } : l.vencimento < hojeISO() ? { label: "Vencido", tone: "erro" } : { label: l.tipo === "receita" ? "A receber" : "A pagar", tone: "atencao" });
 
 const Panel = ({ children, className }) => <div className={cx("bg-white rounded-2xl ring-1 ring-slate-200/70", className)}>{children}</div>;
 
@@ -709,6 +710,7 @@ Formato: {"texto":"DIAGNÓSTICO\\n...\\n\\nSERVIÇO EXECUTADO\\n...\\n\\nTESTES\
 
 /* ================================================================== App */
 export default function ZiisTec({ contexto }) {
+  useDiaLocal();
   /* contexto vem do Supabase (Fase 1). Quando presente, substitui a
      autenticação simulada e os dados de demonstração de empresa/usuário. */
   const real = Boolean(contexto);
@@ -951,7 +953,7 @@ export default function ZiisTec({ contexto }) {
     if (existente && membresias.some((m) => m.usuarioId === existente.id && m.empresaId === empresaId)) { aviso("Esta pessoa já faz parte da sua equipe."); return null; }
     const usuarioId = existente?.id || uid();
     if (!existente) setUsuarios((l) => [...l, { id: usuarioId, nome, email: limpo, telefone: telefone || "", funcao: funcao || "", ultimoAcesso: null, precisaTrocarSenha: true }]);
-    setMembresias((l) => [...l, { id: uid(), usuarioId, empresaId, papel: pp, ativo: true, desde: HOJE, convite: "pendente" }]);
+    setMembresias((l) => [...l, { id: uid(), usuarioId, empresaId, papel: pp, ativo: true, desde: hojeISO(), convite: "pendente" }]);
     aviso(`${nome} foi convidado para a equipe.`); return { usuarioId, senhaTemporaria: senhaTemporaria() };
   };
   const atualizarColaborador = async (usuarioId, dados) => {
@@ -969,7 +971,7 @@ export default function ZiisTec({ contexto }) {
     return senhaTemporaria();
   };
   const concluirPrimeiroAcesso = (usuarioId) => {
-    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, precisaTrocarSenha: false, ultimoAcesso: HOJE } : u)));
+    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, precisaTrocarSenha: false, ultimoAcesso: hojeISO() } : u)));
     setMembresias((l) => l.map((m) => (m.usuarioId === usuarioId ? { ...m, convite: "aceito" } : m)));
   };
   const alternarColaborador = async (m) => {
@@ -1052,11 +1054,11 @@ export default function ZiisTec({ contexto }) {
   /* duplicar: copia cliente, itens e condições; não leva aprovação, OS nem número */
   const duplicarOrcamento = async (o) => {
     if (real) {
-      try { const novo=await duplicarOrcamentoDB(o,empresaId,usuarioAtual?.id,addDays(HOJE,empresa.validadePadrao)); setOrcamentos((l)=>[novo,...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id); }
+      try { const novo=await duplicarOrcamentoDB(o,empresaId,usuarioAtual?.id,addDays(hojeISO(),empresa.validadePadrao)); setOrcamentos((l)=>[novo,...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id); }
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, status: "rascunho", data: HOJE, validade: addDays(HOJE, empresa.validadePadrao), osId: null, itens: o.itens.map((i) => ({ ...i, id: uid() })) };
+    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, status: "rascunho", data: hojeISO(), validade: addDays(hojeISO(), empresa.validadePadrao), osId: null, itens: o.itens.map((i) => ({ ...i, id: uid() })) };
     setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id);
   };
   const mudarStatusOrc = async (id, status) => {
@@ -1075,7 +1077,7 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: orc.clienteId, orcamentoId: orc.id, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: orc.local || c?.endereco || "", localServico: orc.localServico || "", itens: orc.itens.map((i) => ({ ...i, id: uid() })), obs: orc.obs, checklist: [], historico: [{ id: uid(), quando: HOJE, texto: `Gerada a partir do ${orc.numero}` }] };
+    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: orc.clienteId, orcamentoId: orc.id, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: orc.local || c?.endereco || "", localServico: orc.localServico || "", itens: orc.itens.map((i) => ({ ...i, id: uid() })), obs: orc.obs, checklist: [], historico: [{ id: uid(), quando: hojeISO(), texto: `Gerada a partir do ${orc.numero}` }] };
     setOrdens((l) => [nova, ...l]); setOrcamentos((l) => l.map((o) => (o.id === orc.id ? { ...o, osId: nova.id } : o))); aviso(`${nova.numero} criada. Falta definir a data.`); setTela("ordens"); setOrcamentoAberto(null); setOsAberta(nova.id);
   };
 
@@ -1126,7 +1128,7 @@ export default function ZiisTec({ contexto }) {
     let salvoId = os.id || null;
     if (os.id) setOrdens((l) => l.map((x) => (x.id === os.id ? os : x)));
     else {
-      const nova = { ...osBase, ...os, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: os.responsavelId || usuarioAtual?.id, historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] };
+      const nova = { ...osBase, ...os, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: os.responsavelId || usuarioAtual?.id, historico: [{ id: uid(), quando: hojeISO(), texto: "Ordem de serviço criada" }] };
       salvoId = nova.id;
       setOrdens((l) => [nova, ...l]);
       if (nova.orcamentoId) setOrcamentos((l) => l.map((o) => o.id === nova.orcamentoId ? { ...o, osId: nova.id } : o));
@@ -1140,7 +1142,7 @@ export default function ZiisTec({ contexto }) {
     if (real) {
       try { const salvo=await atualizarOSDB(osId,{scheduled_date:data,scheduled_time:hora||null,assigned_to:responsavelId||null,status:'scheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?{...mesclarOSRelida(x,salvo),responsavel}:x)); }
       catch(e){ aviso(mensagemErro(e)); return false; }
-    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data, hora, responsavel, responsavelId: responsavelId || x.responsavelId, status: x.status === "aguardando" || x.status === "agendada" ? "agendada" : x.status, historico: [...x.historico, { id: uid(), quando: HOJE, texto: `Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""} · ${responsavel}` }] } : x));
+    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data, hora, responsavel, responsavelId: responsavelId || x.responsavelId, status: x.status === "aguardando" || x.status === "agendada" ? "agendada" : x.status, historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: `Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""} · ${responsavel}` }] } : x));
     aviso(`Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""}`);
     return true;
   };
@@ -1148,7 +1150,7 @@ export default function ZiisTec({ contexto }) {
     if (real) {
       try { const salvo=await atualizarOSDB(osId,{scheduled_date:null,scheduled_time:null,status:'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?mesclarOSRelida(x,salvo):x)); }
       catch(e){ aviso(mensagemErro(e)); return; }
-    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data: "", hora: "", status: "aguardando", historico: [...x.historico, { id: uid(), quando: HOJE, texto: "Agendamento removido" }] } : x));
+    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data: "", hora: "", status: "aguardando", historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: "Agendamento removido" }] } : x));
     aviso("Agendamento removido");
   };
   const mudarStatusOS = async (os, status) => {
@@ -1162,7 +1164,7 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, status, historico: [...x.historico, { id: uid(), quando: HOJE, texto: `Status alterado para ${ST_OS[status].label}` }] } : x));
+    setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, status, historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: `Status alterado para ${ST_OS[status].label}` }] } : x));
   };
 
   /* finalizar atendimento — protegido contra duplicação de cobrança/garantia */
@@ -1186,14 +1188,14 @@ export default function ZiisTec({ contexto }) {
     if (!atual || atual.status === "concluida" || atual.cobrancaId) { aviso("Esta ordem já foi finalizada."); return; }
     const os = { ...atual, ...extras };
     const total = totalOS(os);
-    const execucao = os.data || HOJE;
+    const execucao = os.data || hojeISO();
     const cobrancaId = total > 0 ? uid() : null;
 
     /* uma OS gera no máximo uma conta a receber; atendimento em garantia sem valor não gera nenhuma */
     if (cobrancaId) {
       setLancamentos((l) => l.some((x) => x.origemTipo === "os" && x.origemId === osId) ? l : [{
         id: cobrancaId, empresaId, tipo: "receita", descricao: `${os.numero} · ${nomeCliente(os.clienteId)}`, clienteId: os.clienteId,
-        valor: total, vencimento: addDays(HOJE, 7), pago: false, origemTipo: "os", origemId: osId, categoria: "Serviços",
+        valor: total, vencimento: addDays(hojeISO(), 7), pago: false, origemTipo: "os", origemId: osId, categoria: "Serviços",
       }, ...l]);
     }
 
@@ -1214,7 +1216,7 @@ export default function ZiisTec({ contexto }) {
           const meses = politica === "disabled" ? 0 : politica === "custom" ? Number(i.garantiaMesesOverride || 0) : Number(pr?.garantiaMeses || 0);
           if (meses > 0) novasGarantias.push({
             id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "produto", descricao: i.nome, produtoId: pr?.id || i.catalogoId,
-            local: os.localServico, inicio: execucao, meses, ate: addMeses(execucao, meses), serie: extras.series?.[i.id] || "",
+            local: os.localServico, inicio: execucao, meses, ate: addMesesISO(execucao, meses), serie: extras.series?.[i.id] || "",
           });
         }
       });
@@ -1225,16 +1227,16 @@ export default function ZiisTec({ contexto }) {
     let retorno = null;
     os.itens.forEach((i) => {
       const s = servicos.find((x) => x.id === i.catalogoId);
-      if (s?.retornoDias > 0) { const d = addDays(HOJE, s.retornoDias); if (!retorno || d < retorno.data) retorno = { data: d, servico: s.nome }; }
+      if (s?.retornoDias > 0) { const d = addDays(hojeISO(), s.retornoDias); if (!retorno || d < retorno.data) retorno = { data: d, servico: s.nome }; }
     });
 
     setOrdens((l) => l.map((x) => x.id === osId ? {
       ...x, ...extras, status: "concluida", cobrancaId, retorno,
       historico: [...x.historico,
-        { id: uid(), quando: HOJE, texto: "Serviço concluído" },
-        ...(cobrancaId ? [{ id: uid(), quando: HOJE, texto: `Cobrança de ${brl(total)} gerada em contas a receber` }]
-          : [{ id: uid(), quando: HOJE, texto: "Atendimento sem cobrança" }]),
-        ...(novasGarantias.length ? [{ id: uid(), quando: HOJE, texto: `${novasGarantias.length} garantia(s) registrada(s) a partir dos serviços executados` }] : []),
+        { id: uid(), quando: hojeISO(), texto: "Serviço concluído" },
+        ...(cobrancaId ? [{ id: uid(), quando: hojeISO(), texto: `Cobrança de ${brl(total)} gerada em contas a receber` }]
+          : [{ id: uid(), quando: hojeISO(), texto: "Atendimento sem cobrança" }]),
+        ...(novasGarantias.length ? [{ id: uid(), quando: hojeISO(), texto: `${novasGarantias.length} garantia(s) registrada(s) a partir dos serviços executados` }] : []),
       ],
     } : x));
     aviso(cobrancaId
@@ -1263,7 +1265,7 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: g.clienteId, orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: origem?.local || cliente(g.clienteId)?.endereco || "", localServico: g.local || origem?.localServico || "", itens: [], obs: `Atendimento em garantia de "${g.descricao}", executado em ${dataBR(g.inicio)}.`, checklist: [], emGarantia: true, garantiaId: g.id, osOrigemId: g.osId, relatoProblema: relatoProblema || "", historico: [{ id: uid(), quando: HOJE, texto: `Aberta em garantia de ${g.descricao}${origem ? ` (${origem.numero})` : ""}` }] };
+    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: g.clienteId, orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: origem?.local || cliente(g.clienteId)?.endereco || "", localServico: g.local || origem?.localServico || "", itens: [], obs: `Atendimento em garantia de "${g.descricao}", executado em ${dataBR(g.inicio)}.`, checklist: [], emGarantia: true, garantiaId: g.id, osOrigemId: g.osId, relatoProblema: relatoProblema || "", historico: [{ id: uid(), quando: hojeISO(), texto: `Aberta em garantia de ${g.descricao}${origem ? ` (${origem.numero})` : ""}` }] };
     setOrdens((l) => [nova, ...l]); aviso(`${nova.numero} aberta em garantia. Falta definir a data.`); setTela("ordens"); setOsAberta(nova.id);
   };
 
@@ -1274,10 +1276,10 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    setLancamentos((ls) => ls.map((x) => (x.id === l.id ? { ...x, pago: !x.pago, pagoEm: x.pago ? null : HOJE, forma: x.pago ? null : forma } : x)));
+    setLancamentos((ls) => ls.map((x) => (x.id === l.id ? { ...x, pago: !x.pago, pagoEm: x.pago ? null : hojeISO(), forma: x.pago ? null : forma } : x)));
     if (!l.pago) {
       if (l.origemTipo === "os" && l.origemId)
-        setOrdens((os) => os.map((o) => o.id === l.origemId ? { ...o, historico: [...o.historico, { id: uid(), quando: HOJE, texto: `Pagamento de ${brl(l.valor)} recebido via ${forma}` }] } : o));
+        setOrdens((os) => os.map((o) => o.id === l.origemId ? { ...o, historico: [...o.historico, { id: uid(), quando: hojeISO(), texto: `Pagamento de ${brl(l.valor)} recebido via ${forma}` }] } : o));
       aviso(`${brl(l.valor)} ${l.tipo === "receita" ? "recebido" : "pago"} via ${forma}`);
     } else aviso("Baixa desfeita");
   };
@@ -1292,7 +1294,7 @@ export default function ZiisTec({ contexto }) {
     const total = c.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
     if (c.id) { setCompras((l) => l.map((x) => (x.id === c.id ? c : x))); setLancamentos((l) => l.map((x) => x.id === c.lancamentoId ? { ...x, valor: total, vencimento: c.vencimento, descricao: `Compra ${c.numero} · ${c.fornecedor}` } : x)); aviso("Compra atualizada"); return true; }
     const id = uid(); const numero = proxNumero(comprasEmp, "CMP"); const lancamentoId = uid();
-    setLancamentos((l) => [{ id: lancamentoId, empresaId, tipo: "despesa", descricao: `Compra ${numero} · ${c.fornecedor}`, valor: total, vencimento: c.vencimento || HOJE, pago: !!c.jaPago, pagoEm: c.jaPago ? HOJE : null, forma: c.jaPago ? c.forma : null, origemTipo: "compra", origemId: id, categoria: "Materiais" }, ...l]);
+    setLancamentos((l) => [{ id: lancamentoId, empresaId, tipo: "despesa", descricao: `Compra ${numero} · ${c.fornecedor}`, valor: total, vencimento: c.vencimento || hojeISO(), pago: !!c.jaPago, pagoEm: c.jaPago ? hojeISO() : null, forma: c.jaPago ? c.forma : null, origemTipo: "compra", origemId: id, categoria: "Materiais" }, ...l]);
     setCompras((l) => [{ ...c, id, numero, lancamentoId, empresaId }, ...l]); aviso(`${numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(id); return true;
   };
 
@@ -1401,12 +1403,12 @@ export default function ZiisTec({ contexto }) {
         const eId = uid(), uId = uid(), mId = uid();
         setEmpresas((l) => [...l, { id: eId, nome: dados.empresa, documento: "", atividade: dados.atividade,
           telefone: "", whatsapp: "", email: dados.email, endereco: "", responsavel: dados.nome,
-          temEquipe: dados.temEquipe, validadePadrao: 15, criadaEm: HOJE,
+          temEquipe: dados.temEquipe, validadePadrao: 15, criadaEm: hojeISO(),
           condicaoPadrao: "50% na aprovação e 50% na entrega do serviço.", observacaoPadrao: "" }]);
-        setUsuarios((l) => [...l, { id: uId, nome: dados.nome, email: dados.email, ultimoAcesso: HOJE }]);
-        setMembresias((l) => [...l, { id: mId, usuarioId: uId, empresaId: eId, papel: "proprietario", ativo: true, desde: HOJE }]);
+        setUsuarios((l) => [...l, { id: uId, nome: dados.nome, email: dados.email, ultimoAcesso: hojeISO() }]);
+        setMembresias((l) => [...l, { id: mId, usuarioId: uId, empresaId: eId, papel: "proprietario", ativo: true, desde: hojeISO() }]);
         setAssinaturas((l) => [...l, { id: uid(), empresaId: eId, plano: PLANO.nome, valor: PLANO.valor,
-          status: "trial", inicio: HOJE, proximaCobranca: addDays(HOJE, 14) }]);
+          status: "trial", inicio: hojeISO(), proximaCobranca: addDays(hojeISO(), 14) }]);
         setSessao({ usuarioId: uId, membresiaId: mId });
         setTela("inicio");
       }} /></>
@@ -1714,13 +1716,13 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarSt
     carregarRevisoesDB(empresaId).then((r)=>{ if(ativo) setRevisoesInicio(r); }).catch((e)=>aviso?.(e?.message || "Não foi possível carregar o pós-venda."));
     return ()=>{ ativo=false; };
   }, [real, empresaId, papel]);
-  const hojeOS = ordens.filter((o) => o.data === HOJE && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const proximas = ordens.filter((o) => o.data > HOJE && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 3);
+  const hojeOS = ordens.filter((o) => o.data === hojeISO() && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const proximas = ordens.filter((o) => o.data > hojeISO() && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 3);
   /* Meu dia (técnico): 1 em andamento, 2 horário marcado, 3 demais atribuídas. O que já está em andamento aparece mesmo de outro dia. */
-  const meuDia = sortTechnicianDay(ordens.filter((o) => o.status === "andamento" || o.data === HOJE));
+  const meuDia = sortTechnicianDay(ordens.filter((o) => o.status === "andamento" || o.data === hojeISO()));
   const agora = useAgora(meuDia.some((o) => o.status === "andamento"));
 
-  const mes = mesRef(HOJE);
+  const mes = mesRef(hojeISO());
   const noMes = (l) => mesRef(l.pago ? l.pagoEm : l.vencimento) === mes;
   const soma = (ls) => ls.reduce((t, l) => t + l.valor, 0);
   const recebido = soma(lancamentos.filter((l) => l.tipo === "receita" && l.pago && noMes(l)));
@@ -1728,20 +1730,20 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarSt
   const aPagar = soma(lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && noMes(l)));
   const despesasPagas = soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago && noMes(l)));
 
-  const recentes = concluidasRecentemente(ordens, HOJE);
+  const recentes = concluidasRecentemente(ordens, hojeISO());
   const semEstoque = papel === "proprietario" ? produtosComEstoqueBaixo(produtos) : [];
 
   const pend = [];
   if (papel === "proprietario") {
-    const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= HOJE);
-    const atrasadas = revisoesPendentes.filter((r)=>r.data < HOJE);
-    const hoje = revisoesPendentes.filter((r)=>r.data === HOJE);
+    const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= hojeISO());
+    const atrasadas = revisoesPendentes.filter((r)=>r.data < hojeISO());
+    const hoje = revisoesPendentes.filter((r)=>r.data === hojeISO());
     if (atrasadas.length) pend.push({ id:"pos-venda-atrasado", tom:"erro", titulo: atrasadas.length + " retorno" + (atrasadas.length>1?"s":"") + " de pós-venda atrasado" + (atrasadas.length>1?"s":""), detalhe:"Mais antigo: " + dataBR(atrasadas[0].data), acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
     if (hoje.length) pend.push({ id:"pos-venda-hoje", tom:"atencao", titulo: hoje.length + " retorno" + (hoje.length>1?"s":"") + " de pós-venda para hoje", detalhe:"Revisar clientes e concluir ou dispensar", acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
     if (semEstoque.length) pend.push({ id:"estoque-baixo", tom:"atencao", titulo: semEstoque.length + " produto" + (semEstoque.length>1?"s":"") + " com estoque baixo", detalhe: semEstoque.slice(0, 3).map((p) => p.nome).join(" · ") + (semEstoque.length > 3 ? " · +" + (semEstoque.length - 3) : ""), acao:"Ver estoque", ir:()=>(abrirV2 ? abrirV2("produtos") : irPara("catalogo")) });
   }
   if (verFinanceiro) {
-  const vencidas = lancamentos.filter((l) => !l.pago && l.vencimento < HOJE);
+  const vencidas = lancamentos.filter((l) => !l.pago && l.vencimento < hojeISO());
   const vencR = vencidas.filter((l) => l.tipo === "receita");
   const vencD = vencidas.filter((l) => l.tipo === "despesa");
   if (vencR.length) pend.push({ id: "vr", tom: "erro", titulo: `${vencR.length} cobrança${vencR.length > 1 ? "s" : ""} vencida${vencR.length > 1 ? "s" : ""}`, detalhe: `${brl(soma(vencR))} em atraso`, acao: "Ver no financeiro", ir: () => irPara("financeiro") });
@@ -1785,7 +1787,7 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarSt
       <div className="flex flex-wrap items-end justify-between gap-4 mb-7">
         <div>
           <p className="text-[15px] text-slate-500">{saudacao}, {(usuarioAtual?.nome || empresa.responsavel).split(" ")[0]}</p>
-          <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em] mt-0.5">{diaSemana(HOJE)}, {dataBR(HOJE)}</h1>
+          <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em] mt-0.5">{diaSemana(hojeISO())}, {dataBR(hojeISO())}</h1>
         </div>
         <div className="flex flex-wrap gap-2">
           {atalhos.map((a) => (
@@ -1909,7 +1911,7 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarSt
 /* =================================================================== Agenda */
 function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, orcamentos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao, real }) {
   const tecnico = papel === "tecnico";
-  const [dia, setDia] = useState(HOJE);
+  const [dia, setDia] = useState(hojeISO());
   const [visao, setVisao] = useState(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "lista" : "semana"));
   const [filtro, setFiltro] = useState("proximos");
   const [tecnicoId, setTecnicoId] = useState("");
@@ -1937,22 +1939,22 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
   const termo = semAcento(busca.trim());
   const bateBusca = (o) => !termo || semAcento([o.numero, nomeCliente(o.clienteId), o.local, o.localServico, resumoOS(o), o.responsavel].filter(Boolean).join(" ")).includes(termo);
   const baseBusca = ordens.filter(bateBusca);
-  const ownerLista = filterOwnerAgenda(baseBusca, { filter: filtro, today: HOJE, technicianId: tecnicoId });
+  const ownerLista = filterOwnerAgenda(baseBusca, { filter: filtro, today: hojeISO(), technicianId: tecnicoId });
   const ownerGrupos = groupAgendaOrders(ownerLista, filtro);
-  const meuDia = technicianDayAgenda(baseBusca, { userId: usuarioAtual?.id, day: dia, today: HOJE });
+  const meuDia = technicianDayAgenda(baseBusca, { userId: usuarioAtual?.id, day: dia, today: hojeISO() });
   const tecnicos = equipe.filter((m) => m.papel === "tecnico" && m.ativo !== false);
   const nomeTecnico = (os) => equipe.find((m) => m.usuarioId === os.responsavelId)?.usuario?.nome || os.responsavel || "Sem técnico";
-  const semAgenda = filterOwnerAgenda(baseBusca, { filter: "semdata", today: HOJE, technicianId: tecnicoId });
+  const semAgenda = filterOwnerAgenda(baseBusca, { filter: "semdata", today: hojeISO(), technicianId: tecnicoId });
 
   const rotuloGrupo = (data) => {
     if (data === "sem-data") return "Sem data";
-    if (data === HOJE) return "Hoje";
-    if (data === addDays(HOJE, 1)) return "Amanhã";
+    if (data === hojeISO()) return "Hoje";
+    if (data === addDays(hojeISO(), 1)) return "Amanhã";
     return `${diaSemana(data).replace("-feira", "")}, ${dataBR(data)}`;
   };
   const rotuloFiltro = { hoje: "Hoje", proximos: "Próximos", semdata: "Sem data", concluidos: "Concluídos" }[filtro] || "Agenda";
-  const abrirHoje = () => { setDia(HOJE); setVisao("lista"); if (!tecnico) setFiltro("hoje"); };
-  const selecionarFiltro = (id) => { setFiltro(id); setVisao("lista"); if (id === "hoje") setDia(HOJE); };
+  const abrirHoje = () => { setDia(hojeISO()); setVisao("lista"); if (!tecnico) setFiltro("hoje"); };
+  const selecionarFiltro = (id) => { setFiltro(id); setVisao("lista"); if (id === "hoje") setDia(hojeISO()); };
 
   const CardAgenda = ({ os, atraso = false }) => {
     const st = ST_OS[os.status] || { label: os.status || "Status", tone: "neutro" };
@@ -1988,8 +1990,8 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
         <div className="flex items-center justify-between gap-2">
           <button onClick={() => setDia(addDays(dia, -1))} aria-label="Dia anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-500 hover:bg-slate-50", ring)}><ArrowLeft className="w-4 h-4" /></button>
           <div className="text-center min-w-0">
-            <p className="font-semibold text-slate-900 truncate">{dia === HOJE ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`}</p>
-            {dia !== HOJE && <button onClick={() => setDia(HOJE)} className="min-h-11 text-[12px] text-teal-700 hover:underline">Voltar para hoje</button>}
+            <p className="font-semibold text-slate-900 truncate">{dia === hojeISO() ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`}</p>
+            {dia !== hojeISO() && <button onClick={() => setDia(hojeISO())} className="min-h-11 text-[12px] text-teal-700 hover:underline">Voltar para hoje</button>}
           </div>
           <button onClick={() => setDia(addDays(dia, 1))} aria-label="Próximo dia" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-500 hover:bg-slate-50", ring)}><ArrowRight className="w-4 h-4" /></button>
         </div>
@@ -2042,13 +2044,13 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
         </div>
         <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase font-semibold text-slate-400 mb-1">{["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((x) => <span key={x}>{x}</span>)}</div>
         <div className="grid grid-cols-7 gap-1">
-          {diasMes.map((d) => { const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length; const fora = !d.startsWith(mesAtual); return <button key={d} onClick={() => { setDia(d); setFiltro("hoje"); setVisao("lista"); }} className={cx("min-h-11 rounded-xl text-sm flex flex-col items-center justify-center", ring, d === HOJE ? "ring-1 ring-teal-300" : "", fora ? "text-slate-300" : "text-slate-700", qtd ? "bg-slate-50" : "hover:bg-slate-50")}><span>{Number(d.slice(8))}</span>{qtd > 0 && <span className="text-[9px] text-teal-700 font-semibold">{qtd}</span>}</button>; })}
+          {diasMes.map((d) => { const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length; const fora = !d.startsWith(mesAtual); return <button key={d} onClick={() => { setDia(d); setFiltro("hoje"); setVisao("lista"); }} className={cx("min-h-11 rounded-xl text-sm flex flex-col items-center justify-center", ring, d === hojeISO() ? "ring-1 ring-teal-300" : "", fora ? "text-slate-300" : "text-slate-700", qtd ? "bg-slate-50" : "hover:bg-slate-50")}><span>{Number(d.slice(8))}</span>{qtd > 0 && <span className="text-[9px] text-teal-700 font-semibold">{qtd}</span>}</button>; })}
         </div>
       </Panel>}
 
       {tecnico ? <>
         {meuDia.overdue.length > 0 && <section className="mb-6"><Rotulo>Atrasados · {meuDia.overdue.length}</Rotulo><Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.overdue.map((os) => <CardAgenda key={os.id} os={os} atraso />)}</Panel></section>}
-        <section><Rotulo>{dia === HOJE ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`} · {meuDia.scheduled.length}</Rotulo>{meuDia.scheduled.length ? <Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.scheduled.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel> : <Empty icon={CalendarClock} title="Nenhum atendimento atribuído" text="Não há OS autorizadas para você neste dia." />}</section>
+        <section><Rotulo>{dia === hojeISO() ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`} · {meuDia.scheduled.length}</Rotulo>{meuDia.scheduled.length ? <Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.scheduled.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel> : <Empty icon={CalendarClock} title="Nenhum atendimento atribuído" text="Não há OS autorizadas para você neste dia." />}</section>
       </> : <>
         {ownerLista.length === 0 ? <Empty icon={CalendarClock} title={`Nenhum item em ${rotuloFiltro.toLowerCase()}`} text="Altere o filtro ou escolha outro período." />
         : <div className="space-y-5 mb-8">{ownerGrupos.map((grupo) => <section key={grupo.date}><Rotulo>{rotuloGrupo(grupo.date)} · {grupo.orders.length}</Rotulo><Panel className="divide-y divide-slate-100 overflow-hidden">{grupo.orders.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel></section>)}</div>}
@@ -2069,7 +2071,7 @@ function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = []
   const [f, setF] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const salvandoRef = useRef(false);
-  useEffect(() => { if (os) setF({ data: os.data || diaSugerido || HOJE, hora: os.hora || "09:00",
+  useEffect(() => { if (os) setF({ data: os.data || diaSugerido || hojeISO(), hora: os.hora || "09:00",
     responsavel: os.responsavel || empresa.responsavel, responsavelId: os.responsavelId || null }); }, [os]);
   const fechar = () => { if (!salvandoRef.current) onClose(); };
   const confirmar = async () => {
@@ -2889,7 +2891,7 @@ function interpretarParaFormulario(bruto, { clientes, servicos, produtos, empres
       itens,
       desconto: Number(bruto.desconto) || 0,
       acrescimo: Number(bruto.acrescimo) || 0,
-      validade: bruto.validadeDias ? addDays(HOJE, Number(bruto.validadeDias)) : null,
+      validade: bruto.validadeDias ? addDays(hojeISO(), Number(bruto.validadeDias)) : null,
       condicao: bruto.condicao || null,
       obs: bruto.obs || null,
       localServico: bruto.localServico || null,
@@ -3108,8 +3110,8 @@ function OrcamentoEditor(p) {
   const [salvando, setSalvando] = useState(false);
   const [d, setD] = useState(() => ({
     id: inicial?.id, numero: inicial?.numero, clienteId: inicial?.clienteId || "",
-    status: inicial?.status || "rascunho", data: inicial?.data || HOJE,
-    validade: inicial?.validade || addDays(HOJE, empresa.validadePadrao),
+    status: inicial?.status || "rascunho", data: inicial?.data || hojeISO(),
+    validade: inicial?.validade || addDays(hojeISO(), empresa.validadePadrao),
     itens: inicial?.itens ? inicial.itens.map((i) => ({ ...i })) : [],
     desconto: inicial?.desconto || 0, acrescimo: inicial?.acrescimo || 0,
     condicao: inicial?.condicao || empresa.condicaoPadrao, obs: inicial?.obs ?? empresa.observacaoPadrao,
@@ -3667,11 +3669,11 @@ function OrdensServico(p) {
   }
 
   const viva = (o) => o.status !== "concluida" && o.status !== "cancelada";
-  const hojeBase = ordens.filter((o) => viva(o) && o.data === HOJE);
+  const hojeBase = ordens.filter((o) => viva(o) && o.data === hojeISO());
   /* técnico: em andamento primeiro, depois horário marcado, depois as demais atribuídas */
   const hoje = soMinhas ? sortTechnicianDay(hojeBase) : hojeBase.sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const proximos = ordens.filter((o) => viva(o) && o.data > HOJE).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
-  const atrasadas = ordens.filter((o) => viva(o) && o.data && o.data < HOJE);
+  const proximos = ordens.filter((o) => viva(o) && o.data > hojeISO()).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
+  const atrasadas = ordens.filter((o) => viva(o) && o.data && o.data < hojeISO());
   const semData = ordens.filter((o) => viva(o) && !o.data);
   const concluidas = ordens.filter((o) => o.status === "concluida").sort((a, b) => (b.data || "").localeCompare(a.data || ""));
 
@@ -3720,7 +3722,7 @@ function OrdensServico(p) {
 
   return (
     <>
-      <PageHead title={soMinhas ? "Minhas ordens de serviço" : "Ordens de serviço"} sub={`${diaSemana(HOJE)}, ${dataBR(HOJE)}`}
+      <PageHead title={soMinhas ? "Minhas ordens de serviço" : "Ordens de serviço"} sub={`${diaSemana(hojeISO())}, ${dataBR(hojeISO())}`}
         action={permitido("todasOS") ? <Btn icon={Plus} onClick={() => setCriando(true)}>Nova OS</Btn> : null} />
       <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
         opcoes={[{ id: "dia", label: "Meu dia" }, { id: "abertas", label: "Todas em aberto" }, { id: "concluidas", label: "Concluídas" }]} />
@@ -4366,7 +4368,7 @@ function OSDetalhe(p) {
         </div>
       </div>
 
-      <AgendarModal os={agendando ? os : null} onClose={() => setAgendando(false)} onSalvar={agendarOS} empresa={empresa} diaSugerido={HOJE} equipe={equipe} />
+      <AgendarModal os={agendando ? os : null} onClose={() => setAgendando(false)} onSalvar={agendarOS} empresa={empresa} diaSugerido={hojeISO()} equipe={equipe} />
 
       {comprovanteAberto && (
         <Modal open onClose={() => setComprovanteAberto(false)} title={`Comprovante de Serviço · ${os.numero}`} sub="Documento não fiscal emitido pelo proprietário">
@@ -4395,7 +4397,7 @@ function OSDetalhe(p) {
             try{
               up({relato:extras.relato,fotos:extras.fotos,pendencia:extras.pendencia});
               if(real) await marcarRetornoOSV2DB({workOrderId:os.id,reason:extras.retornoMotivo,materialNeeded:extras.retornoMaterial,notes:extras.retornoObs,priority:extras.retornoPrioridade,expectedReturnDate:extras.retornoPrevisao,requestId:extras.retornoRequestId});
-              setOrdens(l=>l.map(x=>x.id===os.id?{...x,precisaRetorno:true,pendencia:extras.pendencia||x.pendencia,historico:[...(x.historico||[]),{id:uid(),quando:HOJE,texto:`Precisa retornar · ${extras.retornoMotivo}` }]}:x));
+              setOrdens(l=>l.map(x=>x.id===os.id?{...x,precisaRetorno:true,pendencia:extras.pendencia||x.pendencia,historico:[...(x.historico||[]),{id:uid(),quando:hojeISO(),texto:`Precisa retornar · ${extras.retornoMotivo}` }]}:x));
               setFinalizando(false);
               return true;
             }catch(e){aviso(mensagemErro(e)); return false;}
@@ -4584,7 +4586,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
 
   /* Garantia efetiva por linha da OS. O proprietário pode mudar apenas este
      atendimento; o catálogo continua sendo o padrão dos próximos serviços. */
-  const execucaoPrevista = os.data || HOJE;
+  const execucaoPrevista = os.data || hojeISO();
   const itensGarantia = os.emGarantia ? [] : itensFinais.filter((i) =>
     (i.tipo === "servico" || i.tipo === "produto") && i.catalogoId
   );
@@ -4602,7 +4604,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
     const catalogo = Math.max(0, Number(cat?.garantiaMeses || 0));
     const meses = Math.max(1, Math.min(120, Number(local.months ?? i.garantiaMesesOverride ?? (catalogo || 12))));
     const efetivo = politica === "disabled" ? 0 : politica === "custom" ? meses : catalogo;
-    return { politica, dias: null, meses, efetivo, unidade: "meses", origem: "Fabricante", prazo: efetivo > 0 ? `${efetivo} meses` : "sem garantia", ate: efetivo > 0 ? addMeses(execucaoPrevista, efetivo) : null };
+    return { politica, dias: null, meses, efetivo, unidade: "meses", origem: "Fabricante", prazo: efetivo > 0 ? `${efetivo} meses` : "sem garantia", ate: efetivo > 0 ? addMesesISO(execucaoPrevista, efetivo) : null };
   };
   const ajustarGarantia = (i, patch) => {
     const atual = garantiaAtual(i);
@@ -4888,7 +4890,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
                 <Field label="Motivo do retorno"><textarea value={retornoMotivo} onChange={e=>setRetornoMotivo(e.target.value.slice(0,3000))} rows={3} placeholder="Ex.: falta peça de acabamento" className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
                 <Field label="Material necessário"><textarea value={retornoMaterial} onChange={e=>setRetornoMaterial(e.target.value.slice(0,3000))} rows={2} placeholder="Peça, cabo, fonte, ferramenta..." className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
                 <Field label="Observação"><textarea value={retornoObs} onChange={e=>setRetornoObs(e.target.value.slice(0,5000))} rows={3} className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
-                <div className="grid gap-3 sm:grid-cols-2"><Field label="Prioridade"><select value={retornoPrioridade} onChange={e=>setRetornoPrioridade(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></Field><Field label="Previsão de retorno"><input type="date" min={HOJE} value={retornoPrevisao} onChange={e=>setRetornoPrevisao(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field></div>
+                <div className="grid gap-3 sm:grid-cols-2"><Field label="Prioridade"><select value={retornoPrioridade} onChange={e=>setRetornoPrioridade(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></Field><Field label="Previsão de retorno"><input type="date" min={hojeISO()} value={retornoPrevisao} onChange={e=>setRetornoPrevisao(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field></div>
               </div>
             )}
             {resultado === "naoFinalizado" && (
@@ -5159,10 +5161,10 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
 
           {lanc && (
             <div className={cx("rounded-2xl px-5 py-4 mb-6 flex flex-wrap items-center justify-between gap-3 ring-1",
-              lanc.pago ? "bg-emerald-50 ring-emerald-200/70" : lanc.vencimento < HOJE ? "bg-rose-50 ring-rose-200/70" : "bg-amber-50 ring-amber-200/70")}>
-              <p className={cx("text-[14px]", lanc.pago ? "text-emerald-900" : lanc.vencimento < HOJE ? "text-rose-900" : "text-amber-900")}>
+              lanc.pago ? "bg-emerald-50 ring-emerald-200/70" : lanc.vencimento < hojeISO() ? "bg-rose-50 ring-rose-200/70" : "bg-amber-50 ring-amber-200/70")}>
+              <p className={cx("text-[14px]", lanc.pago ? "text-emerald-900" : lanc.vencimento < hojeISO() ? "text-rose-900" : "text-amber-900")}>
                 {lanc.pago ? `Pago em ${dataBR(lanc.pagoEm)}${lanc.forma ? ` via ${lanc.forma}` : ""}.`
-                  : `Conta a pagar de ${brl(lanc.valor)} · vence ${dataBR(lanc.vencimento)}${lanc.vencimento < HOJE ? " · vencida" : ""}`}
+                  : `Conta a pagar de ${brl(lanc.valor)} · vence ${dataBR(lanc.vencimento)}${lanc.vencimento < hojeISO() ? " · vencida" : ""}`}
               </p>
               <Btn size="sm" variant="soft" icon={Wallet} onClick={() => setTela("financeiro")}>Ver no financeiro</Btn>
             </div>
@@ -5218,7 +5220,7 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
   return (
     <>
       <PageHead title="Compras" sub="Materiais comprados de fornecedores. Cada compra vira uma conta a pagar."
-        action={<Btn icon={Plus} onClick={() => setForm({ fornecedor: "", data: HOJE, itens: [], forma: "Boleto", vencimento: addDays(HOJE, 15), anexos: [], obs: "", jaPago: false })}>Nova compra</Btn>} />
+        action={<Btn icon={Plus} onClick={() => setForm({ fornecedor: "", data: hojeISO(), itens: [], forma: "Boleto", vencimento: addDays(hojeISO(), 15), anexos: [], obs: "", jaPago: false })}>Nova compra</Btn>} />
       {compras.length === 0 ? (
         <Panel><Empty icon={ShoppingCart} title="Nenhuma compra registrada" sub="Registre a compra e o ZiisTec cria a conta a pagar automaticamente." /></Panel>
       ) : (
@@ -5364,7 +5366,7 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 
 /* ============================================================== Financeiro */
 function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId, empresa: empresaDados, excluirRegistro, papel, abrirV2 }) {
-  const [mes, setMes] = useState(mesRef(HOJE));
+  const [mes, setMes] = useState(mesRef(hojeISO()));
   const [aba, setAba] = useState("visao");
   const [form, setForm] = useState(null);
   const [salvandoLancamento, setSalvandoLancamento] = useState(false);
@@ -5382,8 +5384,8 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   const aReceberMes = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && noMes(l));
   const pagoMes = lancamentos.filter((l) => l.tipo === "despesa" && l.pago && noMes(l));
   const aPagarMes = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && noMes(l));
-  const vencidosReceber = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento < HOJE);
-  const vencidosPagar = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento < HOJE);
+  const vencidosReceber = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento < hojeISO());
+  const vencidosPagar = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento < hojeISO());
   const resultado = soma(recebidoMes) - soma(pagoMes);
 
   const futuroReceber = soma(lancamentos.filter((l) => l.tipo === "receita" && !l.pago)) - soma(aReceberMes);
@@ -5392,17 +5394,17 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   /* fluxo de caixa: janela escolhida pelo usuário. Atraso fica separado,
      porque previsão olha só para frente. */
   const saldoAtual = soma(lancamentos.filter((l) => l.tipo === "receita" && l.pago)) - soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago));
-  const limite = addDays(HOJE, janela);
-  const entradasJanela = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
-  const saidasJanela = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
+  const limite = addDays(hojeISO(), janela);
+  const entradasJanela = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= hojeISO() && l.vencimento <= limite);
+  const saidasJanela = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= hojeISO() && l.vencimento <= limite);
   const projetado = saldoAtual + soma(entradasJanela) - soma(saidasJanela);
 
   /* o que exige ação hoje */
-  const receberHoje = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento === HOJE);
-  const pagarHoje = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento === HOJE);
+  const receberHoje = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento === hojeISO());
+  const pagarHoje = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento === hojeISO());
 
   /* margem dos serviços: usa conclusão real e cobrança efetivamente gerada para a OS */
-  const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || HOJE) === mes);
+  const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || hojeISO()) === mes);
   const cobrancaDaOS = (o) => lancamentos.find((l) => l.tipo === "receita" && l.origemTipo === "os" && l.origemId === o.id);
   const custoDiretoOS = (o) => {
     const materiaisJaNosItens = (o.itens || []).some((i) => i.materialRegistrado);
@@ -5425,8 +5427,8 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
 
   /* filtros de leitura: status, origem, cliente e busca livre */
   const aplicarFiltro = (itens) => itens.filter((l) => {
-    if (filtro.status === "vencido" && !(!l.pago && l.vencimento < HOJE)) return false;
-    if (filtro.status === "aberto" && (l.pago || l.vencimento < HOJE)) return false;
+    if (filtro.status === "vencido" && !(!l.pago && l.vencimento < hojeISO())) return false;
+    if (filtro.status === "aberto" && (l.pago || l.vencimento < hojeISO())) return false;
     if (filtro.status === "pago" && !l.pago) return false;
     if (filtro.origem !== "todas" && (l.origemTipo || "manual") !== filtro.origem) return false;
     if (filtro.clienteId && l.clienteId !== filtro.clienteId) return false;
@@ -5492,7 +5494,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   return (
     <>
       <PageHead title="Financeiro" sub="Quanto entrou, quanto falta entrar e quanto sai."
-        action={<div className="flex flex-wrap gap-2"><RecursosV2 aba="financeiro" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => setForm({ tipo: "despesa", vencimento: HOJE, pago: false, valor: 0, categoria: "Materiais", origemTipo: "manual" })}>Novo lançamento</Btn></div>} />
+        action={<div className="flex flex-wrap gap-2"><RecursosV2 aba="financeiro" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => setForm({ tipo: "despesa", vencimento: hojeISO(), pago: false, valor: 0, categoria: "Materiais", origemTipo: "manual" })}>Novo lançamento</Btn></div>} />
 
       <div className="flex items-center justify-between gap-2 mb-6">
         <button onClick={() => mudarMes(-1)} aria-label="Mês anterior" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700", ring)}><ArrowLeft className="w-4 h-4" /></button>
@@ -5667,7 +5669,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
               ))}
             </div>
           </Field>
-          <p className="text-[12.5px] text-slate-400">A data do {baixando.tipo === "receita" ? "recebimento" : "pagamento"} será hoje, {dataBR(HOJE)}.</p>
+          <p className="text-[12.5px] text-slate-400">A data do {baixando.tipo === "receita" ? "recebimento" : "pagamento"} será hoje, {dataBR(hojeISO())}.</p>
         </Modal>
       )}
 
@@ -5685,12 +5687,12 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
                   setForm((f) => (f ? { ...f, requestId } : f));
                 }
                 setSalvandoLancamento(true);
-                try { const salvo = await salvarLancamentoDB({ ...form, requestId, pagoEm: form.pago ? HOJE : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }
+                try { const salvo = await salvarLancamentoDB({ ...form, requestId, pagoEm: form.pago ? hojeISO() : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }
                 catch (e) { aviso(mensagemErro(e)); }
                 finally { setSalvandoLancamento(false); }
                 return;
               }
-              setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? HOJE : null }, ...l]); setForm(null); aviso("Lançamento registrado");
+              setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? hojeISO() : null }, ...l]); setForm(null); aviso("Lançamento registrado");
             }}>{salvandoLancamento ? "Salvando…" : "Salvar lançamento"}</Btn></>}>
           <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
             {[["despesa", "Despesa"], ["receita", "Receita"]].map(([id, label]) => (
@@ -6289,7 +6291,7 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
                     <p className="text-[13px] text-slate-500 truncate">{nomeCliente(r.clienteId)} · retorno em {dataBR(r.data)}</p>
                   </button>
                   <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
-                    <Pill tone={r.data < HOJE ? "erro" : r.data === HOJE ? "atencao" : "neutro"}>{r.data < HOJE ? "Atrasado" : r.data === HOJE ? "Hoje" : dataBR(r.data)}</Pill>
+                    <Pill tone={r.data < hojeISO() ? "erro" : r.data === hojeISO() ? "atencao" : "neutro"}>{r.data < hojeISO() ? "Atrasado" : r.data === hojeISO() ? "Hoje" : dataBR(r.data)}</Pill>
                     <Btn size="sm" variant="soft" icon={Check} className="min-h-11 flex-1 sm:flex-none" onClick={()=>mudarRevisao(r,"done")}>Concluir</Btn>
                     <Btn size="sm" variant="ghost" className="min-h-11 flex-1 sm:flex-none" onClick={()=>mudarRevisao(r,"dismissed")}>Dispensar</Btn>
                   </div>
@@ -6918,7 +6920,7 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
       <Panel className="divide-y divide-slate-100 overflow-hidden">
         {assinaturas.map((a) => {
           const st = ST_ASSINATURA[a.status];
-          const atrasada = a.status === "pendente" && a.proximaCobranca < HOJE;
+          const atrasada = a.status === "pendente" && a.proximaCobranca < hojeISO();
           return (
             <Linha key={a.id}>
               <div className="flex flex-wrap items-center justify-between gap-4">

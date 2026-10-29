@@ -482,7 +482,7 @@ test('A4 · o bloco do Início não mostra valores financeiros e vale para propr
   assert.match(section, /abrirOS\(os\.id\)/);
   assert.doesNotMatch(section, /brl\(|\.valor|total|preco|preço|custo|margem|R\$/i);
   assert.doesNotMatch(section, /papel === "proprietario"|verFinanceiro/, 'sem filtro de papel: a lista já segue o RLS de cada papel');
-  assert.match(legacy, /const recentes = concluidasRecentemente\(ordens, HOJE\);/);
+  assert.match(legacy, /const recentes = concluidasRecentemente\(ordens, hojeISO\(\)\);/);
 });
 
 test('A4 · estoque baixo usa a regra única da tela de estoque e só alerta o proprietário', () => {

@@ -13,7 +13,7 @@ import {
 import { mensagemErro } from '../../lib/supabase';
 import { hojeISO as hoje, addDiasISO as addDays, addMesesISO as addMonths, dataBR } from '../../lib/dates';
 
-const VAZIO = { clienteId:'', tipo:'produto', produtoId:'', servicoId:'', descricao:'', inicio:hoje(), ate:addMonths(hoje(),12), serie:'', local:'', obs:'' };
+const formVazio = () => ({ clienteId:'', tipo:'produto', produtoId:'', servicoId:'', descricao:'', inicio:hoje(), ate:addMonths(hoje(),12), serie:'', local:'', obs:'' });
 
 function Btn({ children, onClick, disabled=false, variant='primary', type='button', className='' }) {
   const cls=variant==='primary'?'bg-emerald-700 text-white hover:bg-emerald-800':'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50';
@@ -41,7 +41,7 @@ export default function ManualWarrantyV2({ companyId, companyName='Sua empresa',
   const [success,setSuccess]=useState('');
   const [options,setOptions]=useState({clientes:[],servicos:[],produtos:[]});
   const [warranties,setWarranties]=useState([]);
-  const [form,setForm]=useState({...VAZIO});
+  const [form,setForm]=useState(() => formVazio());
 
   const load=async()=>{
     setLoading(true); setError('');
@@ -74,7 +74,7 @@ export default function ManualWarrantyV2({ companyId, companyName='Sua empresa',
     try{
       await criarGarantiaManualDB(form,companyId);
       setSuccess('Garantia manual criada e registrada no histórico do cliente.');
-      setForm({...VAZIO,clienteId:form.clienteId,local:clientMap.get(form.clienteId)?.endereco||''});
+      setForm({...formVazio(),clienteId:form.clienteId,local:clientMap.get(form.clienteId)?.endereco||''});
       await load();
     }catch(e2){if(recursoV2AindaNaoMigrado(e2))setAvailable(false);setError(mensagemErro(e2));}
     finally{setSaving(false);}
