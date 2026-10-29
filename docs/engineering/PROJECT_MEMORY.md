@@ -86,6 +86,8 @@
 
 - Hardening adversarial V1.2 (0112, definers 149; `docs/engineering/RELEASE_HARDENING_V12.md`): 1 P2 e 7 P3, 2 corrigidos. `company_members` não aceita mudar `id`, `company_id` nem `user_id` (o dono podia reescrever `user_id` e puxar qualquer usuário para a própria empresa); as rotas `api/*` nunca repassam o corpo de erro do banco (`api/_apiErrors.js`: só as frases exatas das RPCs de cota). Nova rota que mostre erro do banco ao navegador deve usar o mesmo padrão. 0112 não aplicada em ambiente real; H0 e Fiscal seguem não iniciados.
 
+- First 10 Customers · Fase 1 (`docs/engineering/FIRST_CUSTOMERS_PHASE1.md`): o fluxo cliente → orçamento → OS → execução → conclusão → financeiro → comprovante → histórico tem um teste de jornada no banco (`v2_first_customers_golden_path_rollback.sql`, 32 checks) além dos testes por recurso. O PDF do Comprovante de Serviço abre com a frase exata "Comprovante de serviço — documento não fiscal." (`IDENTIFICACAO_NAO_FISCAL`, desenhada direto: `clean()` trocaria o travessão por hífen). Pendências que não são de código: 0100–0112 não aplicadas em nenhum ambiente, Production em 0049 e vazia, H0 em aparelho real e E2E autenticado sem credenciais.
+
 ## Direção de produto aprovada
 
 - Histórico técnico deve evoluir para Cliente → Local → Ativos → Histórico de serviços.
