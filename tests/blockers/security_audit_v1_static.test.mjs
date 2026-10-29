@@ -54,8 +54,9 @@ test('CSP: sem script inline/eval, sem objeto, sem moldura de terceiros e base/f
   }
 });
 
-test('CSP: conexões e imagens externas só para os dois projetos Supabase conhecidos', () => {
-  const projects = new Set(['https://diztevlpbcfqleizswxr.supabase.co', 'https://xadoktssibuuebzzjrhv.supabase.co']);
+test('CSP: conexões e imagens externas só para os projetos Supabase conhecidos (Production, Beta e o H0 descartável)', () => {
+  // O terceiro projeto é o H0 de homologação; a entrada dele é bloqueador de merge para a main (h0_environment_isolation.test.mjs).
+  const projects = new Set(['https://diztevlpbcfqleizswxr.supabase.co', 'https://xadoktssibuuebzzjrhv.supabase.co', 'https://auojcljfahhpkfqqbygd.supabase.co']);
   const sockets = new Set([...projects].map((url) => url.replace('https:', 'wss:')));
   const external = (values) => values.filter((v) => !v.startsWith("'") && !['data:', 'blob:'].includes(v));
   for (const value of external(csp['connect-src'])) assert.ok(projects.has(value) || sockets.has(value), `connect-src: ${value}`);
