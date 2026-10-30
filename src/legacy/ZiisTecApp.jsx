@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { baixarOrcamentoPDF, compartilharOrcamentoPDF, suportaCompartilharArquivo } from "../lib/quotePdf";
+import { baixarReciboPDF, compartilharReciboPDF, suportaCompartilharRecibo } from "../lib/reciboPdf";
 import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";
 import {
   LayoutDashboard, CalendarDays, Users, Wrench, FileText, ClipboardList,
@@ -7,13 +8,16 @@ import {
   Phone, MapPin, Trash2, Send, Share2, Pencil, ChevronRight, Clock,
   CircleCheck, Building2, User, CheckCircle2, Circle, AlertTriangle,
   Printer, MoreHorizontal, CalendarClock, Receipt, Banknote, Mic, MicOff,
-  Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles, Navigation,
-  TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building,
+  Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles,
+  TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building, ChevronDown,
 } from "lucide-react";
+import GlobalSearchModal from "../components/GlobalSearchModal";
+import BarcodeScanner from "../components/BarcodeScanner";
 import { mensagemErro } from "../lib/supabase";
 import {
   recarregarSeguro, salvarClienteDB, salvarServicoDB, salvarProdutoDB, salvarOrcamentoDB,
-  salvarOSDB, atualizarOSDB, finalizarOSDB, resolverPrecificacaoOSDB, baixarLancamentoDB, salvarLancamentoDB, atualizarStatusOrcamentoDB,
+  salvarOSDB, carregarOSPorOrcamentoDB, atualizarOSDB, finalizarOSDB, resolverPrecificacaoOSDB, baixarLancamentoDB, salvarLancamentoDB, atualizarStatusOrcamentoDB,
+  excluirRegistroDB,
 } from "../lib/dataApi";
 import {
   salvarCompraDB, duplicarOrcamentoDB, criarOSDeOrcamentoDB, abrirAtendimentoGarantiaDB,
@@ -21,12 +25,49 @@ import {
 } from "../lib/dataApiExtras";
 import { atualizarColaboradorDB } from "../lib/teamApi";
 import {
-  hidratarComplementosDB, persistirEdicaoOSDB, prepararFinalizacaoOSDB,
+  hidratarComplementosDB, persistirEdicaoOSDB, prepararFinalizacaoOSDB, lerInicioAtendimentoDB,
   uploadDocumentosCompraDB, uploadLogoEmpresaDB,
 } from "../lib/runtimeApi";
+import {
+  attendanceTimerLabel, buildStandardReportText, createContentRequestIds, createReportRequestIds, difficultyLabel, DIFFICULTY_OPTIONS,
+  emptyTechnicalBase, evidenceCountLabel, isStaleAttendance, mergeDictation, normalizeConfirmation, normalizeTechnicalBase,
+  REPORT_PROVENANCE_LABEL, reportFallbackMessage, reportProvenance, reportUsageLabel, sortTechnicianDay, STALE_ATTENDANCE_MESSAGE,
+  technicalBaseChanged, technicalBaseHasContent, technicalBaseTooLong, TECHNICAL_BASE_MAX, technicianCardModel,
+} from "../lib/fieldExecution";
+import {
+  carregarFechamentoTecnico, carregarUsoRelatorioIADB, marcarRelatorioIAUsadoDB, salvarBaseTecnicaDB, salvarConfirmacaoDB,
+} from "../lib/technicalBaseApi";
+import { gerarRelatorioIA } from "../lib/workOrderReportApi";
 import { cancelarAssinaturaDB, reativarAssinaturaDB } from "../lib/subscriptionApi";
+import MinhaConta from "../components/MinhaConta";
+import { seloBetaAtivo } from "../lib/betaFlags";
+import { resumoAssinatura } from "../lib/subscriptionDisplay";
 import { chamarIAReal } from "../lib/aiApi";
-import { resolverLogoEmpresaDB, persistirFotosOSDB } from "../lib/storageExtras";
+import { resolverLogoEmpresaDB, persistirFotosOSDB, resolverImagemProdutoDB, salvarImagemProdutoDB, removerImagemProdutoDB, prepararPreviewImagemProdutoDB } from "../lib/storageExtras";
+import { createProductImagePreview } from "../lib/productImagePreview";
+import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
+import ServiceReceiptPanel from "../components/ServiceReceiptPanel";
+import QuoteClientLocationField from "../components/QuoteClientLocationField";
+import LocationHistoryPanel from "../components/LocationHistoryPanel";
+import { listarLocaisClienteOrcamentoV2DB } from "../lib/quoteReuseV2Api";
+import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
+import useSpeechInput from "../hooks/useSpeechInput";
+import useModalViewport from "../hooks/useModalViewport";
+import { useDiscardGuard, useFormDirty } from "../hooks/useUnsavedChanges";
+import { confirmDiscardNavigation } from "../lib/unsavedChanges";
+import DiscardChangesPrompt from "../components/DiscardChangesPrompt";
+import { useModalDismiss } from "../hooks/useModalDismiss";
+import { useFormDraft } from "../hooks/useFormDraft";
+import DraftRestoredNotice from "../components/DraftRestoredNotice";
+import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
+import { abaDeOrigemV2, recursosV2DaAba, semOrigemV2 } from "../lib/recursosV2";
+import { concluidasRecentemente, produtosComEstoqueBaixo } from "../lib/dashboardInicio";
+import RouteButton from "../components/RouteButton";
+import useRoutePreference from "../hooks/useRoutePreference";
+import { linkDeRota, resolverDestinoRota } from "../lib/routeApps";
+import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
+import { hojeISO, addMesesISO } from "../lib/dates";
+import useDiaLocal from "../hooks/useDiaLocal";
 
 /* ================================================================ helpers */
 const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -36,9 +77,8 @@ const iso = (d) => {
   const x = new Date(d);
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 };
-const HOJE = iso(new Date());
+const HOJE_SEED = hojeISO(); // só para os dados de demonstração, montados uma vez; as regras leem hojeISO() na hora
 const addDays = (base, n) => { const d = new Date(base + "T12:00:00"); d.setDate(d.getDate() + n); return iso(d); };
-const addMeses = (base, n) => { const d = new Date(base + "T12:00:00"); d.setMonth(d.getMonth() + n); return iso(d); };
 const dataBR = (s) => (s ? s.split("-").reverse().join("/") : "—");
 const dataCurta = (s) => (s ? s.slice(8) + "/" + s.slice(5, 7) : "—");
 const DIAS = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
@@ -59,10 +99,19 @@ const totalOS = (os) => somaItens(os.itens) + somaAdicionais(os) + (os.valorAdic
 const resumoOS = (os) => os.itens.map((i) => i.nome).join(" · ")
   || (os.descricaoLivre || "").trim()
   || (os.emGarantia ? "atendimento em garantia" : "sem descrição");
+// OS vinda do banco só traz responsavelId: o nome vem da equipe carregada ou do próprio usuário.
+const nomeResponsavelOS = (os, equipe = [], usuarioAtual = null) =>
+  equipe.find((m) => m.usuarioId === os.responsavelId)?.usuario?.nome
+  || (os.responsavelId && os.responsavelId === usuarioAtual?.id ? usuarioAtual.nome : "")
+  || os.responsavel || "Sem técnico";
 const num = (v) => { const n = parseFloat(String(v).replace(",", ".")); return Number.isFinite(n) ? n : 0; };
+const precoComAcrescimo = (custo, percentual) => Number((Math.max(0, num(custo)) * (1 + Math.max(0, num(percentual)) / 100)).toFixed(2));
+const acrescimoSobreCusto = (custo, preco) => {
+  const c = Math.max(0, num(custo));
+  return c > 0 ? Number((((Math.max(0, num(preco)) / c) - 1) * 100).toFixed(2)) : 0;
+};
 const soDigitos = (s) => (s || "").replace(/\D/g, "");
 const iniciais = (s = "") => s.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-const mapsUrl = (end) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(end || "")}`;
 const semAcento = (s = "") => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 const UNIDADES = [
@@ -82,7 +131,7 @@ const PRAZOS_GARANTIA = [
 ];
 const diasEntre = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 86400000);
 const statusGarantia = (g) => {
-  const d = diasEntre(HOJE, g.ate);
+  const d = diasEntre(hojeISO(), g.ate);
   return d >= 0
     ? { ativa: true, label: "Ativa", tone: "sucesso", detalhe: d === 0 ? "vence hoje" : `${d} dia${d > 1 ? "s" : ""} restante${d > 1 ? "s" : ""}` }
     : { ativa: false, label: "Expirada", tone: "neutro", detalhe: `expirada há ${Math.abs(d)} dia${Math.abs(d) > 1 ? "s" : ""}` };
@@ -128,17 +177,17 @@ const PRODUTOS_SEED = [
 ];
 
 const itemServico = (s, qtd, preco) => ({ id: uid(), tipo: "servico", catalogoId: s.id, nome: s.nome, unidade: s.unidade, qtd, preco: preco ?? s.preco, custo: s.custo });
-const itemProduto = (p, qtd, preco) => ({ id: uid(), tipo: "produto", catalogoId: p.id, nome: `${p.nome}${p.marca ? " · " + p.marca : ""}${p.modelo ? " " + p.modelo : ""}`, unidade: p.unidade, qtd, preco: preco ?? p.preco, custo: p.custo });
+const itemProduto = (p, qtd, preco) => ({ id: uid(), tipo: "produto", catalogoId: p.id, nome: `${p.nome}${p.marca ? " · " + p.marca : ""}${p.modelo ? " " + p.modelo : ""}`, unidade: p.unidade, qtd, preco: preco ?? p.preco, custo: p.custo, imagemPath: p.imagemPath || null });
 const itemLivre = ({ nome = "", qtd = 1, unidade = "unidade", preco = 0, obs = "" } = {}) =>
   ({ id: uid(), tipo: "livre", catalogoId: null, nome, unidade, qtd, preco, custo: 0, obs });
 const S = (id) => SERVICOS_SEED.find((s) => s.id === id);
 const P = (id) => PRODUTOS_SEED.find((p) => p.id === id);
 
 const ORCAMENTOS_SEED = [
-  { id: "o1", numero: "ORC-0007", clienteId: "c1", status: "enviado", data: addDays(HOJE, -3), validade: addDays(HOJE, 12), itens: [itemServico(S("s1"), 4), itemProduto(P("p1"), 4), itemServico(S("s3"), 1)], desconto: 150, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Instalação nas portarias social e de serviço.", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portarias social e de serviço", osId: null },
-  { id: "o2", numero: "ORC-0006", clienteId: "c2", status: "aprovado", data: addDays(HOJE, -6), validade: addDays(HOJE, 9), itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], desconto: 0, acrescimo: 0, condicao: "Pagamento à vista via Pix na conclusão.", obs: "Porta de madeira maciça.", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", osId: "os3" },
-  { id: "o3", numero: "ORC-0005", clienteId: "c4", status: "rascunho", data: addDays(HOJE, -1), validade: addDays(HOJE, 14), itens: [itemServico(S("s4"), 4), itemProduto(P("p2"), 4)], desconto: 0, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Prioridade nas câmeras do estoque.", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Estoque e área de produção", osId: null },
-  { id: "o4", numero: "ORC-0004", clienteId: "c3", status: "aprovado", data: addDays(HOJE, -14), validade: addDays(HOJE, 1), itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], desconto: 0, acrescimo: 0, condicao: "Boleto em 15 dias.", obs: "", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", osId: "os2" },
+  { id: "o1", numero: "ORC-0007", clienteId: "c1", status: "enviado", data: addDays(HOJE_SEED, -3), validade: addDays(HOJE_SEED, 12), itens: [itemServico(S("s1"), 4), itemProduto(P("p1"), 4), itemServico(S("s3"), 1)], desconto: 150, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Instalação nas portarias social e de serviço.", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portarias social e de serviço", osId: null },
+  { id: "o2", numero: "ORC-0006", clienteId: "c2", status: "aprovado", data: addDays(HOJE_SEED, -6), validade: addDays(HOJE_SEED, 9), itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], desconto: 0, acrescimo: 0, condicao: "Pagamento à vista via Pix na conclusão.", obs: "Porta de madeira maciça.", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", osId: "os3" },
+  { id: "o3", numero: "ORC-0005", clienteId: "c4", status: "rascunho", data: addDays(HOJE_SEED, -1), validade: addDays(HOJE_SEED, 14), itens: [itemServico(S("s4"), 4), itemProduto(P("p2"), 4)], desconto: 0, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Prioridade nas câmeras do estoque.", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Estoque e área de produção", osId: null },
+  { id: "o4", numero: "ORC-0004", clienteId: "c3", status: "aprovado", data: addDays(HOJE_SEED, -14), validade: addDays(HOJE_SEED, 1), itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], desconto: 0, acrescimo: 0, condicao: "Boleto em 15 dias.", obs: "", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", osId: "os2" },
 ];
 
 const osBase = {
@@ -148,33 +197,33 @@ const osBase = {
 };
 
 const ORDENS_SEED = [
-  { ...osBase, id: "os1", numero: "OS-0001", clienteId: "c1", orcamentoId: null, status: "andamento", data: HOJE, hora: "14:00", responsavel: "Jonas Ribeiro", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Garagem — subsolo 1", itens: [itemServico(S("s4"), 3), itemProduto(P("p2"), 3)], obs: "Substituir 3 câmeras da garagem. Elevador de serviço até 17h.", checklist: [{ id: "k1", texto: "Conferir cabeamento existente", feito: true }, { id: "k2", texto: "Instalar câmeras", feito: false }, { id: "k3", texto: "Ajustar ângulo e gravação", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE, -1), texto: "Ordem de serviço criada" }] },
-  { ...osBase, id: "os2", numero: "OS-0002", clienteId: "c3", orcamentoId: "o4", status: "concluida", data: addDays(HOJE, -4), hora: "09:00", responsavel: "Diego Farias", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], obs: "", relato: "Diagnóstico\nTrês interfones do bloco B sem áudio de retorno.\n\nServiço executado\nLimpeza de contatos, troca de dois cabos e recadastramento de tags.\n\nResultado\nTestado em todos os apartamentos e funcionando.", checklist: [{ id: "k4", texto: "Testar interfones", feito: true }, { id: "k5", texto: "Cadastrar tags novas", feito: true }], custosExtras: 40, cobrancaId: "l1", historico: [{ id: uid(), quando: addDays(HOJE, -8), texto: "Gerada a partir do ORC-0004" }, { id: uid(), quando: addDays(HOJE, -4), texto: "Serviço concluído" }] },
-  { ...osBase, id: "os3", numero: "OS-0003", clienteId: "c2", orcamentoId: "o2", status: "agendada", data: HOJE, hora: "09:00", responsavel: "Jonas Ribeiro", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], obs: "Porta de madeira maciça. Cliente prefere manhã.", checklist: [{ id: "k6", texto: "Levar furadeira e brocas", feito: false }, { id: "k7", texto: "Cadastrar digitais da família", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE, -5), texto: "Gerada a partir do ORC-0006" }] },
-  { ...osBase, id: "os4", numero: "OS-0004", clienteId: "c1", orcamentoId: null, status: "agendada", data: addDays(HOJE, 1), hora: "10:30", responsavel: "Diego Farias", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portaria social", itens: [itemServico(S("s6"), 1)], obs: "Vistoria mensal do contrato.", checklist: [], historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] },
-  { ...osBase, id: "os5", numero: "OS-0005", clienteId: "c4", orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: "Jonas Ribeiro", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Entrada de serviço", itens: [itemServico(S("s5"), 1)], obs: "Interfone com ruído.", checklist: [], historico: [{ id: uid(), quando: addDays(HOJE, -2), texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os1", numero: "OS-0001", clienteId: "c1", orcamentoId: null, status: "andamento", data: HOJE_SEED, hora: "14:00", responsavel: "Jonas Ribeiro", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Garagem — subsolo 1", itens: [itemServico(S("s4"), 3), itemProduto(P("p2"), 3)], obs: "Substituir 3 câmeras da garagem. Elevador de serviço até 17h.", checklist: [{ id: "k1", texto: "Conferir cabeamento existente", feito: true }, { id: "k2", texto: "Instalar câmeras", feito: false }, { id: "k3", texto: "Ajustar ângulo e gravação", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -1), texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os2", numero: "OS-0002", clienteId: "c3", orcamentoId: "o4", status: "concluida", data: addDays(HOJE_SEED, -4), hora: "09:00", responsavel: "Diego Farias", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], obs: "", relato: "Diagnóstico\nTrês interfones do bloco B sem áudio de retorno.\n\nServiço executado\nLimpeza de contatos, troca de dois cabos e recadastramento de tags.\n\nResultado\nTestado em todos os apartamentos e funcionando.", checklist: [{ id: "k4", texto: "Testar interfones", feito: true }, { id: "k5", texto: "Cadastrar tags novas", feito: true }], custosExtras: 40, cobrancaId: "l1", historico: [{ id: uid(), quando: addDays(HOJE_SEED, -8), texto: "Gerada a partir do ORC-0004" }, { id: uid(), quando: addDays(HOJE_SEED, -4), texto: "Serviço concluído" }] },
+  { ...osBase, id: "os3", numero: "OS-0003", clienteId: "c2", orcamentoId: "o2", status: "agendada", data: HOJE_SEED, hora: "09:00", responsavel: "Jonas Ribeiro", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], obs: "Porta de madeira maciça. Cliente prefere manhã.", checklist: [{ id: "k6", texto: "Levar furadeira e brocas", feito: false }, { id: "k7", texto: "Cadastrar digitais da família", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -5), texto: "Gerada a partir do ORC-0006" }] },
+  { ...osBase, id: "os4", numero: "OS-0004", clienteId: "c1", orcamentoId: null, status: "agendada", data: addDays(HOJE_SEED, 1), hora: "10:30", responsavel: "Diego Farias", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portaria social", itens: [itemServico(S("s6"), 1)], obs: "Vistoria mensal do contrato.", checklist: [], historico: [{ id: uid(), quando: HOJE_SEED, texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os5", numero: "OS-0005", clienteId: "c4", orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: "Jonas Ribeiro", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Entrada de serviço", itens: [itemServico(S("s5"), 1)], obs: "Interfone com ruído.", checklist: [], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -2), texto: "Ordem de serviço criada" }] },
 ];
 
 const LANCAMENTOS_SEED = [
-  { id: "l1", tipo: "receita", descricao: "OS-0002 · Prime Imóveis", clienteId: "c3", valor: 1180, vencimento: addDays(HOJE, 11), pago: false, origemTipo: "os", origemId: "os2", categoria: "Serviços" },
-  { id: "l2", tipo: "receita", descricao: "Manutenção interfone · Cond. Jardins", clienteId: "c1", valor: 540, vencimento: addDays(HOJE, -9), pago: true, pagoEm: addDays(HOJE, -9), forma: "Pix", origemTipo: "manual", categoria: "Serviços" },
-  { id: "l3", tipo: "receita", descricao: "Instalação CFTV · Padaria Pão Nosso", clienteId: "c4", valor: 750, vencimento: addDays(HOJE, -2), pago: true, pagoEm: addDays(HOJE, -2), forma: "Transferência", origemTipo: "manual", categoria: "Serviços" },
-  { id: "l7", tipo: "receita", descricao: "Configuração de tags · Cond. Jardins", clienteId: "c1", valor: 640, vencimento: addDays(HOJE, -6), pago: false, origemTipo: "manual", categoria: "Serviços" },
-  { id: "l4", tipo: "despesa", descricao: "Compra CMP-0002 · Casa das Fontes", valor: 760, vencimento: addDays(HOJE, -7), pago: true, pagoEm: addDays(HOJE, -7), forma: "Pix", origemTipo: "compra", origemId: "cp2", categoria: "Materiais" },
-  { id: "l5", tipo: "despesa", descricao: "Combustível", valor: 320, vencimento: addDays(HOJE, -5), pago: true, pagoEm: addDays(HOJE, -5), forma: "Dinheiro", origemTipo: "manual", categoria: "Deslocamento" },
-  { id: "l6", tipo: "despesa", descricao: "Plano de celular e internet", valor: 189, vencimento: addDays(HOJE, 4), pago: false, origemTipo: "manual", categoria: "Fixas" },
-  { id: "l8", tipo: "despesa", descricao: "Compra CMP-0001 · Distribuidora Eletro Sul", valor: 1842.5, vencimento: addDays(HOJE, 9), pago: false, origemTipo: "compra", origemId: "cp1", categoria: "Materiais" },
+  { id: "l1", tipo: "receita", descricao: "OS-0002 · Prime Imóveis", clienteId: "c3", valor: 1180, vencimento: addDays(HOJE_SEED, 11), pago: false, origemTipo: "os", origemId: "os2", categoria: "Serviços" },
+  { id: "l2", tipo: "receita", descricao: "Manutenção interfone · Cond. Jardins", clienteId: "c1", valor: 540, vencimento: addDays(HOJE_SEED, -9), pago: true, pagoEm: addDays(HOJE_SEED, -9), forma: "Pix", origemTipo: "manual", categoria: "Serviços" },
+  { id: "l3", tipo: "receita", descricao: "Instalação CFTV · Padaria Pão Nosso", clienteId: "c4", valor: 750, vencimento: addDays(HOJE_SEED, -2), pago: true, pagoEm: addDays(HOJE_SEED, -2), forma: "Transferência", origemTipo: "manual", categoria: "Serviços" },
+  { id: "l7", tipo: "receita", descricao: "Configuração de tags · Cond. Jardins", clienteId: "c1", valor: 640, vencimento: addDays(HOJE_SEED, -6), pago: false, origemTipo: "manual", categoria: "Serviços" },
+  { id: "l4", tipo: "despesa", descricao: "Compra CMP-0002 · Casa das Fontes", valor: 760, vencimento: addDays(HOJE_SEED, -7), pago: true, pagoEm: addDays(HOJE_SEED, -7), forma: "Pix", origemTipo: "compra", origemId: "cp2", categoria: "Materiais" },
+  { id: "l5", tipo: "despesa", descricao: "Combustível", valor: 320, vencimento: addDays(HOJE_SEED, -5), pago: true, pagoEm: addDays(HOJE_SEED, -5), forma: "Dinheiro", origemTipo: "manual", categoria: "Deslocamento" },
+  { id: "l6", tipo: "despesa", descricao: "Plano de celular e internet", valor: 189, vencimento: addDays(HOJE_SEED, 4), pago: false, origemTipo: "manual", categoria: "Fixas" },
+  { id: "l8", tipo: "despesa", descricao: "Compra CMP-0001 · Distribuidora Eletro Sul", valor: 1842.5, vencimento: addDays(HOJE_SEED, 9), pago: false, origemTipo: "compra", origemId: "cp1", categoria: "Materiais" },
 ];
 
 const COMPRAS_SEED = [
-  { id: "cp1", numero: "CMP-0001", fornecedor: "Distribuidora Eletro Sul", data: addDays(HOJE, -6), itens: [{ id: uid(), nome: "Fechadura digital biométrica · Intelbras FR 320", qtd: 2, custo: 620 }, { id: uid(), nome: "Câmera bullet Full HD · Intelbras VHD 1220 B", qtd: 2, custo: 210 }, { id: uid(), nome: "Tag de proximidade RFID · Intelbras TH 2000", qtd: 40, custo: 4.5 }], forma: "Boleto", vencimento: addDays(HOJE, 9), anexos: [{ id: uid(), nome: "boleto-eletro-sul-08.pdf" }], lancamentoId: "l8", obs: "Pedido 88412." },
-  { id: "cp2", numero: "CMP-0002", fornecedor: "Casa das Fontes", data: addDays(HOJE, -7), itens: [{ id: uid(), nome: "Fonte colmeia 12V 10A · Vetti VT-1210", qtd: 8, custo: 95 }], forma: "Pix", vencimento: addDays(HOJE, -7), anexos: [], lancamentoId: "l4", obs: "" },
+  { id: "cp1", numero: "CMP-0001", fornecedor: "Distribuidora Eletro Sul", data: addDays(HOJE_SEED, -6), itens: [{ id: uid(), nome: "Fechadura digital biométrica · Intelbras FR 320", qtd: 2, custo: 620 }, { id: uid(), nome: "Câmera bullet Full HD · Intelbras VHD 1220 B", qtd: 2, custo: 210 }, { id: uid(), nome: "Tag de proximidade RFID · Intelbras TH 2000", qtd: 40, custo: 4.5 }], forma: "Boleto", vencimento: addDays(HOJE_SEED, 9), anexos: [{ id: uid(), nome: "boleto-eletro-sul-08.pdf" }], lancamentoId: "l8", obs: "Pedido 88412." },
+  { id: "cp2", numero: "CMP-0002", fornecedor: "Casa das Fontes", data: addDays(HOJE_SEED, -7), itens: [{ id: uid(), nome: "Fonte colmeia 12V 10A · Vetti VT-1210", qtd: 8, custo: 95 }], forma: "Pix", vencimento: addDays(HOJE_SEED, -7), anexos: [], lancamentoId: "l4", obs: "" },
 ];
 
 const GARANTIAS_SEED = [
-  { id: "g1", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s5", descricao: "Manutenção de interfone", local: "Bloco B", inicio: addDays(HOJE, -4), dias: 30, ate: addDays(HOJE, 26), serie: "" },
-  { id: "g2", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s2", descricao: "Configuração de controle de acesso", local: "Bloco B", inicio: addDays(HOJE, -4), dias: 90, ate: addDays(HOJE, 86), serie: "" },
-  { id: "g3", clienteId: "c4", osId: null, tipo: "servico", servicoId: "s4", descricao: "Instalação de câmera CFTV", local: "Área de produção", inicio: addDays(HOJE, -120), dias: 90, ate: addDays(HOJE, -30), serie: "" },
+  { id: "g1", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s5", descricao: "Manutenção de interfone", local: "Bloco B", inicio: addDays(HOJE_SEED, -4), dias: 30, ate: addDays(HOJE_SEED, 26), serie: "" },
+  { id: "g2", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s2", descricao: "Configuração de controle de acesso", local: "Bloco B", inicio: addDays(HOJE_SEED, -4), dias: 90, ate: addDays(HOJE_SEED, 86), serie: "" },
+  { id: "g3", clienteId: "c4", osId: null, tipo: "servico", servicoId: "s4", descricao: "Instalação de câmera CFTV", local: "Área de produção", inicio: addDays(HOJE_SEED, -120), dias: 90, ate: addDays(HOJE_SEED, -30), serie: "" },
 ];
 
 /* ============================================ empresa · usuários · acesso
@@ -188,35 +237,35 @@ const PLATFORM_ADMIN = "platform_admin";
 const ehPlataforma = (u) => u?.papelPlataforma === PLATFORM_ADMIN;
 
 const EMPRESAS_SEED = [
-  { ...EMPRESA_SEED, id: "e1", criadaEm: addDays(HOJE, -240) },
+  { ...EMPRESA_SEED, id: "e1", criadaEm: addDays(HOJE_SEED, -240) },
   {
     id: "e2", nome: "Carlos Elétrica", documento: "29.110.884/0001-30",
     atividade: "Instalações elétricas prediais", telefone: "(11) 3411-9080",
     whatsapp: "(11) 98330-1177", email: "contato@carloseletrica.com.br",
     endereco: "Rua Tuiuti, 210 — Tatuapé, São Paulo/SP", responsavel: "Carlos Prado",
-    temEquipe: false, validadePadrao: 10, criadaEm: addDays(HOJE, -35),
+    temEquipe: false, validadePadrao: 10, criadaEm: addDays(HOJE_SEED, -35),
     condicaoPadrao: "Pagamento à vista na conclusão.", observacaoPadrao: "",
   },
 ];
 
 const USUARIOS_SEED = [
-  { id: "u1", nome: "Jonas Ribeiro", email: "jonas@jrservicostecnicos.com.br", ultimoAcesso: HOJE },
-  { id: "u2", nome: "Diego Farias", email: "diego@jrservicostecnicos.com.br", telefone: "(11) 97744-2019", funcao: "Técnico instalador", ultimoAcesso: addDays(HOJE, -1) },
-  { id: "u3", nome: "Carlos Prado", email: "carlos@carloseletrica.com.br", ultimoAcesso: addDays(HOJE, -4) },
-  { id: "u0", nome: "João — ZiisTec", email: "joao@ziistec.com.br", papelPlataforma: PLATFORM_ADMIN, ultimoAcesso: HOJE },
+  { id: "u1", nome: "Jonas Ribeiro", email: "jonas@jrservicostecnicos.com.br", ultimoAcesso: HOJE_SEED },
+  { id: "u2", nome: "Diego Farias", email: "diego@jrservicostecnicos.com.br", telefone: "(11) 97744-2019", funcao: "Técnico instalador", ultimoAcesso: addDays(HOJE_SEED, -1) },
+  { id: "u3", nome: "Carlos Prado", email: "carlos@carloseletrica.com.br", ultimoAcesso: addDays(HOJE_SEED, -4) },
+  { id: "u0", nome: "João — ZiisTec", email: "joao@ziistec.com.br", papelPlataforma: PLATFORM_ADMIN, ultimoAcesso: HOJE_SEED },
 ];
 
 /* vínculo usuário ⇄ empresa: é aqui que mora o papel */
 const MEMBRESIAS_SEED = [
-  { id: "m1", usuarioId: "u1", empresaId: "e1", papel: "proprietario", ativo: true, desde: addDays(HOJE, -240) },
-  { id: "m2", usuarioId: "u2", empresaId: "e1", papel: "tecnico", ativo: true, desde: addDays(HOJE, -90) },
-  { id: "m3", usuarioId: "u3", empresaId: "e2", papel: "proprietario", ativo: true, desde: addDays(HOJE, -35) },
+  { id: "m1", usuarioId: "u1", empresaId: "e1", papel: "proprietario", ativo: true, desde: addDays(HOJE_SEED, -240) },
+  { id: "m2", usuarioId: "u2", empresaId: "e1", papel: "tecnico", ativo: true, desde: addDays(HOJE_SEED, -90) },
+  { id: "m3", usuarioId: "u3", empresaId: "e2", papel: "proprietario", ativo: true, desde: addDays(HOJE_SEED, -35) },
 ];
 
-const PLANO = { nome: "ZiisTec Mensal", valor: 69.9 };
+const PLANO = { nome: "Profissional", valor: 79.9 };
 const ASSINATURAS_SEED = [
-  { id: "a1", empresaId: "e1", plano: PLANO.nome, valor: PLANO.valor, status: "ativa", inicio: addDays(HOJE, -240), proximaCobranca: addDays(HOJE, 12) },
-  { id: "a2", empresaId: "e2", plano: PLANO.nome, valor: PLANO.valor, status: "pendente", inicio: addDays(HOJE, -35), proximaCobranca: addDays(HOJE, -3) },
+  { id: "a1", empresaId: "e1", plano: PLANO.nome, valor: PLANO.valor, status: "ativa", inicio: addDays(HOJE_SEED, -240), proximaCobranca: addDays(HOJE_SEED, 12) },
+  { id: "a2", empresaId: "e2", plano: PLANO.nome, valor: PLANO.valor, status: "pendente", inicio: addDays(HOJE_SEED, -35), proximaCobranca: addDays(HOJE_SEED, -3) },
 ];
 const ST_ASSINATURA = {
   trial: { label: "Avaliação", tone: "marca", libera: true },
@@ -229,7 +278,7 @@ const ST_ASSINATURA = {
 /* permissões por papel. A lista é curta de propósito: dois papéis, regras claras. */
 const PERMISSOES = {
   proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "equipe", "config", "assinatura", "verValores", "todasOS"],
-  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais"],
+  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo"],
 };
 const pode = (papel, chave) => (PERMISSOES[papel] || []).includes(chave);
 
@@ -244,7 +293,7 @@ const senhaTemporaria = () => {
 const DADOS_E2 = {
   clientes: [{ id: "c9", empresaId: "e2", tipo: "PF", nome: "Ricardo Menezes", documento: "512.900.331-07", telefone: "(11) 4002-8922", whatsapp: "(11) 99120-4455", endereco: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", obs: "" }],
   servicos: [{ id: "s9", empresaId: "e2", nome: "Troca de disjuntor", categoria: "Elétrica", unidade: "unidade", preco: 150, custo: 45, descricao: "Substituição com teste de carga.", ativo: true, garantiaDias: 90, retornoDias: 0 }],
-  ordens: [{ ...osBase, id: "os9", empresaId: "e2", numero: "OS-0001", clienteId: "c9", orcamentoId: null, status: "agendada", data: HOJE, hora: "15:00", responsavelId: "u3", responsavel: "Carlos Prado", local: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", localServico: "Quadro geral", itens: [], descricaoLivre: "Quadro desarmando ao ligar o chuveiro. Verificar disjuntor e fiação.", obs: "", checklist: [], historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] }],
+  ordens: [{ ...osBase, id: "os9", empresaId: "e2", numero: "OS-0001", clienteId: "c9", orcamentoId: null, status: "agendada", data: HOJE_SEED, hora: "15:00", responsavelId: "u3", responsavel: "Carlos Prado", local: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", localServico: "Quadro geral", itens: [], descricaoLivre: "Quadro desarmando ao ligar o chuveiro. Verificar disjuntor e fiação.", obs: "", checklist: [], historico: [{ id: uid(), quando: HOJE_SEED, texto: "Ordem de serviço criada" }] }],
 };
 
 /* toda entidade empresarial carrega empresaId desde a origem */
@@ -255,6 +304,37 @@ const RESPONSAVEIS = { "Jonas Ribeiro": "u1", "Diego Farias": "u2" };
 const cx = (...c) => c.filter(Boolean).join(" ");
 const ring = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50";
 
+/* A OS relida do banco (fromWorkOrder) vem sem relato, histórico, checklist, fotos, retornos e
+   materiais registrados: esses complementos chegam pela hidratação (runtimeApi). Ao trocar status,
+   agenda ou salvar, a OS da lista mantém os complementos em vez de aparecer vazia até recarregar. */
+function mesclarOSRelida(anterior, salvo) {
+  if (!anterior || !salvo) return salvo;
+  const itensSalvos = salvo.itens || [];
+  const materiais = (anterior.itens || []).filter((i) => i.materialRegistrado && !itensSalvos.some((s) => s.id === i.id));
+  return {
+    ...salvo,
+    relato: salvo.relato || anterior.relato || "",
+    historico: salvo.historico?.length ? salvo.historico : anterior.historico || [],
+    retornos: salvo.retornos?.length ? salvo.retornos : anterior.retornos,
+    checklist: salvo.checklist?.length ? salvo.checklist : anterior.checklist || [],
+    fotos: salvo.fotos?.length ? salvo.fotos : anterior.fotos || [],
+    itens: [...itensSalvos, ...materiais],
+    /* início do atendimento (0101): o select da OS não traz a coluna; vale enquanto a OS segue em andamento */
+    iniciadaEm: salvo.iniciadaEm ?? (salvo.status === "andamento" ? anterior.iniciadaEm || null : null),
+  };
+}
+
+function aplicarOSSalvaNoEstado(salvo, { setOrdens, setOrcamentos, setOsAberta }) {
+  setOrdens((lista) => lista.some((x) => x.id === salvo.id)
+    ? lista.map((x) => x.id === salvo.id ? mesclarOSRelida(x, salvo) : x)
+    : [salvo, ...lista]);
+  if (salvo.orcamentoId) {
+    setOrcamentos((lista) => lista.map((o) => o.id === salvo.orcamentoId ? { ...o, osId: salvo.id } : o));
+  }
+  setOsAberta(salvo.id);
+  return salvo.id;
+}
+
 function Btn({ children, onClick, variant = "primary", size = "md", icon: Icon, className, type = "button", disabled, title, ariaLabel }) {
   const base = `inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors duration-150 active:scale-[0.99] select-none disabled:opacity-40 disabled:pointer-events-none ${ring}`;
   const variants = {
@@ -264,8 +344,9 @@ function Btn({ children, onClick, variant = "primary", size = "md", icon: Icon, 
     quiet: "bg-slate-100 text-slate-700 hover:bg-slate-200",
     ghost: "text-slate-600 hover:bg-slate-100",
     danger: "text-rose-700 hover:bg-rose-50",
+    dangerSolid: "bg-rose-600 text-white hover:bg-rose-700",
   };
-  const sizes = { sm: "text-sm px-3 py-2", md: "text-sm px-4 py-3", lg: "text-base px-5 py-3.5" };
+  const sizes = { sm: "min-h-11 text-sm px-3 py-2", md: "min-h-11 text-sm px-4 py-3", lg: "min-h-12 text-base px-5 py-3.5" };
   return (
     <button type={type} onClick={onClick} disabled={disabled} title={title} aria-label={ariaLabel || title}
       className={cx(base, variants[variant], sizes[size], className)}>
@@ -285,6 +366,10 @@ const TONE = {
 const Pill = ({ tone = "neutro", children, className }) => (
   <span className={cx("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap", TONE[tone], className)}>{children}</span>
 );
+/* BETA ACCESS · selo discreto no shell (marca lateral, trilho recolhido e cabeçalho mobile). */
+const SeloBeta = ({ className }) => (seloBetaAtivo() ? (
+  <span className={cx("inline-flex items-center rounded-md bg-teal-400/15 px-1.5 py-0.5 text-[10px] font-bold leading-none tracking-[0.12em] text-teal-300 ring-1 ring-teal-400/30", className)}>BETA</span>
+) : null);
 
 const ST_ORC = {
   rascunho: { label: "Rascunho", tone: "neutro" },
@@ -300,9 +385,41 @@ const ST_OS = {
   concluida: { label: "Concluída", tone: "sucesso" },
   cancelada: { label: "Cancelada", tone: "erro" },
 };
-const statusLanc = (l) => (l.pago ? { label: l.tipo === "receita" ? "Recebido" : "Pago", tone: "sucesso" } : l.vencimento < HOJE ? { label: "Vencido", tone: "erro" } : { label: l.tipo === "receita" ? "A receber" : "A pagar", tone: "atencao" });
+const statusLanc = (l) => (l.pago ? { label: l.tipo === "receita" ? "Recebido" : "Pago", tone: "sucesso" } : l.vencimento < hojeISO() ? { label: "Vencido", tone: "erro" } : { label: l.tipo === "receita" ? "A receber" : "A pagar", tone: "atencao" });
 
 const Panel = ({ children, className }) => <div className={cx("bg-white rounded-2xl ring-1 ring-slate-200/70", className)}>{children}</div>;
+
+class TelaErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("[ZiisTec] erro inesperado de tela", error, info);
+  }
+  tentarNovamente = () => this.setState({ error: null });
+  voltar = () => {
+    this.setState({ error: null });
+    this.props.onBack?.();
+  };
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" className="rounded-2xl bg-white ring-1 ring-rose-200 p-5 sm:p-6">
+        <AlertTriangle className="w-6 h-6 text-rose-700 mb-3" aria-hidden="true" />
+        <h1 className="text-xl font-semibold text-slate-900">Algo deu errado ao abrir esta tela</h1>
+        <p className="mt-2 text-sm text-slate-600">O erro foi mantido visível para não deixar o aplicativo em branco.</p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Btn onClick={this.tentarNovamente}>Tentar novamente</Btn>
+          <Btn variant="soft" onClick={this.voltar}>Voltar</Btn>
+        </div>
+      </div>
+    );
+  }
+}
 
 const Rotulo = ({ children, acao }) => (
   <div className="flex items-end justify-between gap-4 mb-3">
@@ -319,27 +436,68 @@ const Field = ({ label, children, hint, className }) => (
   </label>
 );
 
-const inputCls = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 transition focus:outline-none focus:ring-2 focus:ring-teal-600";
+const inputClsBase = "w-full rounded-xl bg-white ring-1 ring-slate-200 px-3.5 py-3 text-[15px] text-slate-900 placeholder:text-slate-300 transition focus:outline-none focus:ring-2 focus:ring-teal-600";
+
+/* Campo monetário brasileiro sem exigir digitação "por centavos".
+   Exemplos: 200 -> R$ 200,00; 20,50 -> R$ 20,50; 1.250,90 -> R$ 1.250,90.
+   O banco continua recebendo apenas número limpo. */
+function InputMoeda({ valor, onChange, className, ...resto }) {
+  const [foco, setFoco] = useState(false);
+  const [rascunho, setRascunho] = useState("");
+  const numero = Number(valor) || 0;
+  const formatado = numero.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const exibido = foco ? rascunho : formatado;
+
+  const interpretar = (texto) => {
+    let t = String(texto ?? "").replace(/R\$/gi, "").replace(/\s/g, "").replace(/[^0-9,.-]/g, "");
+    if (!t || t === "-" || t === "," || t === ".") return 0;
+    const temVirgula = t.includes(",");
+    if (temVirgula) t = t.replace(/\./g, "").replace(",", ".");
+    else if ((t.match(/\./g) || []).length > 1) t = t.replace(/\./g, "");
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.max(0, n) : 0;
+  };
+
+  return (
+    <div className="relative">
+      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-slate-400 pointer-events-none">R$</span>
+      <input
+        {...resto}
+        inputMode="decimal"
+        value={exibido}
+        onFocus={(e) => { setFoco(true); setRascunho(formatado); requestAnimationFrame(() => e.target.select?.()); }}
+        onBlur={() => setFoco(false)}
+        onChange={(e) => { setRascunho(e.target.value); onChange(interpretar(e.target.value)); }}
+        className={cx(inputClsBase, "pl-10 text-right tabular-nums", className)}
+      />
+    </div>
+  );
+}
+
+const inputCls = inputClsBase;
 const Input = (p) => <input {...p} className={cx(inputCls, p.className)} />;
 const Textarea = (p) => <textarea {...p} className={cx(inputCls, "resize-none leading-relaxed", p.className)} />;
 const Select = ({ children, ...p }) => <select {...p} className={cx(inputCls, "appearance-none", p.className)}>{children}</select>;
 
-function Modal({ open, onClose, title, sub, children, footer, wide }) {
+function Modal({ open, onClose, title, sub, children, footer, wide, dirty = false, busy = false }) {
+  const { overlay, scroller } = useModalViewport(open);
+  const guard = useModalDismiss({ open, dirty, busy, onClose, overlayRef: overlay });
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
-      <div className={cx("relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[92vh] sm:max-h-[88vh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
-        <div className="flex items-start justify-between gap-4 px-5 sm:px-7 pt-6 pb-4">
+    <div ref={overlay} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6 pt-[env(safe-area-inset-top)]" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="absolute inset-0 bg-slate-900/40" onClick={guard.requestClose} />
+      <div className={cx("ziistec-modal-panel relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[calc(100dvh-env(safe-area-inset-top))] sm:max-h-[88dvh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
+        <div className="shrink-0 flex items-start justify-between gap-4 px-5 sm:px-7 pt-6 pb-4">
           <div>
             <h3 className="text-lg font-semibold text-slate-900 tracking-tight">{title}</h3>
             {sub && <p className="text-sm text-slate-500 mt-0.5">{sub}</p>}
           </div>
-          <button onClick={onClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
+          <button onClick={guard.requestClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
         </div>
-        <div className="overflow-y-auto px-5 sm:px-7 pb-6 space-y-5">{children}</div>
-        {footer && <div className="px-5 sm:px-7 py-4 border-t border-slate-100 flex gap-3 justify-end">{footer}</div>}
+        <div ref={scroller} className="min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-7 pb-6 space-y-5">{children}</div>
+        {footer && <div className="shrink-0 sticky bottom-0 bg-white px-5 sm:px-7 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 flex flex-wrap gap-3 justify-end">{typeof footer === "function" ? footer(guard.requestClose) : footer}</div>}
       </div>
+      <DiscardChangesPrompt open={guard.confirming} onKeepEditing={guard.keepEditing} onDiscard={guard.discard} />
     </div>
   );
 }
@@ -349,14 +507,14 @@ function Confirm({ estado, onClose }) {
   return (
     <Modal open onClose={onClose} title={estado.titulo}
       footer={<><Btn variant="ghost" onClick={onClose}>Voltar</Btn>
-        <Btn variant="dark" onClick={() => { estado.acao(); onClose(); }}>{estado.confirmar}</Btn></>}>
+        <Btn variant={estado.perigo ? "dangerSolid" : "dark"} onClick={() => { estado.acao(); onClose(); }}>{estado.confirmar}</Btn></>}>
       <p className="text-[15px] text-slate-600 leading-relaxed">{estado.texto}</p>
     </Modal>
   );
 }
 
 const PageHead = ({ title, sub, action }) => (
-  <div className="flex items-start justify-between gap-4 mb-7">
+  <div className="flex flex-col gap-4 mb-7 min-[390px]:flex-row min-[390px]:items-start min-[390px]:justify-between">
     <div>
       <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{title}</h1>
       {sub && <p className="text-slate-500 mt-1.5 text-[15px]">{sub}</p>}
@@ -364,6 +522,11 @@ const PageHead = ({ title, sub, action }) => (
     {action && <div className="shrink-0">{action}</div>}
   </div>
 );
+
+/* Entradas das telas V2 dentro da aba do app principal. Só o proprietário recebe; o acesso real segue no App e no banco. */
+const RecursosV2 = ({ aba, papel, abrirV2 }) => (typeof abrirV2 === "function"
+  ? recursosV2DaAba(aba, papel).map((r) => <Btn key={r.chave} variant="soft" onClick={() => abrirV2(r.chave)}>{r.rotulo}</Btn>)
+  : null);
 
 const Empty = ({ icon: Icon, title, sub, action }) => (
   <div className="text-center py-12 px-6">
@@ -425,106 +588,88 @@ const Linha = ({ children, onClick, className }) => {
 
 /* endereço que abre rota no mapa */
 const Endereco = ({ valor, local, className, compacto }) => {
+  /* O link segue o app de rota que o usuário escolheu (Google Maps é o padrão). */
+  const { app } = useRoutePreference();
   if (!valor) return null;
-  const destino = [local, valor].filter(Boolean).join(", ");
-  return (
-    <a href={mapsUrl(destino)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-      className={cx("inline-flex items-start gap-1.5 text-teal-800 hover:underline", ring, className)}>
+  const href = linkDeRota(app, resolverDestinoRota({ endereco: valor, localServico: local }));
+  const conteudo = (
+    <>
       <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />
       <span className={compacto ? "truncate" : ""}>{local ? `${local} · ${valor}` : valor}</span>
-    </a>
+    </>
+  );
+  return href ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+      className={cx("inline-flex items-start gap-1.5 text-teal-800 hover:underline", ring, className)}>{conteudo}</a>
+  ) : (
+    <span className={cx("inline-flex items-start gap-1.5 text-slate-600", className)}>{conteudo}</span>
   );
 };
 
 /* =============================================== voz + interpretação por IA */
 function usarReconhecimento() {
-  const [suportado] = useState(() => typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition));
-  const [ouvindo, setOuvindo] = useState(false);
-  const [erro, setErro] = useState(null);
-  const rec = useRef(null);
-
-  const iniciar = (aoTexto) => {
-    if (!suportado) return;
-    setErro(null);
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const r = new Rec();
-    r.lang = "pt-BR"; r.continuous = true; r.interimResults = true;
-    let finalizado = "";
-    r.onresult = (ev) => {
-      let parcial = "";
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const t = ev.results[i][0].transcript;
-        if (ev.results[i].isFinal) finalizado += t + " "; else parcial += t;
-      }
-      aoTexto((finalizado + parcial).trim());
-    };
-    r.onerror = (ev) => {
-      const msgs = {
-        "not-allowed": "Permissão de microfone negada. Libere o microfone nas configurações do navegador.",
-        "service-not-allowed": "O navegador bloqueou o reconhecimento de voz neste site.",
-        "no-speech": "Não ouvi nada. Toque no microfone e fale mais perto do aparelho.",
-        "audio-capture": "Nenhum microfone disponível neste aparelho.",
-        network: "Sem conexão para transcrever agora.",
-        aborted: null,
-      };
-      const m = msgs[ev.error];
-      if (m !== null) setErro(m || "Não consegui capturar o áudio.");
-      setOuvindo(false);
-    };
-    r.onend = () => setOuvindo(false);
-    rec.current = r;
-    try { r.start(); setOuvindo(true); } catch { setErro("Microfone indisponível."); }
+  const callbackRef = useRef(null);
+  const speech = useSpeechInput({ onText: ({ text }) => { if (text) callbackRef.current?.(text); } });
+  const iniciar = (aoTexto) => { callbackRef.current = aoTexto; return speech.start(); };
+  return {
+    suportado: speech.supported, ouvindo: speech.listening, processando: speech.processing,
+    sucesso: speech.success, estado: speech.status, erro: speech.error || null,
+    iniciar, parar: speech.stop, cancelar: speech.cancel,
   };
-  const parar = () => { rec.current?.stop(); setOuvindo(false); };
-  return { suportado, ouvindo, erro, iniciar, parar };
 }
 
 /* Componente único de ditado. Usado em TODO campo de texto livre do ZiisTec.
    A voz complementa o campo: o texto ditado é acrescentado ao que já existe,
    nunca substitui, e continua editável à mão. */
-function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica }) {
-  const { suportado, ouvindo, erro, iniciar, parar } = usarReconhecimento();
+function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica, rotuloVoz, maxLength }) {
+  const { suportado, ouvindo, processando, sucesso, erro, iniciar, parar, cancelar } = usarReconhecimento();
   const baseRef = useRef("");
   const comecar = () => {
     baseRef.current = valor.trim() ? valor.trimEnd() + " " : "";
-    iniciar((t) => onChange(baseRef.current + t));
+    /* ditado só acrescenta: transcrição vazia ou falha nunca troca nem apaga o que já está escrito */
+    iniciar((t) => onChange(mergeDictation(baseRef.current, t)));
   };
-  const alternar = () => (ouvindo ? parar() : comecar());
+  const ativo = ouvindo || processando;
+  const alternar = () => (ouvindo ? parar() : processando ? cancelar() : comecar());
 
   return (
     <div>
       <div className="relative">
-        <Textarea rows={rows} value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
-          className={cx(suportado && !destaque && "pr-14", ouvindo && "ring-2 ring-teal-600")} />
-        {suportado && !destaque && (
-          <button onClick={alternar} aria-label={ouvindo ? "Parar de gravar" : "Ditar por voz"} title={ouvindo ? "Parar de gravar" : "Ditar por voz"}
-            className={cx("absolute right-2.5 bottom-2.5 p-2.5 rounded-lg transition-colors", ring,
-              ouvindo ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700")}>
-            {ouvindo ? <MicOff className="w-[18px] h-[18px]" /> : <Mic className="w-[18px] h-[18px]" />}
+        <Textarea rows={rows} value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} maxLength={maxLength}
+          className={cx(suportado && !destaque && !rotuloVoz && "pr-14", ativo && "ring-2 ring-teal-600")} />
+        {suportado && !destaque && !rotuloVoz && (
+          <button type="button" onClick={alternar} aria-label={ouvindo ? "Parar ditado" : processando ? "Cancelar transcrição" : "Ditar por voz"}
+            title={ouvindo ? "Parar ditado" : processando ? "Cancelar transcrição" : "Ditar por voz"}
+            className={cx("absolute right-2.5 bottom-2.5 min-h-11 min-w-11 p-2.5 rounded-lg transition-colors", ring,
+              ativo ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700")}>
+            {ativo ? <MicOff className="w-[18px] h-[18px]" /> : <Mic className="w-[18px] h-[18px]" />}
           </button>
         )}
       </div>
 
-      {suportado && destaque && (
-        <Btn className="w-full mt-3" size="lg" variant={ouvindo ? "dark" : "primary"} icon={ouvindo ? MicOff : Mic} onClick={alternar}>
-          {ouvindo ? "Parar de gravar" : valor.trim() ? "Continuar falando" : "Falar o que foi feito"}
+      {suportado && !destaque && rotuloVoz && (
+        <Btn size="sm" variant={ativo ? "dark" : "soft"} icon={ativo ? MicOff : Mic} className="mt-2" onClick={alternar}>
+          {ouvindo ? "Parar" : processando ? "Transcrevendo…" : rotuloVoz}
         </Btn>
       )}
 
+      {suportado && destaque && (
+        <div className="mt-3 grid gap-2 min-[390px]:grid-cols-[1fr_auto]">
+          <Btn className="w-full" size="lg" variant={ativo ? "dark" : "primary"} icon={ativo ? MicOff : Mic} onClick={alternar}>
+            {ouvindo ? "Parar ditado" : processando ? "Transcrevendo..." : valor.trim() ? "Continuar falando" : "Falar o que foi feito"}
+          </Btn>
+          {ativo && <Btn variant="ghost" onClick={cancelar}>Cancelar</Btn>}
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mt-2 flex-wrap min-h-[18px]">
-        {ouvindo ? (
-          <span className="inline-flex items-center gap-2 text-[12.5px] font-medium text-teal-800">
-            <span className="w-2 h-2 rounded-full bg-rose-500" aria-hidden="true" />
-            Ouvindo… pode falar. O texto entra depois do que já está escrito.
-          </span>
-        ) : (
-          <>
-            {!suportado && <span className="text-[12px] text-slate-400">Ditado indisponível neste navegador — funciona no Chrome. Pode digitar normalmente.</span>}
-            {suportado && dica && <span className="text-[12px] text-slate-400">{dica}</span>}
-          </>
-        )}
+        {ouvindo ? <span className="inline-flex items-center gap-2 text-[12.5px] font-medium text-teal-800"><span className="w-2 h-2 rounded-full bg-rose-500" aria-hidden="true" />Ouvindo... pode falar.</span>
+          : processando ? <span className="text-[12.5px] font-medium text-sky-700">Transcrevendo...</span>
+          : sucesso ? <span className="text-[12.5px] font-medium text-emerald-700">Texto inserido.</span>
+          : <>{!suportado && <span className="text-[12px] text-slate-400">Ditado indisponível neste navegador. No iPhone/Android, use também o microfone do teclado; a digitação continua disponível.</span>}{suportado && dica && <span className="text-[12px] text-slate-400">{dica}</span>}</>}
+        {ativo && !destaque && <button type="button" onClick={cancelar} className="min-h-11 px-3 rounded-lg text-[12px] font-semibold text-slate-600 hover:bg-slate-100">Cancelar</button>}
       </div>
-      {erro && <p className="text-[12.5px] text-rose-700 mt-1">{erro} Você pode continuar digitando.</p>}
+      {erro && <div className="mt-1 flex flex-wrap items-center gap-2"><p className="text-[12.5px] text-rose-700">{erro}</p><button type="button" onClick={comecar} className="min-h-11 px-3 rounded-lg text-[12px] font-semibold text-teal-800 hover:bg-teal-50">Tentar novamente</button></div>}
     </div>
   );
 }
@@ -535,7 +680,7 @@ async function chamarIA(prompt) {
 
 const promptOrcamento = ({ fala, clientes, servicos, produtos, rascunho, comando }) => `Você interpreta pedidos de orçamento de um prestador de serviços brasileiro e devolve APENAS JSON, sem markdown e sem comentários.
 
-CATÁLOGO DE CLIENTES: ${JSON.stringify(clientes.map((c) => ({ id: c.id, nome: c.fantasia || c.nome })))}
+CATÁLOGO DE CLIENTES: ${JSON.stringify(clientes.filter((c) => !c.excluidoEm).map((c) => ({ id: c.id, nome: c.fantasia || c.nome })))}
 CATÁLOGO DE SERVIÇOS: ${JSON.stringify(servicos.filter((s) => s.ativo).map((s) => ({ id: s.id, nome: s.nome, preco: s.preco, unidade: s.unidade })))}
 CATÁLOGO DE PRODUTOS: ${JSON.stringify(produtos.filter((p) => p.ativo).map((p) => ({ id: p.id, nome: `${p.nome} ${p.marca || ""} ${p.modelo || ""}`.trim(), preco: p.preco, unidade: p.unidade })))}
 
@@ -565,12 +710,25 @@ Formato: {"texto":"DIAGNÓSTICO\\n...\\n\\nSERVIÇO EXECUTADO\\n...\\n\\nTESTES\
 
 /* ================================================================== App */
 export default function ZiisTec({ contexto }) {
+  useDiaLocal();
   /* contexto vem do Supabase (Fase 1). Quando presente, substitui a
      autenticação simulada e os dados de demonstração de empresa/usuário. */
   const real = Boolean(contexto);
-  const [tela, setTela] = useState("inicio");
+  const [tela, setTela] = useState(() => (typeof window !== "undefined" ? abaDeOrigemV2(window.history.state) : null) || "inicio");
+  useEffect(() => {
+    // A origem vale uma vez: consumida, sai do histórico para um recarregamento comum voltar ao Início.
+    if (typeof window === "undefined") return;
+    const limpo = semOrigemV2(window.history.state);
+    if (limpo) window.history.replaceState(limpo, "", window.location.href);
+  }, []);
   const [drawer, setDrawer] = useState(false);
+  const [menuExpandido, setMenuExpandido] = useState(false);
+  const menuTouchX = useRef(null);
+  const mobileEdgeSwipe = useRef(null);
+  const drawerSwipe = useRef(null);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [busca, setBusca] = useState(false);
+  const [minhaConta, setMinhaConta] = useState(false);
   /* --- identidade e acesso --- */
   const [empresas, setEmpresas] = useState(() => (real ? [contexto.empresa] : EMPRESAS_SEED));
   const [usuarios, setUsuarios] = useState(() => (real ? contexto.usuarios : USUARIOS_SEED));
@@ -606,6 +764,10 @@ export default function ZiisTec({ contexto }) {
   const [clienteAberto, setClienteAberto] = useState(null);
   const [orcamentoAberto, setOrcamentoAberto] = useState(null);
   const [osAberta, setOsAberta] = useState(null);
+  useEffect(() => {
+    contexto?.onAssistantWorkOrder?.(tela === 'ordens' ? osAberta : null);
+    return () => contexto?.onAssistantWorkOrder?.(null);
+  }, [tela, osAberta, contexto?.onAssistantWorkOrder]);
   const [compraAberta, setCompraAberta] = useState(null);
   const [garantiaAberta, setGarantiaAberta] = useState(null);
 
@@ -619,6 +781,54 @@ export default function ZiisTec({ contexto }) {
   const empresa = empresas.find((e) => e.id === empresaId) || EMPRESA_SEED;
   const assinatura = assinaturas.find((a) => a.empresaId === empresaId) || null;
   const permitido = (chave) => pode(papel, chave);
+
+  useEffect(() => {
+    if (!drawer) return undefined;
+    const fecharComEsc = (event) => { if (event.key === "Escape") setDrawer(false); };
+    window.addEventListener("keydown", fecharComEsc);
+    return () => window.removeEventListener("keydown", fecharComEsc);
+  }, [drawer]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) { setKeyboardOpen(false); return undefined; }
+    const atualizarTeclado = () => setKeyboardOpen(isKeyboardViewportOpen({ layoutHeight: window.innerHeight, visualHeight: viewport.height }));
+    atualizarTeclado();
+    viewport.addEventListener("resize", atualizarTeclado);
+    viewport.addEventListener("scroll", atualizarTeclado);
+    window.addEventListener("orientationchange", atualizarTeclado);
+    return () => {
+      viewport.removeEventListener("resize", atualizarTeclado);
+      viewport.removeEventListener("scroll", atualizarTeclado);
+      window.removeEventListener("orientationchange", atualizarTeclado);
+    };
+  }, []);
+
+  const alvoBloqueiaSwipe = (target) => Boolean(target?.closest?.("input, textarea, select, button, a, [role='slider'], [data-no-edge-swipe]"));
+  const iniciarEdgeSwipe = (event) => {
+    if (window.innerWidth >= 768 || drawer || alvoBloqueiaSwipe(event.target)) return;
+    const touch = event.touches?.[0];
+    mobileEdgeSwipe.current = touch ? beginEdgeSwipe({ x: touch.clientX, y: touch.clientY, viewportWidth: window.innerWidth }) : null;
+  };
+  const finalizarEdgeSwipe = (event) => {
+    const start = mobileEdgeSwipe.current;
+    mobileEdgeSwipe.current = null;
+    if (!start || window.innerWidth >= 768) return;
+    const touch = event.changedTouches?.[0];
+    if (touch && classifyHorizontalSwipe(start, { x: touch.clientX, y: touch.clientY }, "open") === "open") setDrawer(true);
+  };
+  const iniciarDrawerSwipe = (event) => {
+    if (window.innerWidth >= 768 || alvoBloqueiaSwipe(event.target)) return;
+    const touch = event.touches?.[0];
+    drawerSwipe.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+  };
+  const finalizarDrawerSwipe = (event) => {
+    const start = drawerSwipe.current;
+    drawerSwipe.current = null;
+    if (!start || window.innerWidth >= 768) return;
+    const touch = event.changedTouches?.[0];
+    if (touch && classifyHorizontalSwipe(start, { x: touch.clientX, y: touch.clientY }, "close") === "close") setDrawer(false);
+  };
 
   /* Fase 2: quando há sessão real, os módulos operacionais vêm do Supabase.
      RLS continua sendo a autoridade: o técnico recebe apenas o que pode ler. */
@@ -635,7 +845,7 @@ export default function ZiisTec({ contexto }) {
       setCompras(data.compras); setGarantias(data.garantias);
     });
     return () => { ativo = false; };
-  }, [real, empresaId, contexto?.chave]);
+  }, [real, empresaId, contexto?.chave, contexto?.assistantRevision]);
 
   const recarregarDados = async () => {
     if (!real || !empresaId) return;
@@ -677,6 +887,7 @@ export default function ZiisTec({ contexto }) {
   const nomeCliente = (id) => { const c = cliente(id); return c?.fantasia || c?.nome || "Cliente"; };
 
   const irPara = (t) => {
+    if (!confirmDiscardNavigation()) return;
     setTela(t); setClienteAberto(null); setOrcamentoAberto(null); setOsAberta(null); setCompraAberta(null);
     setGarantiaAberta(null); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
   };
@@ -685,6 +896,34 @@ export default function ZiisTec({ contexto }) {
   const abrirCliente = (id) => { setTela("clientes"); setClienteAberto(id); setBusca(false); setDrawer(false); };
   const abrirCompra = (id) => { setTela("compras"); setCompraAberta(id); setBusca(false); setDrawer(false); };
   const abrirGarantia = (id) => { setTela("garantias"); setGarantiaAberta(id); setBusca(false); setDrawer(false); };
+
+  const excluirRegistro = (tipo, id, nome, aoExcluir) => {
+    if (papel !== "proprietario") { aviso("Somente o proprietário pode excluir registros."); return; }
+    const rotulos = { cliente:"cliente", servico:"serviço", produto:"produto", orcamento:"orçamento", os:"ordem de serviço", compra:"compra", financeiro:"lançamento", garantia:"garantia" };
+    const rotulo = rotulos[tipo] || "registro";
+    setConfirmar({
+      titulo: `Excluir ${rotulo}?`,
+      texto: `${nome || "Este registro"} deixará de aparecer nas listas ativas. Os vínculos históricos necessários para documentos, financeiro e auditoria serão preservados.`,
+      confirmar: "Excluir", perigo: true,
+      acao: async () => {
+        try {
+          if (real) { await excluirRegistroDB(tipo, id, empresaId); await recarregarDados(); }
+          else {
+            const agora = new Date().toISOString();
+            if (tipo === "cliente") setClientes((ls) => ls.map((x) => x.id === id ? { ...x, excluidoEm: agora } : x));
+            if (tipo === "servico") setServicos((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "produto") setProdutos((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "orcamento") setOrcamentos((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "os") setOrdens((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "compra") setCompras((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "financeiro") setLancamentos((ls) => ls.filter((x) => x.id !== id));
+            if (tipo === "garantia") setGarantias((ls) => ls.filter((x) => x.id !== id));
+          }
+          aoExcluir?.(); aviso(`${rotulo.charAt(0).toUpperCase() + rotulo.slice(1)} excluído com segurança.`);
+        } catch (e) { aviso(mensagemErro(e)); }
+      },
+    });
+  };
 
   const proxNumero = (lista, prefixo) => {
     const n = lista.reduce((m, x) => Math.max(m, Number(x.numero?.split("-")[1] || 0)), 0) + 1;
@@ -706,7 +945,7 @@ export default function ZiisTec({ contexto }) {
      guardar senha exige hash no servidor, que ainda não existe. */
   const salvarColaborador = async ({ nome, email, telefone, funcao, papel: pp }) => {
     if (real) {
-      try { const eq = await convidarColaboradorDB({ nome, email, telefone, funcao, papel: pp }, empresaId, usuarioAtual?.id); setUsuarios(eq.usuarios); setMembresias(eq.membresias); aviso(`${nome} foi convidado para a equipe.`); return { convite: true }; }
+      try { const eq = await convidarColaboradorDB({ nome, email, telefone, funcao, papel: pp }, empresaId, usuarioAtual?.id); setUsuarios(eq.usuarios); setMembresias(eq.membresias); const emailEnviado = Boolean(eq.emailDelivery?.sent); aviso(emailEnviado ? `Convite ZiisTec enviado para ${email.trim().toLowerCase()}.` : eq.emailDelivery?.reason === "rate_limited" ? `O convite para ${email.trim().toLowerCase()} já foi enviado há instantes. Aguarde ${eq.emailDelivery.retryAfterSeconds || 60} segundos para reenviar.` : `${nome} foi adicionado como convite pendente. Se já tiver conta, pode entrar com o mesmo e-mail; o acesso só será ativado após a confirmação do e-mail.`); return { convite: true, emailEnviado }; }
       catch (e) { aviso(mensagemErro(e)); return null; }
     }
     const limpo = email.trim().toLowerCase();
@@ -714,7 +953,7 @@ export default function ZiisTec({ contexto }) {
     if (existente && membresias.some((m) => m.usuarioId === existente.id && m.empresaId === empresaId)) { aviso("Esta pessoa já faz parte da sua equipe."); return null; }
     const usuarioId = existente?.id || uid();
     if (!existente) setUsuarios((l) => [...l, { id: usuarioId, nome, email: limpo, telefone: telefone || "", funcao: funcao || "", ultimoAcesso: null, precisaTrocarSenha: true }]);
-    setMembresias((l) => [...l, { id: uid(), usuarioId, empresaId, papel: pp, ativo: true, desde: HOJE, convite: "pendente" }]);
+    setMembresias((l) => [...l, { id: uid(), usuarioId, empresaId, papel: pp, ativo: true, desde: hojeISO(), convite: "pendente" }]);
     aviso(`${nome} foi convidado para a equipe.`); return { usuarioId, senhaTemporaria: senhaTemporaria() };
   };
   const atualizarColaborador = async (usuarioId, dados) => {
@@ -732,7 +971,7 @@ export default function ZiisTec({ contexto }) {
     return senhaTemporaria();
   };
   const concluirPrimeiroAcesso = (usuarioId) => {
-    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, precisaTrocarSenha: false, ultimoAcesso: HOJE } : u)));
+    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, precisaTrocarSenha: false, ultimoAcesso: hojeISO() } : u)));
     setMembresias((l) => l.map((m) => (m.usuarioId === usuarioId ? { ...m, convite: "aceito" } : m)));
   };
   const alternarColaborador = async (m) => {
@@ -792,8 +1031,11 @@ export default function ZiisTec({ contexto }) {
       try { const salvo = await salvarProdutoDB(p, empresaId); setProdutos((l) => p.id ? l.map((x)=>x.id===salvo.id?salvo:x) : [salvo,...l]); aviso(p.id ? "Produto atualizado" : "Produto cadastrado"); return salvo.id; }
       catch (e) { aviso(mensagemErro(e)); return null; }
     }
-    setProdutos((l) => (p.id ? l.map((x) => (x.id === p.id ? p : x)) : [...l, { ...p, id: uid(), empresaId }]));
+    let id = p.id;
+    if (p.id) setProdutos((l) => l.map((x) => (x.id === p.id ? p : x)));
+    else { id = uid(); setProdutos((l) => [...l, { ...p, id, empresaId }]); }
     aviso(p.id ? "Produto atualizado" : "Produto cadastrado");
+    return id;
   };
 
   /* --------- orçamento --------- */
@@ -805,17 +1047,18 @@ export default function ZiisTec({ contexto }) {
         aviso(o.id ? "Orçamento salvo" : `${salvo.numero} criado`); setOrcamentoAberto(salvo.id); return salvo.id;
       } catch (e) { aviso(mensagemErro(e)); return null; }
     }
-    if (o.id) { setOrcamentos((l) => l.map((x) => (x.id === o.id ? o : x))); aviso("Orçamento salvo"); setOrcamentoAberto(o.id); }
-    else { const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, osId: null }; setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado`); setOrcamentoAberto(novo.id); }
+    if (o.id) { setOrcamentos((l) => l.map((x) => (x.id === o.id ? o : x))); aviso("Orçamento salvo"); setOrcamentoAberto(o.id); return o.id; }
+    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, osId: null };
+    setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado`); setOrcamentoAberto(novo.id); return novo.id;
   };
   /* duplicar: copia cliente, itens e condições; não leva aprovação, OS nem número */
   const duplicarOrcamento = async (o) => {
     if (real) {
-      try { const novo=await duplicarOrcamentoDB(o,empresaId,usuarioAtual?.id,addDays(HOJE,empresa.validadePadrao)); setOrcamentos((l)=>[novo,...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id); }
+      try { const novo=await duplicarOrcamentoDB(o,empresaId,usuarioAtual?.id,addDays(hojeISO(),empresa.validadePadrao)); setOrcamentos((l)=>[novo,...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id); }
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, status: "rascunho", data: HOJE, validade: addDays(HOJE, empresa.validadePadrao), osId: null, itens: o.itens.map((i) => ({ ...i, id: uid() })) };
+    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, status: "rascunho", data: hojeISO(), validade: addDays(hojeISO(), empresa.validadePadrao), osId: null, itens: o.itens.map((i) => ({ ...i, id: uid() })) };
     setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id);
   };
   const mudarStatusOrc = async (id, status) => {
@@ -834,43 +1077,94 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: orc.clienteId, orcamentoId: orc.id, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: orc.local || c?.endereco || "", localServico: orc.localServico || "", itens: orc.itens.map((i) => ({ ...i, id: uid() })), obs: orc.obs, checklist: [], historico: [{ id: uid(), quando: HOJE, texto: `Gerada a partir do ${orc.numero}` }] };
+    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: orc.clienteId, orcamentoId: orc.id, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: orc.local || c?.endereco || "", localServico: orc.localServico || "", itens: orc.itens.map((i) => ({ ...i, id: uid() })), obs: orc.obs, checklist: [], historico: [{ id: uid(), quando: hojeISO(), texto: `Gerada a partir do ${orc.numero}` }] };
     setOrdens((l) => [nova, ...l]); setOrcamentos((l) => l.map((o) => (o.id === orc.id ? { ...o, osId: nova.id } : o))); aviso(`${nova.numero} criada. Falta definir a data.`); setTela("ordens"); setOrcamentoAberto(null); setOsAberta(nova.id);
   };
 
   /* --------- ordem de serviço --------- */
-  const salvarOS = async (os) => {
-    if (real) {
-      try { const salvo = await salvarOSDB(os,empresaId,usuarioAtual?.id); setOrdens((l)=>os.id?l.map((x)=>x.id===salvo.id?salvo:x):[salvo,...l]); setOsAberta(salvo.id); aviso("Ordem de serviço salva"); return salvo.id; }
-      catch(e){ aviso(mensagemErro(e)); return null; }
+  const abrirOSVinculada = (existente, orcamentoId) => {
+    setOrdens((lista) => lista.some((x) => x.id === existente.id)
+      ? lista.map((x) => x.id === existente.id ? existente : x)
+      : [existente, ...lista]);
+    setOrcamentos((lista) => lista.map((o) => o.id === orcamentoId ? { ...o, osId: existente.id } : o));
+    setOsAberta(existente.id);
+    aviso(`${existente.numero || "A OS"} já está vinculada a este orçamento.`);
+    return existente.id;
+  };
+  const salvarOS = async (os, opcoes = {}) => {
+    const orcamentoId = os.orcamentoId || null;
+    if (!os.id && orcamentoId) {
+      const local = ordens.find((x) => x.orcamentoId === orcamentoId);
+      if (local) return abrirOSVinculada(local, orcamentoId);
+      if (real) {
+        try {
+          const existente = await carregarOSPorOrcamentoDB(orcamentoId, empresaId);
+          if (existente) return abrirOSVinculada(existente, orcamentoId);
+        } catch (e) {
+          if (opcoes.propagarErro) throw e;
+          aviso(mensagemErro(e));
+          return null;
+        }
+      }
     }
+    if (real) {
+      try {
+        const salvo = await salvarOSDB(os,empresaId,usuarioAtual?.id);
+        const salvoId = aplicarOSSalvaNoEstado(salvo, { setOrdens, setOrcamentos, setOsAberta });
+        aviso("Ordem de serviço salva");
+        return salvoId;
+      } catch(e) {
+        if (!os.id && orcamentoId) {
+          try {
+            const existente = await carregarOSPorOrcamentoDB(orcamentoId, empresaId);
+            if (existente) return abrirOSVinculada(existente, orcamentoId);
+          } catch {}
+        }
+        if (opcoes.propagarErro) throw e;
+        aviso(mensagemErro(e));
+        return null;
+      }
+    }
+    let salvoId = os.id || null;
     if (os.id) setOrdens((l) => l.map((x) => (x.id === os.id ? os : x)));
-    else { const nova = { ...osBase, ...os, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: os.responsavelId || usuarioAtual?.id, historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] }; setOrdens((l) => [nova, ...l]); setOsAberta(nova.id); }
+    else {
+      const nova = { ...osBase, ...os, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: os.responsavelId || usuarioAtual?.id, historico: [{ id: uid(), quando: hojeISO(), texto: "Ordem de serviço criada" }] };
+      salvoId = nova.id;
+      setOrdens((l) => [nova, ...l]);
+      if (nova.orcamentoId) setOrcamentos((l) => l.map((o) => o.id === nova.orcamentoId ? { ...o, osId: nova.id } : o));
+      setOsAberta(nova.id);
+    }
     aviso("Ordem de serviço salva");
+    return salvoId;
   };
   const agendarOS = async (osId, { data, hora, responsavel, responsavelId }) => {
-    if (!data) return;
+    if (!data) return false;
     if (real) {
-      try { const salvo=await atualizarOSDB(osId,{scheduled_date:data,scheduled_time:hora||null,assigned_to:responsavelId||null,status:'scheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?{...salvo,responsavel}:x)); }
-      catch(e){ aviso(mensagemErro(e)); return; }
-    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data, hora, responsavel, responsavelId: responsavelId || x.responsavelId, status: x.status === "aguardando" || x.status === "agendada" ? "agendada" : x.status, historico: [...x.historico, { id: uid(), quando: HOJE, texto: `Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""} · ${responsavel}` }] } : x));
+      try { const salvo=await atualizarOSDB(osId,{scheduled_date:data,scheduled_time:hora||null,assigned_to:responsavelId||null,status:'scheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?{...mesclarOSRelida(x,salvo),responsavel}:x)); }
+      catch(e){ aviso(mensagemErro(e)); return false; }
+    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data, hora, responsavel, responsavelId: responsavelId || x.responsavelId, status: x.status === "aguardando" || x.status === "agendada" ? "agendada" : x.status, historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: `Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""} · ${responsavel}` }] } : x));
     aviso(`Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""}`);
+    return true;
   };
   const desagendarOS = async (osId) => {
     if (real) {
-      try { const salvo=await atualizarOSDB(osId,{scheduled_date:null,scheduled_time:null,status:'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?salvo:x)); }
+      try { const salvo=await atualizarOSDB(osId,{scheduled_date:null,scheduled_time:null,status:'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?mesclarOSRelida(x,salvo):x)); }
       catch(e){ aviso(mensagemErro(e)); return; }
-    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data: "", hora: "", status: "aguardando", historico: [...x.historico, { id: uid(), quando: HOJE, texto: "Agendamento removido" }] } : x));
+    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data: "", hora: "", status: "aguardando", historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: "Agendamento removido" }] } : x));
     aviso("Agendamento removido");
   };
   const mudarStatusOS = async (os, status) => {
     if (real) {
       const mapa={aguardando:'unscheduled',agendada:'scheduled',andamento:'in_progress',concluida:'done',cancelada:'canceled'};
-      try { const salvo=await atualizarOSDB(os.id,{status:mapa[status]||'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===os.id?salvo:x)); }
+      try {
+        const salvo=await atualizarOSDB(os.id,{status:mapa[status]||'unscheduled'});
+        const inicio=status==='andamento'?await lerInicioAtendimentoDB(os.id):null;
+        setOrdens((l)=>l.map((x)=>x.id===os.id?mesclarOSRelida(x,inicio?{...salvo,iniciadaEm:inicio}:salvo):x));
+      }
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, status, historico: [...x.historico, { id: uid(), quando: HOJE, texto: `Status alterado para ${ST_OS[status].label}` }] } : x));
+    setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, status, historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: `Status alterado para ${ST_OS[status].label}` }] } : x));
   };
 
   /* finalizar atendimento — protegido contra duplicação de cobrança/garantia */
@@ -879,26 +1173,29 @@ export default function ZiisTec({ contexto }) {
       try {
         const alvo = ordens.find((o) => o.id === osId);
         if (!alvo) throw new Error("Ordem de serviço não encontrada");
+        if (Object.prototype.hasOwnProperty.call(extras, "precisaRetornar")) {
+          await atualizarOSDB(osId, { needs_return: Boolean(extras.precisaRetornar) });
+        }
         const preparado = await prepararFinalizacaoOSDB(alvo, extras, empresaId, usuarioAtual?.id, papel);
         extras = { ...extras, ...preparado };
         await finalizarOSDB(osId,extras);
         await recarregarDados();
         aviso("Atendimento finalizado e sincronizado com financeiro/garantias.");
-      } catch(e){ aviso(mensagemErro(e)); }
-      return;
+        return true;
+      } catch(e){ aviso(mensagemErro(e)); return false; }
     }
     const atual = ordens.find((o) => o.id === osId);
     if (!atual || atual.status === "concluida" || atual.cobrancaId) { aviso("Esta ordem já foi finalizada."); return; }
     const os = { ...atual, ...extras };
     const total = totalOS(os);
-    const execucao = os.data || HOJE;
+    const execucao = os.data || hojeISO();
     const cobrancaId = total > 0 ? uid() : null;
 
     /* uma OS gera no máximo uma conta a receber; atendimento em garantia sem valor não gera nenhuma */
     if (cobrancaId) {
       setLancamentos((l) => l.some((x) => x.origemTipo === "os" && x.origemId === osId) ? l : [{
         id: cobrancaId, empresaId, tipo: "receita", descricao: `${os.numero} · ${nomeCliente(os.clienteId)}`, clienteId: os.clienteId,
-        valor: total, vencimento: addDays(HOJE, 7), pago: false, origemTipo: "os", origemId: osId, categoria: "Serviços",
+        valor: total, vencimento: addDays(hojeISO(), 7), pago: false, origemTipo: "os", origemId: osId, categoria: "Serviços",
       }, ...l]);
     }
 
@@ -906,38 +1203,40 @@ export default function ZiisTec({ contexto }) {
     const novasGarantias = [];
     if (!os.emGarantia) {
       os.itens.forEach((i) => {
+        const politica = i.garantiaPolitica || "catalog";
         if (i.tipo === "servico") {
-          const s = servicos.find((x) => x.id === i.catalogoId);
-          if (s?.garantiaDias > 0) novasGarantias.push({
-            id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "servico", descricao: s.nome, servicoId: s.id,
-            local: os.localServico, inicio: execucao, dias: s.garantiaDias, ate: addDays(execucao, s.garantiaDias), serie: "",
+          const sv = servicos.find((x) => x.id === i.catalogoId);
+          const dias = politica === "disabled" ? 0 : politica === "custom" ? Number(i.garantiaDiasOverride || 0) : Number(sv?.garantiaDias || 0);
+          if (dias > 0) novasGarantias.push({
+            id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "servico", descricao: sv?.nome || i.nome, servicoId: sv?.id || i.catalogoId,
+            local: os.localServico, inicio: execucao, dias, ate: addDays(execucao, dias), serie: "",
           });
-        } else {
+        } else if (i.tipo === "produto") {
           const pr = produtos.find((x) => x.id === i.catalogoId);
-          if (pr?.garantiaMeses > 0) novasGarantias.push({
-            id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "produto", descricao: i.nome, produtoId: pr.id,
-            local: os.localServico, inicio: execucao, meses: pr.garantiaMeses, ate: addMeses(execucao, pr.garantiaMeses),
-            serie: extras.series?.[i.id] || "",
+          const meses = politica === "disabled" ? 0 : politica === "custom" ? Number(i.garantiaMesesOverride || 0) : Number(pr?.garantiaMeses || 0);
+          if (meses > 0) novasGarantias.push({
+            id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "produto", descricao: i.nome, produtoId: pr?.id || i.catalogoId,
+            local: os.localServico, inicio: execucao, meses, ate: addMesesISO(execucao, meses), serie: extras.series?.[i.id] || "",
           });
         }
       });
     }
-    if (novasGarantias.length) setGarantias((g) => [...novasGarantias, ...g.filter((x) => x.osId !== osId)]);
+    if (novasGarantias.length) setGarantias((g) => [...novasGarantias, ...g.filter((x) => x.osId !== osId)]);    if (novasGarantias.length) setGarantias((g) => [...novasGarantias, ...g.filter((x) => x.osId !== osId)]);
 
     /* recomendação de retorno (pós-venda), apenas registrada */
     let retorno = null;
     os.itens.forEach((i) => {
       const s = servicos.find((x) => x.id === i.catalogoId);
-      if (s?.retornoDias > 0) { const d = addDays(HOJE, s.retornoDias); if (!retorno || d < retorno.data) retorno = { data: d, servico: s.nome }; }
+      if (s?.retornoDias > 0) { const d = addDays(hojeISO(), s.retornoDias); if (!retorno || d < retorno.data) retorno = { data: d, servico: s.nome }; }
     });
 
     setOrdens((l) => l.map((x) => x.id === osId ? {
       ...x, ...extras, status: "concluida", cobrancaId, retorno,
       historico: [...x.historico,
-        { id: uid(), quando: HOJE, texto: "Serviço concluído" },
-        ...(cobrancaId ? [{ id: uid(), quando: HOJE, texto: `Cobrança de ${brl(total)} gerada em contas a receber` }]
-          : [{ id: uid(), quando: HOJE, texto: "Atendimento sem cobrança" }]),
-        ...(novasGarantias.length ? [{ id: uid(), quando: HOJE, texto: `${novasGarantias.length} garantia(s) registrada(s) a partir dos serviços executados` }] : []),
+        { id: uid(), quando: hojeISO(), texto: "Serviço concluído" },
+        ...(cobrancaId ? [{ id: uid(), quando: hojeISO(), texto: `Cobrança de ${brl(total)} gerada em contas a receber` }]
+          : [{ id: uid(), quando: hojeISO(), texto: "Atendimento sem cobrança" }]),
+        ...(novasGarantias.length ? [{ id: uid(), quando: hojeISO(), texto: `${novasGarantias.length} garantia(s) registrada(s) a partir dos serviços executados` }] : []),
       ],
     } : x));
     aviso(cobrancaId
@@ -966,7 +1265,7 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: g.clienteId, orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: origem?.local || cliente(g.clienteId)?.endereco || "", localServico: g.local || origem?.localServico || "", itens: [], obs: `Atendimento em garantia de "${g.descricao}", executado em ${dataBR(g.inicio)}.`, checklist: [], emGarantia: true, garantiaId: g.id, osOrigemId: g.osId, relatoProblema: relatoProblema || "", historico: [{ id: uid(), quando: HOJE, texto: `Aberta em garantia de ${g.descricao}${origem ? ` (${origem.numero})` : ""}` }] };
+    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: g.clienteId, orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: origem?.local || cliente(g.clienteId)?.endereco || "", localServico: g.local || origem?.localServico || "", itens: [], obs: `Atendimento em garantia de "${g.descricao}", executado em ${dataBR(g.inicio)}.`, checklist: [], emGarantia: true, garantiaId: g.id, osOrigemId: g.osId, relatoProblema: relatoProblema || "", historico: [{ id: uid(), quando: hojeISO(), texto: `Aberta em garantia de ${g.descricao}${origem ? ` (${origem.numero})` : ""}` }] };
     setOrdens((l) => [nova, ...l]); aviso(`${nova.numero} aberta em garantia. Falta definir a data.`); setTela("ordens"); setOsAberta(nova.id);
   };
 
@@ -977,10 +1276,10 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    setLancamentos((ls) => ls.map((x) => (x.id === l.id ? { ...x, pago: !x.pago, pagoEm: x.pago ? null : HOJE, forma: x.pago ? null : forma } : x)));
+    setLancamentos((ls) => ls.map((x) => (x.id === l.id ? { ...x, pago: !x.pago, pagoEm: x.pago ? null : hojeISO(), forma: x.pago ? null : forma } : x)));
     if (!l.pago) {
       if (l.origemTipo === "os" && l.origemId)
-        setOrdens((os) => os.map((o) => o.id === l.origemId ? { ...o, historico: [...o.historico, { id: uid(), quando: HOJE, texto: `Pagamento de ${brl(l.valor)} recebido via ${forma}` }] } : o));
+        setOrdens((os) => os.map((o) => o.id === l.origemId ? { ...o, historico: [...o.historico, { id: uid(), quando: hojeISO(), texto: `Pagamento de ${brl(l.valor)} recebido via ${forma}` }] } : o));
       aviso(`${brl(l.valor)} ${l.tipo === "receita" ? "recebido" : "pago"} via ${forma}`);
     } else aviso("Baixa desfeita");
   };
@@ -988,15 +1287,15 @@ export default function ZiisTec({ contexto }) {
   /* --------- compras → conta a pagar --------- */
   const salvarCompra = async (c) => {
     if (real) {
-      try { const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await uploadDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id); await recarregarDados(); aviso(c.id ? "Compra atualizada" : `${salva.numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(salva.id); }
-      catch(e){ aviso(mensagemErro(e)); }
-      return;
+      let salva;
+      try { salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await uploadDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id); await recarregarDados(); aviso(c.id ? "Compra atualizada" : `${salva.numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(salva.id); return true; }
+      catch(e){ aviso(mensagemErro(e)); return salva ? { ok: false, id: salva.id, requestId: salva.requestId } : false; }
     }
     const total = c.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
-    if (c.id) { setCompras((l) => l.map((x) => (x.id === c.id ? c : x))); setLancamentos((l) => l.map((x) => x.id === c.lancamentoId ? { ...x, valor: total, vencimento: c.vencimento, descricao: `Compra ${c.numero} · ${c.fornecedor}` } : x)); aviso("Compra atualizada"); return; }
+    if (c.id) { setCompras((l) => l.map((x) => (x.id === c.id ? c : x))); setLancamentos((l) => l.map((x) => x.id === c.lancamentoId ? { ...x, valor: total, vencimento: c.vencimento, descricao: `Compra ${c.numero} · ${c.fornecedor}` } : x)); aviso("Compra atualizada"); return true; }
     const id = uid(); const numero = proxNumero(comprasEmp, "CMP"); const lancamentoId = uid();
-    setLancamentos((l) => [{ id: lancamentoId, empresaId, tipo: "despesa", descricao: `Compra ${numero} · ${c.fornecedor}`, valor: total, vencimento: c.vencimento || HOJE, pago: !!c.jaPago, pagoEm: c.jaPago ? HOJE : null, forma: c.jaPago ? c.forma : null, origemTipo: "compra", origemId: id, categoria: "Materiais" }, ...l]);
-    setCompras((l) => [{ ...c, id, numero, lancamentoId, empresaId }, ...l]); aviso(`${numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(id);
+    setLancamentos((l) => [{ id: lancamentoId, empresaId, tipo: "despesa", descricao: `Compra ${numero} · ${c.fornecedor}`, valor: total, vencimento: c.vencimento || hojeISO(), pago: !!c.jaPago, pagoEm: c.jaPago ? hojeISO() : null, forma: c.jaPago ? c.forma : null, origemTipo: "compra", origemId: id, categoria: "Materiais" }, ...l]);
+    setCompras((l) => [{ ...c, id, numero, lancamentoId, empresaId }, ...l]); aviso(`${numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(id); return true;
   };
 
   const props = {
@@ -1011,7 +1310,8 @@ export default function ZiisTec({ contexto }) {
     clienteAberto, setClienteAberto, orcamentoAberto, setOrcamentoAberto, osAberta, setOsAberta,
     compraAberta, setCompraAberta, setTela, abrirOS, abrirOrc, abrirCliente, abrirCompra,
     garantiaAberta, setGarantiaAberta, abrirGarantia, real,
-    pedirConfirmacao: setConfirmar,
+    pedirConfirmacao: setConfirmar, excluirRegistro, contexto,
+    abrirV2: contexto?.abrirRecursoV2 ? (chave, params) => contexto.abrirRecursoV2(chave, { origem: tela, params }) : undefined,
   };
 
   const NAV = [
@@ -1021,6 +1321,7 @@ export default function ZiisTec({ contexto }) {
     { id: "catalogo", label: "Serviços e produtos", icon: Wrench },
     { id: "orcamentos", label: "Orçamentos", icon: FileText },
     { id: "ordens", label: "Ordens de serviço", icon: ClipboardList },
+    { id: "vendaCampo", label: "Produtos", icon: ShoppingCart },
     { id: "garantias", label: "Garantias", icon: ShieldCheck },
     { id: "compras", label: "Compras", icon: ShoppingCart },
     { id: "equipe", label: "Equipe", icon: Users2 },
@@ -1030,11 +1331,13 @@ export default function ZiisTec({ contexto }) {
   const NAV_MOBILE = ["inicio", "agenda", "orcamentos", "ordens"];
 
   const Marca = ({ rail }) => (
-    <div className={cx("flex items-center gap-3 px-5 h-[68px]", rail && "lg:px-5 px-0 lg:justify-start justify-center")}>
-      <div className="w-9 h-9 rounded-xl bg-teal-500 flex items-center justify-center shrink-0">
-        <span className="text-slate-900 font-bold text-lg leading-none">Z</span>
+    <div className={cx("flex items-center gap-3 px-5 h-[68px]", rail && !menuExpandido && "md:px-0 md:justify-center lg:px-5 lg:justify-start")}>
+      <div className="relative shrink-0">
+        <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-9 h-9 rounded-xl object-contain" />
+        {rail && !menuExpandido && <SeloBeta className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1 text-[8px] lg:hidden" />}
       </div>
-      <p className={cx("text-white font-semibold tracking-tight text-[17px]", rail && "hidden lg:block")}>ZiisTec</p>
+      <p className={cx("text-white font-semibold tracking-tight text-[17px]", rail && !menuExpandido && "hidden lg:block")}>ZiisTec</p>
+      <SeloBeta className={rail && !menuExpandido ? "hidden lg:inline-flex" : ""} />
     </div>
   );
   const Nav = ({ rail }) => (
@@ -1042,34 +1345,42 @@ export default function ZiisTec({ contexto }) {
       {NAV.filter((n) => permitido(n.id) && (n.id !== "equipe" || empresa.temEquipe)).map((n) => {
         const ativo = tela === n.id;
         return (
-          <button key={n.id} onClick={() => irPara(n.id)} title={n.label} aria-current={ativo ? "page" : undefined}
-            className={cx("relative w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] transition-colors",
-              rail && "lg:justify-start justify-center",
+          <button key={n.id} onClick={() => n.id === "vendaCampo" ? contexto?.abrirRecursoV2?.("venda-os") : irPara(n.id)} title={n.label} aria-current={ativo ? "page" : undefined}
+            className={cx("relative w-full min-h-11 flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] transition-colors",
+              rail && !menuExpandido && "md:justify-center lg:justify-start",
               ativo ? "bg-white/10 text-white font-medium" : "text-slate-400 hover:text-slate-100 hover:bg-white/5",
               "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400")}>
             {ativo && <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-teal-400" aria-hidden="true" />}
             <n.icon className={cx("w-[18px] h-[18px] shrink-0", ativo && "text-teal-300")} aria-hidden="true" />
-            <span className={rail ? "hidden lg:inline" : ""}>{n.label}</span>
+            <span className={rail && !menuExpandido ? "hidden lg:inline" : ""}>{n.label}</span>
           </button>
         );
       })}
     </nav>
   );
-  const Empresa = ({ rail }) => (
-    <div className={cx("px-3 pb-4", rail && "hidden lg:block")}>
-      <div className="flex items-center gap-3 rounded-xl px-3 py-3 bg-white/5">
-        <div className="w-8 h-8 rounded-lg bg-slate-700 text-slate-200 flex items-center justify-center text-xs font-semibold shrink-0">{iniciais(empresa.nome)}</div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] text-white font-medium truncate">{empresa.nome}</p>
-          <p className="text-[11px] text-slate-400 truncate">
-            {usuarioAtual?.nome} · {papel === "proprietario" ? "proprietário" : "técnico"}
-          </p>
-        </div>
-        <button onClick={sair} aria-label="Sair da conta" title="Sair"
-          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 shrink-0"><LogOut className="w-4 h-4" /></button>
+  /* BETA ACCESS · Minha conta e Sair da conta ficam visíveis em desktop, no trilho recolhido do tablet e no menu mobile. */
+  const Empresa = ({ rail }) => {
+    const compacto = rail && !menuExpandido;
+    return (
+      <div className={cx("px-3 pb-4 space-y-1", compacto && "md:px-2 lg:px-3")}>
+        <button onClick={() => { setDrawer(false); setMinhaConta(true); }} aria-label="Minha conta" title="Minha conta"
+          className={cx("w-full min-h-11 flex items-center gap-3 rounded-xl px-3 py-3 bg-white/5 text-left hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400", compacto && "md:justify-center md:px-0 lg:justify-start lg:px-3")}>
+          <div className="w-8 h-8 rounded-lg bg-slate-700 text-slate-200 flex items-center justify-center text-xs font-semibold shrink-0">{iniciais(empresa.nome)}</div>
+          <div className={cx("min-w-0 flex-1", compacto && "md:hidden lg:block")}>
+            <p className="text-[13px] text-white font-medium truncate">{empresa.nome}</p>
+            <p className="text-[11px] text-slate-400 truncate">
+              {usuarioAtual?.nome} · {papel === "proprietario" ? "proprietário" : "técnico"}
+            </p>
+          </div>
+        </button>
+        <button onClick={sair} aria-label="Sair da conta" title="Sair da conta"
+          className={cx("w-full min-h-11 flex items-center gap-2.5 rounded-xl px-3 text-[13px] font-medium text-slate-300 hover:text-white hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400", compacto && "md:justify-center md:px-0 lg:justify-start lg:px-3")}>
+          <LogOut className="w-4 h-4 shrink-0" aria-hidden="true" />
+          <span className={compacto ? "md:hidden lg:inline" : ""}>Sair da conta</span>
+        </button>
       </div>
-    </div>
-  );
+    );
+  };
 
   const estiloGlobal = (
     <style>{`
@@ -1092,12 +1403,12 @@ export default function ZiisTec({ contexto }) {
         const eId = uid(), uId = uid(), mId = uid();
         setEmpresas((l) => [...l, { id: eId, nome: dados.empresa, documento: "", atividade: dados.atividade,
           telefone: "", whatsapp: "", email: dados.email, endereco: "", responsavel: dados.nome,
-          temEquipe: dados.temEquipe, validadePadrao: 15, criadaEm: HOJE,
+          temEquipe: dados.temEquipe, validadePadrao: 15, criadaEm: hojeISO(),
           condicaoPadrao: "50% na aprovação e 50% na entrega do serviço.", observacaoPadrao: "" }]);
-        setUsuarios((l) => [...l, { id: uId, nome: dados.nome, email: dados.email, ultimoAcesso: HOJE }]);
-        setMembresias((l) => [...l, { id: mId, usuarioId: uId, empresaId: eId, papel: "proprietario", ativo: true, desde: HOJE }]);
+        setUsuarios((l) => [...l, { id: uId, nome: dados.nome, email: dados.email, ultimoAcesso: hojeISO() }]);
+        setMembresias((l) => [...l, { id: mId, usuarioId: uId, empresaId: eId, papel: "proprietario", ativo: true, desde: hojeISO() }]);
         setAssinaturas((l) => [...l, { id: uid(), empresaId: eId, plano: PLANO.nome, valor: PLANO.valor,
-          status: "trial", inicio: HOJE, proximaCobranca: addDays(HOJE, 14) }]);
+          status: "trial", inicio: hojeISO(), proximaCobranca: addDays(hojeISO(), 14) }]);
         setSessao({ usuarioId: uId, membresiaId: mId });
         setTela("inicio");
       }} /></>
@@ -1109,60 +1420,74 @@ export default function ZiisTec({ contexto }) {
       assinaturas={assinaturas} mudarAssinatura={mudarAssinatura} sair={sair} toast={toast} /></>
   );
 
-  /* portão 3 — assinatura sem liberação bloqueia o uso, nunca os dados */
-  if (assinatura && !ST_ASSINATURA[assinatura.status].libera) return (
-    <>{estiloGlobal}<AssinaturaBloqueada assinatura={assinatura} empresa={empresa} papel={papel} sair={sair}
-      reativar={() => mudarAssinatura(empresaId, "ativa")} /></>
+  /* portão 3 — assinatura sem liberação (status ou período encerrado) bloqueia o uso, nunca os dados */
+  if (assinatura && (!ST_ASSINATURA[assinatura.status]?.libera || resumoAssinatura(assinatura)?.bloqueado)) return (
+    <>{estiloGlobal}<AssinaturaBloqueada assinatura={assinatura} empresa={empresa} papel={papel} sair={sair} /></>
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
+    <div className="min-h-[100dvh] overflow-x-hidden bg-slate-50 text-slate-800 font-sans antialiased" onTouchStart={iniciarEdgeSwipe} onTouchEnd={finalizarEdgeSwipe}>
       {estiloGlobal}
 
-      <aside className="zt-nao-imprime hidden md:flex fixed inset-y-0 left-0 z-30 md:w-[72px] lg:w-[248px] bg-slate-900 flex-col">
+      <aside
+        className={cx("zt-nao-imprime hidden md:flex fixed inset-y-0 left-0 z-30 bg-slate-900 flex-col transition-[width] duration-200 select-none", menuExpandido ? "md:w-[248px]" : "md:w-[72px] lg:w-[248px]")}
+        style={{ touchAction: "pan-y" }}
+        onTouchStart={(e) => { if (window.innerWidth < 1024) menuTouchX.current = e.touches?.[0]?.clientX ?? null; }}
+        onTouchMove={(e) => {
+          if (window.innerWidth >= 1024 || menuTouchX.current == null) return;
+          const atual = e.touches?.[0]?.clientX ?? menuTouchX.current;
+          const delta = atual - menuTouchX.current;
+          if (delta > 38) { setMenuExpandido(true); menuTouchX.current = atual; }
+          if (delta < -38) { setMenuExpandido(false); menuTouchX.current = atual; }
+        }}
+        onTouchEnd={() => { menuTouchX.current = null; }}
+        aria-label="Menu lateral: arraste para abrir ou recolher"
+      >
         <Marca rail /><Nav rail /><Empresa rail />
       </aside>
 
-      <header className="zt-nao-imprime md:hidden sticky top-0 z-30 bg-slate-900 flex items-center justify-between px-4 h-14">
+      <header className="zt-nao-imprime md:hidden sticky top-0 z-30 bg-slate-900 flex items-center justify-between px-4 h-[calc(3.5rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-teal-500 flex items-center justify-center"><span className="text-slate-900 font-bold text-sm leading-none">Z</span></div>
+          <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-7 h-7 rounded-lg object-contain" />
           <span className="text-white font-semibold tracking-tight">ZiisTec</span>
+          <SeloBeta />
         </div>
         <div className="flex items-center">
-          <button onClick={() => setBusca(true)} aria-label="Buscar" className="p-2.5 text-slate-300"><Search className="w-5 h-5" /></button>
-          <button onClick={() => setDrawer(true)} aria-label="Abrir menu" className="p-2.5 -mr-2 text-slate-300"><Menu className="w-6 h-6" /></button>
+          <button onClick={() => setMinhaConta(true)} aria-label="Minha conta" className="min-h-11 min-w-11 p-2.5 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><User className="w-5 h-5" /></button>
+          <button onClick={() => setBusca(true)} aria-label="Buscar" className="min-h-11 min-w-11 p-2.5 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><Search className="w-5 h-5" /></button>
+          <button onClick={() => setDrawer(true)} aria-label="Abrir menu" className="min-h-11 min-w-11 p-2.5 -mr-2 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><Menu className="w-6 h-6" /></button>
         </div>
       </header>
 
       {drawer && (
         <div className="zt-nao-imprime md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menu">
           <div className="absolute inset-0 bg-slate-900/50" onClick={() => setDrawer(false)} />
-          <div className="absolute inset-y-0 left-0 w-72 bg-slate-900 flex flex-col">
+          <div className="absolute inset-y-0 left-0 w-[min(18rem,calc(100vw-3rem))] bg-slate-900 flex flex-col pt-[env(safe-area-inset-top)]" onTouchStart={iniciarDrawerSwipe} onTouchEnd={finalizarDrawerSwipe} style={{ touchAction: "pan-y" }}>
             <div className="flex items-center justify-between pr-2">
               <Marca />
-              <button onClick={() => setDrawer(false)} aria-label="Fechar menu" className="p-2.5 text-slate-400"><X className="w-5 h-5" /></button>
+              <button onClick={() => setDrawer(false)} aria-label="Fechar menu" className="min-h-11 min-w-11 p-2.5 text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"><X className="w-5 h-5" /></button>
             </div>
             <Nav /><Empresa />
           </div>
         </div>
       )}
 
-      <main className="md:pl-[72px] lg:pl-[248px]">
+      <main className={cx("transition-[padding] duration-200", menuExpandido ? "md:pl-[248px]" : "md:pl-[72px] lg:pl-[248px]")}>
         <div className="hidden md:flex zt-nao-imprime justify-end max-w-[1180px] mx-auto px-8 lg:px-10 pt-5">
           <button onClick={() => setBusca(true)}
             className={cx("flex items-center gap-2.5 rounded-xl bg-white ring-1 ring-slate-200 px-4 py-2.5 text-[13px] text-slate-400 hover:ring-slate-300 w-72", ring)}>
             <Search className="w-4 h-4" aria-hidden="true" />
-            Buscar cliente, orçamento, OS…
+            Buscar cliente, OS, produto, serial...
           </button>
         </div>
-        <div className="max-w-[1180px] mx-auto px-4 sm:px-8 lg:px-10 py-6 sm:py-7 pb-28 md:pb-16">
+        <div className={cx("max-w-[1180px] mx-auto px-4 sm:px-8 lg:px-10 py-6 sm:py-7 md:pb-16", keyboardOpen ? "pb-8" : "pb-[calc(7rem+env(safe-area-inset-bottom))]")}>
           {!permitido(tela) ? <SemPermissao papel={papel} /> : <>
           {tela === "inicio" && <Inicio {...props} />}
           {tela === "agenda" && <Agenda {...props} />}
           {tela === "clientes" && <Clientes {...props} />}
           {tela === "catalogo" && <Catalogo {...props} />}
           {tela === "orcamentos" && <Orcamentos {...props} />}
-          {tela === "ordens" && <OrdensServico {...props} />}
+          {tela === "ordens" && <TelaErrorBoundary key={osAberta || "ordens-lista"} onBack={() => setOsAberta(null)}><OrdensServico {...props} /></TelaErrorBoundary>}
           {tela === "garantias" && <Garantias {...props} />}
           {tela === "compras" && <Compras {...props} />}
           {tela === "financeiro" && <Financeiro {...props} />}
@@ -1172,24 +1497,29 @@ export default function ZiisTec({ contexto }) {
         </div>
       </main>
 
-      <nav className="zt-nao-imprime md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 flex" aria-label="Navegação rápida">
+      <nav className={cx("zt-nao-imprime md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)]", keyboardOpen ? "hidden" : "flex")} aria-label="Navegação rápida">
         {NAV.filter((n) => NAV_MOBILE.includes(n.id) && permitido(n.id)).map((n) => {
           const ativo = tela === n.id;
           return (
-            <button key={n.id} onClick={() => irPara(n.id)} aria-current={ativo ? "page" : undefined}
-              className={cx("flex-1 flex flex-col items-center gap-1 py-2.5", ativo ? "text-teal-800" : "text-slate-400")}>
+            <button key={n.id} onClick={() => n.id === "vendaCampo" ? contexto?.abrirRecursoV2?.("venda-os") : irPara(n.id)} aria-current={ativo ? "page" : undefined}
+              className={cx("flex-1 min-h-14 flex flex-col items-center justify-center gap-1 py-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600", ativo ? "text-teal-800" : "text-slate-400")}>
               <n.icon className="w-[22px] h-[22px]" aria-hidden="true" />
               <span className="text-[10px] font-medium">{n.label.split(" ")[0]}</span>
             </button>
           );
         })}
-        <button onClick={() => setDrawer(true)} className="flex-1 flex flex-col items-center gap-1 py-2.5 text-slate-400" aria-label="Mais seções">
+        <button onClick={() => setDrawer(true)} className="flex-1 min-h-14 flex flex-col items-center justify-center gap-1 py-2.5 text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600" aria-label="Mais seções">
           <MoreHorizontal className="w-[22px] h-[22px]" aria-hidden="true" />
           <span className="text-[10px] font-medium">Mais</span>
         </button>
       </nav>
 
-      {busca && <BuscaGlobal onClose={() => setBusca(false)} {...props} />}
+      {busca && (real && papel === "proprietario" ? <GlobalSearchModal companyId={empresaId} onClose={() => setBusca(false)} onClient={abrirCliente} onWorkOrder={abrirOS} onQuote={abrirOrc} onWarranty={abrirGarantia} onLocation={(item)=>{ if(item.work_order_id) abrirOS(item.work_order_id); else abrirCliente(item.client_id); return true; }} onPostSale={()=>{ const u=new URL(window.location.href); u.searchParams.set("v2","pos-venda"); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} onProduct={(id)=>{ const u=new URL(window.location.href); u.searchParams.set("v2","produtos"); u.searchParams.set("product",id); window.location.assign(`${u.pathname}${u.search}${u.hash}`); }} /> : <BuscaGlobal onClose={() => setBusca(false)} {...props} />)}
+
+      {minhaConta && (
+        <MinhaConta nome={usuarioAtual?.nome} email={usuarioAtual?.email} empresa={empresa.fantasia || empresa.nome} papel={papel}
+          assinatura={assinatura} mostrarAssinatura={pode(papel, "assinatura")} sair={sair} onFechar={() => setMinhaConta(false)} />
+      )}
 
       {toast && (
         <div role="status" className="zt-nao-imprime fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white text-[14px] px-4 py-3 rounded-xl shadow-lg flex items-center gap-2.5 max-w-[92vw]">
@@ -1216,7 +1546,7 @@ function BuscaGlobal({ onClose, clientes, orcamentos, ordens, compras, nomeClien
   };
 
   /* a busca respeita o papel: o técnico só alcança as ordens dele */
-  const rc = permitido("clientes") ? clientes.filter((c) => bate(c.nome, c.fantasia, c.documento, c.telefone, c.whatsapp, c.endereco)) : [];
+  const rc = permitido("clientes") ? clientes.filter((c) => !c.excluidoEm && bate(c.nome, c.fantasia, c.documento, c.telefone, c.whatsapp, c.endereco)) : [];
   const ro = permitido("orcamentos") ? orcamentos.filter((o) => bate(o.numero, nomeCliente(o.clienteId), o.local, o.localServico)) : [];
   const rs = ordens.filter((o) => bate(o.numero, nomeCliente(o.clienteId), o.local, o.localServico));
   const rp = permitido("compras") ? compras.filter((c) => bate(c.numero, c.fornecedor)) : [];
@@ -1252,8 +1582,132 @@ function BuscaGlobal({ onClose, clientes, orcamentos, ordens, compras, nomeClien
   );
 }
 
+/* =============================================== Field Execution Intelligence V1 · Meu dia, tempo de atendimento e Base Técnica */
+/* Relógio só de tela: recalcula a cada minuto enquanto há atendimento em andamento. Nada é gravado e nada fecha por tempo. */
+function useAgora(ativo, passoMs = 60000) {
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ativo) return undefined;
+    setAgora(Date.now());
+    const id = setInterval(() => setAgora(Date.now()), passoMs);
+    return () => clearInterval(id);
+  }, [ativo, passoMs]);
+  return agora;
+}
+
+function TimerAtendimento({ os, agora, className }) {
+  if (os.status !== "andamento") return null;
+  return (
+    <span className={cx("inline-flex items-center gap-1.5 text-[12.5px] font-medium text-amber-800 tabular-nums", className)}>
+      <Clock className="w-3.5 h-3.5" aria-hidden="true" />{attendanceTimerLabel(os.iniciadaEm, agora)}
+    </span>
+  );
+}
+
+function AvisoAtendimentoLongo({ os, agora, className }) {
+  if (os.status !== "andamento" || !isStaleAttendance(os.iniciadaEm, agora)) return null;
+  return (
+    <p role="status" className={cx("text-[12.5px] leading-relaxed text-amber-900 bg-amber-50 ring-1 ring-amber-200/70 rounded-xl px-3 py-2", className)}>
+      {STALE_ATTENDANCE_MESSAGE}
+    </p>
+  );
+}
+
+/* Cartão do técnico em "Meu dia": cliente, local, horário, endereço, telefone, resumo e o próximo passo.
+   Nenhum valor financeiro. A prioridade da OS não existe no produto e não foi criada aqui. */
+function CartaoMeuDia({ os, nomeCliente, cliente, abrirOS, mudarStatusOS, agora }) {
+  const [abrindo, setAbrindo] = useState(false);
+  const c = cliente ? cliente(os.clienteId) : null;
+  const modelo = technicianCardModel(os, { clienteNome: nomeCliente(os.clienteId), telefone: c?.whatsapp || c?.telefone || "", resumo: resumoOS(os) });
+  const cta = modelo.cta;
+  const acionar = async () => {
+    if (abrindo) return;
+    setAbrindo(true);
+    try {
+      if (cta?.kind === "start") await mudarStatusOS(os, "andamento");
+      abrirOS(os.id);
+    } finally { setAbrindo(false); }
+  };
+  return (
+    <Linha>
+      <div className="flex items-start gap-4">
+        <button onClick={() => abrirOS(os.id)} className={cx("w-[52px] shrink-0 text-left", ring)}>
+          <p className="text-[17px] font-semibold text-slate-900 leading-none tabular-nums">{modelo.hora || "—"}</p>
+          <p className="text-[11px] text-slate-400 mt-1.5">{modelo.numero}</p>
+        </button>
+        <button onClick={() => abrirOS(os.id)} className={cx("min-w-0 flex-1 text-left", ring)}>
+          <p className="font-medium text-slate-900 truncate">{modelo.cliente}</p>
+          <p className="text-[13px] text-slate-500 line-clamp-2">{modelo.resumo}</p>
+        </button>
+        <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
+      </div>
+      <div className="pl-[68px] mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+        <Endereco valor={modelo.endereco} local={modelo.local} compacto />
+        {modelo.telefoneHref && (
+          <a href={modelo.telefoneHref} onClick={(e) => e.stopPropagation()}
+            className={cx("inline-flex items-center gap-1.5 min-h-11 sm:min-h-0 text-teal-800 hover:underline", ring)}>
+            <Phone className="w-3.5 h-3.5" aria-hidden="true" />{modelo.telefone}
+          </a>
+        )}
+      </div>
+      {modelo.emAndamento && <div className="pl-[68px] mt-2"><TimerAtendimento os={os} agora={agora} /></div>}
+      <AvisoAtendimentoLongo os={os} agora={agora} className="mt-2 ml-[68px]" />
+      {cta && (
+        <div className="pl-[68px] mt-3">
+          <Btn size="sm" variant={cta.kind === "start" ? "primary" : "dark"} icon={ArrowRight} disabled={abrindo} onClick={acionar} className="w-full sm:w-auto">
+            {abrindo ? "Abrindo…" : cta.label}
+          </Btn>
+        </div>
+      )}
+    </Linha>
+  );
+}
+
+/* Consulta da Base Técnica (interna) dentro da OS. Somente leitura: proprietário e técnico da OS; o banco decide quem lê. */
+function BaseTecnicaPainel({ os, real, recarregar }) {
+  const [dados, setDados] = useState(null);
+  const [uso, setUso] = useState(null);
+  useEffect(() => {
+    if (!real) return undefined;
+    let vivo = true;
+    Promise.all([carregarFechamentoTecnico(os.id).catch(() => null), carregarUsoRelatorioIADB(os.id).catch(() => null)])
+      .then(([r, u]) => { if (vivo) { setDados(r); setUso(u); } });
+    return () => { vivo = false; };
+  }, [real, os.id, os.status, recarregar]);
+  if (!real || !dados?.available) return null;
+  const { base, confirmation } = dados;
+  const temConfirmacao = Boolean(confirmation.name || confirmation.absent);
+  if (!technicalBaseHasContent(base) && !temConfirmacao) return null;
+  const linhas = [
+    ["Causa encontrada", base.cause],
+    ["Solução aplicada", base.solution],
+    ["Nível de dificuldade", difficultyLabel(base.difficulty)],
+    ["Observação técnica final", base.learning],
+  ].filter(([, texto]) => texto);
+  return (
+    <section>
+      <Rotulo acao={<span className="text-[12px] text-slate-400">Uso interno</span>}>Base Técnica</Rotulo>
+      <Panel className="p-5 space-y-3">
+        {linhas.map(([titulo, texto]) => (
+          <div key={titulo}>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-0.5">{titulo}</p>
+            <p className="text-[14px] text-slate-700 whitespace-pre-line leading-relaxed">{texto}</p>
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-slate-600">
+          <span>Necessita retorno: <strong className="font-medium text-slate-800">{os.precisaRetorno ? "Sim" : "Não"}</strong></span>
+          <span>{evidenceCountLabel(os.fotos?.length)}</span>
+          {temConfirmacao && <span>Recebido por: <strong className="font-medium text-slate-800">{confirmation.absent ? "responsável ausente" : confirmation.name}</strong></span>}
+        </div>
+        {uso?.lastUsedAt && <p className="text-[12px] text-slate-400">Relatório do cliente: {REPORT_PROVENANCE_LABEL}{uso.lastUsedEdited ? " · editado depois" : ""}.</p>}
+        <p className="text-[12px] text-slate-400 leading-relaxed">Esta seção é interna: não aparece para o cliente nem nos documentos enviados.</p>
+      </Panel>
+    </section>
+  );
+}
+
 /* =============================================================== Dashboard */
-function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso }) {
+function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarStatusOS, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso, produtos, abrirV2 }) {
   const verFinanceiro = permitido("financeiro");
   const [revisoesInicio, setRevisoesInicio] = useState([]);
   useEffect(() => {
@@ -1262,10 +1716,13 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
     carregarRevisoesDB(empresaId).then((r)=>{ if(ativo) setRevisoesInicio(r); }).catch((e)=>aviso?.(e?.message || "Não foi possível carregar o pós-venda."));
     return ()=>{ ativo=false; };
   }, [real, empresaId, papel]);
-  const hojeOS = ordens.filter((o) => o.data === HOJE && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const proximas = ordens.filter((o) => o.data > HOJE && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 3);
+  const hojeOS = ordens.filter((o) => o.data === hojeISO() && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const proximas = ordens.filter((o) => o.data > hojeISO() && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 3);
+  /* Meu dia (técnico): 1 em andamento, 2 horário marcado, 3 demais atribuídas. O que já está em andamento aparece mesmo de outro dia. */
+  const meuDia = sortTechnicianDay(ordens.filter((o) => o.status === "andamento" || o.data === hojeISO()));
+  const agora = useAgora(meuDia.some((o) => o.status === "andamento"));
 
-  const mes = mesRef(HOJE);
+  const mes = mesRef(hojeISO());
   const noMes = (l) => mesRef(l.pago ? l.pagoEm : l.vencimento) === mes;
   const soma = (ls) => ls.reduce((t, l) => t + l.valor, 0);
   const recebido = soma(lancamentos.filter((l) => l.tipo === "receita" && l.pago && noMes(l)));
@@ -1273,16 +1730,20 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
   const aPagar = soma(lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && noMes(l)));
   const despesasPagas = soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago && noMes(l)));
 
+  const recentes = concluidasRecentemente(ordens, hojeISO());
+  const semEstoque = papel === "proprietario" ? produtosComEstoqueBaixo(produtos) : [];
+
   const pend = [];
   if (papel === "proprietario") {
-    const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= HOJE);
-    const atrasadas = revisoesPendentes.filter((r)=>r.data < HOJE);
-    const hoje = revisoesPendentes.filter((r)=>r.data === HOJE);
+    const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= hojeISO());
+    const atrasadas = revisoesPendentes.filter((r)=>r.data < hojeISO());
+    const hoje = revisoesPendentes.filter((r)=>r.data === hojeISO());
     if (atrasadas.length) pend.push({ id:"pos-venda-atrasado", tom:"erro", titulo: atrasadas.length + " retorno" + (atrasadas.length>1?"s":"") + " de pós-venda atrasado" + (atrasadas.length>1?"s":""), detalhe:"Mais antigo: " + dataBR(atrasadas[0].data), acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
     if (hoje.length) pend.push({ id:"pos-venda-hoje", tom:"atencao", titulo: hoje.length + " retorno" + (hoje.length>1?"s":"") + " de pós-venda para hoje", detalhe:"Revisar clientes e concluir ou dispensar", acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
+    if (semEstoque.length) pend.push({ id:"estoque-baixo", tom:"atencao", titulo: semEstoque.length + " produto" + (semEstoque.length>1?"s":"") + " com estoque baixo", detalhe: semEstoque.slice(0, 3).map((p) => p.nome).join(" · ") + (semEstoque.length > 3 ? " · +" + (semEstoque.length - 3) : ""), acao:"Ver estoque", ir:()=>(abrirV2 ? abrirV2("produtos") : irPara("catalogo")) });
   }
   if (verFinanceiro) {
-  const vencidas = lancamentos.filter((l) => !l.pago && l.vencimento < HOJE);
+  const vencidas = lancamentos.filter((l) => !l.pago && l.vencimento < hojeISO());
   const vencR = vencidas.filter((l) => l.tipo === "receita");
   const vencD = vencidas.filter((l) => l.tipo === "despesa");
   if (vencR.length) pend.push({ id: "vr", tom: "erro", titulo: `${vencR.length} cobrança${vencR.length > 1 ? "s" : ""} vencida${vencR.length > 1 ? "s" : ""}`, detalhe: `${brl(soma(vencR))} em atraso`, acao: "Ver no financeiro", ir: () => irPara("financeiro") });
@@ -1306,14 +1767,19 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
 
   const hora = new Date().getHours();
   const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
+  const abrirProdutosCampo = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("v2", "venda-os");
+    window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+  };
   const atalhos = verFinanceiro ? [
     { label: "Novo orçamento", icon: FileText, ir: () => { setTela("orcamentos"); setOrcamentoAberto("novo"); } },
     { label: "Novo cliente", icon: Users, ir: () => irPara("clientes") },
     { label: "Nova OS", icon: ClipboardList, ir: () => irPara("ordens") },
     { label: "Nova compra", icon: ShoppingCart, ir: () => irPara("compras") },
   ] : [
-    { label: "Minhas ordens", icon: ClipboardList, ir: () => irPara("ordens") },
-    { label: "Agenda", icon: CalendarDays, ir: () => irPara("agenda") },
+    { label: "Meus serviços", icon: ClipboardList, ir: () => irPara("ordens") },
+    { label: "Produtos", icon: ShoppingCart, ir: abrirProdutosCampo },
   ];
 
   return (
@@ -1321,7 +1787,7 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
       <div className="flex flex-wrap items-end justify-between gap-4 mb-7">
         <div>
           <p className="text-[15px] text-slate-500">{saudacao}, {(usuarioAtual?.nome || empresa.responsavel).split(" ")[0]}</p>
-          <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em] mt-0.5">{diaSemana(HOJE)}, {dataBR(HOJE)}</h1>
+          <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em] mt-0.5">{diaSemana(hojeISO())}, {dataBR(hojeISO())}</h1>
         </div>
         <div className="flex flex-wrap gap-2">
           {atalhos.map((a) => (
@@ -1336,11 +1802,14 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
       <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         <div className="lg:col-span-2 space-y-8">
           <section>
-            <Rotulo acao={<button onClick={() => irPara("agenda")} className="text-[13px] font-medium text-teal-800 hover:underline">Ver agenda</button>}>
+            <Rotulo acao={<button onClick={() => irPara(verFinanceiro ? "agenda" : "ordens")} className="text-[13px] font-medium text-teal-800 hover:underline">{verFinanceiro ? "Ver agenda" : "Ver serviços"}</button>}>
               {verFinanceiro ? "O que tenho para hoje" : "Meus atendimentos de hoje"}
             </Rotulo>
             <Panel className="divide-y divide-slate-100 overflow-hidden">
-              {hojeOS.length === 0 ? <Empty icon={CalendarDays} title="Nenhum atendimento hoje" sub="Aproveite para colocar os orçamentos em dia." />
+              {(verFinanceiro ? hojeOS : meuDia).length === 0 ? <Empty icon={CalendarDays} title="Nenhum atendimento hoje" sub="Aproveite para colocar os orçamentos em dia." />
+                : !verFinanceiro ? meuDia.map((os) => (
+                  <CartaoMeuDia key={os.id} os={os} nomeCliente={nomeCliente} cliente={cliente} abrirOS={abrirOS} mudarStatusOS={mudarStatusOS} agora={agora} />
+                ))
                 : hojeOS.map((os) => (
                   <Linha key={os.id}>
                     <div className="flex items-start gap-4">
@@ -1393,6 +1862,27 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
               </Panel>
             )}
           </section>
+
+          <section>
+            <Rotulo acao={<button onClick={() => irPara("ordens")} className="text-[13px] font-medium text-teal-800 hover:underline">Ver serviços</button>}>
+              Serviços concluídos recentemente
+            </Rotulo>
+            <Panel className="divide-y divide-slate-100 overflow-hidden">
+              {recentes.length === 0 ? <Empty icon={CheckCircle2} title="Nenhum serviço concluído nos últimos 30 dias" />
+                : recentes.map((os) => (
+                  <Linha key={os.id} onClick={() => abrirOS(os.id)}>
+                    <div className="flex items-center gap-3.5">
+                      <span className="text-[12px] font-medium text-slate-500 tabular-nums w-[44px] shrink-0">{dataCurta(os.concluidaEm)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[14px] font-medium text-slate-800 truncate">{nomeCliente(os.clienteId)}</p>
+                        <p className="text-[12.5px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
+                      </div>
+                      <Pill tone={ST_OS.concluida.tone}>{ST_OS.concluida.label}</Pill>
+                    </div>
+                  </Linha>
+                ))}
+            </Panel>
+          </section>
         </div>
 
         {verFinanceiro && <section className="lg:sticky lg:top-6">
@@ -1419,105 +1909,195 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
 }
 
 /* =================================================================== Agenda */
-function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, empresa, equipe }) {
-  const [dia, setDia] = useState(HOJE);
+function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, orcamentos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao, real }) {
+  const tecnico = papel === "tecnico";
+  const [dia, setDia] = useState(hojeISO());
+  const [visao, setVisao] = useState(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "lista" : "semana"));
+  const [filtro, setFiltro] = useState("proximos");
+  const [tecnicoId, setTecnicoId] = useState("");
+  const [busca, setBusca] = useState("");
   const [agendando, setAgendando] = useState(null);
-  const semana = Array.from({ length: 7 }, (_, i) => addDays(dia, i - 3));
-  const doDia = ordens.filter((o) => o.data === dia && o.status !== "cancelada").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const semAgenda = ordens.filter((o) => !o.data && o.status !== "cancelada" && o.status !== "concluida");
+  const [novaOS, setNovaOS] = useState(false);
+
+  const inicioSemana = (d) => {
+    const x = new Date(d + "T12:00:00");
+    const dow = x.getDay();
+    x.setDate(x.getDate() - ((dow + 6) % 7));
+    return iso(x);
+  };
+  const moverMes = (d, n) => {
+    const x = new Date(d + "T12:00:00");
+    x.setDate(1); x.setMonth(x.getMonth() + n);
+    return iso(x);
+  };
+  const mesAtual = dia.slice(0, 7);
+  const inicio = inicioSemana(dia);
+  const semana = Array.from({ length: 7 }, (_, i) => addDays(inicio, i));
+  const primeiroMes = mesAtual + "-01";
+  const gradeInicio = inicioSemana(primeiroMes);
+  const diasMes = Array.from({ length: 42 }, (_, i) => addDays(gradeInicio, i));
+  const termo = semAcento(busca.trim());
+  const bateBusca = (o) => !termo || semAcento([o.numero, nomeCliente(o.clienteId), o.local, o.localServico, resumoOS(o), o.responsavel].filter(Boolean).join(" ")).includes(termo);
+  const baseBusca = ordens.filter(bateBusca);
+  const ownerLista = filterOwnerAgenda(baseBusca, { filter: filtro, today: hojeISO(), technicianId: tecnicoId });
+  const ownerGrupos = groupAgendaOrders(ownerLista, filtro);
+  const meuDia = technicianDayAgenda(baseBusca, { userId: usuarioAtual?.id, day: dia, today: hojeISO() });
+  const tecnicos = equipe.filter((m) => m.papel === "tecnico" && m.ativo !== false);
+  const nomeTecnico = (os) => equipe.find((m) => m.usuarioId === os.responsavelId)?.usuario?.nome || os.responsavel || "Sem técnico";
+  const semAgenda = filterOwnerAgenda(baseBusca, { filter: "semdata", today: hojeISO(), technicianId: tecnicoId });
+
+  const rotuloGrupo = (data) => {
+    if (data === "sem-data") return "Sem data";
+    if (data === hojeISO()) return "Hoje";
+    if (data === addDays(hojeISO(), 1)) return "Amanhã";
+    return `${diaSemana(data).replace("-feira", "")}, ${dataBR(data)}`;
+  };
+  const rotuloFiltro = { hoje: "Hoje", proximos: "Próximos", semdata: "Sem data", concluidos: "Concluídos" }[filtro] || "Agenda";
+  const abrirHoje = () => { setDia(hojeISO()); setVisao("lista"); if (!tecnico) setFiltro("hoje"); };
+  const selecionarFiltro = (id) => { setFiltro(id); setVisao("lista"); if (id === "hoje") setDia(hojeISO()); };
+
+  const CardAgenda = ({ os, atraso = false }) => {
+    const st = ST_OS[os.status] || { label: os.status || "Status", tone: "neutro" };
+    return <Linha onClick={() => abrirOS(os.id)} className="py-3.5 sm:py-4">
+      <div className="flex gap-3 sm:gap-4 items-start">
+        <div className="w-14 sm:w-16 shrink-0">
+          <p className={cx("text-[16px] font-semibold tabular-nums", atraso ? "text-rose-700" : "text-slate-900")}>{os.hora || "—"}</p>
+          <p className="text-[11px] text-slate-400 mt-1 truncate">{os.numero}</p>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
+            <Pill tone={st.tone}>{st.label}</Pill>
+          </div>
+          <p className="text-[13px] text-slate-600 mt-1 line-clamp-2">{resumoOS(os)}</p>
+          <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 text-[12px] min-w-0">
+            <Endereco valor={os.local} local={os.localServico} compacto className="max-w-full" />
+            {empresa.temEquipe && <span className="flex items-center gap-1.5 text-slate-400 truncate"><User className="w-3.5 h-3.5 shrink-0" />{nomeTecnico(os)}</span>}
+          </div>
+          {atraso && <p className="mt-2 text-[11px] font-medium text-rose-700">Atrasado desde {dataBR(os.data)}</p>}
+          {!tecnico && os.data && os.status !== "concluida" && <button onClick={(e) => { e.stopPropagation(); pedirConfirmacao({ titulo: "Remover da agenda?", texto: `${os.numero} continuará existindo como OS, mas ficará sem data e horário.`, confirmar: "Remover agendamento", perigo: true, acao: () => desagendarOS(os.id) }); }} className="mt-2 min-h-11 px-1 text-[12px] font-medium text-rose-600 hover:underline">Remover da agenda</button>}
+        </div>
+      </div>
+    </Linha>;
+  };
 
   return (
     <>
-      <PageHead title="Agenda" sub="O que está marcado e o que ainda precisa de data."
-        action={dia !== HOJE ? <Btn variant="soft" size="sm" onClick={() => setDia(HOJE)}>Hoje</Btn> : null} />
+      <PageHead title={tecnico ? "Meu dia" : "Agenda"} sub={tecnico ? "Seus atendimentos atribuídos, em ordem de execução." : "Planejamento da operação e próximos atendimentos."}
+        action={!tecnico && <Btn icon={Plus} onClick={() => setNovaOS(true)}>Novo agendamento</Btn>} />
 
-      <div className="flex items-center gap-1 sm:gap-2 mb-6">
-        <button onClick={() => setDia(addDays(dia, -7))} aria-label="Semana anterior" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowLeft className="w-4 h-4" /></button>
-        <div className="grid grid-cols-7 gap-1.5 sm:gap-2 flex-1">
+      {tecnico ? <Panel className="p-3 sm:p-4 mb-5">
+        <div className="flex items-center justify-between gap-2">
+          <button onClick={() => setDia(addDays(dia, -1))} aria-label="Dia anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-500 hover:bg-slate-50", ring)}><ArrowLeft className="w-4 h-4" /></button>
+          <div className="text-center min-w-0">
+            <p className="font-semibold text-slate-900 truncate">{dia === hojeISO() ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`}</p>
+            {dia !== hojeISO() && <button onClick={() => setDia(hojeISO())} className="min-h-11 text-[12px] text-teal-700 hover:underline">Voltar para hoje</button>}
+          </div>
+          <button onClick={() => setDia(addDays(dia, 1))} aria-label="Próximo dia" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-500 hover:bg-slate-50", ring)}><ArrowRight className="w-4 h-4" /></button>
+        </div>
+        <div className="relative mt-3">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Cliente, OS ou endereço" className="pl-9" />
+        </div>
+      </Panel> : <Panel className="p-3 sm:p-4 mb-5">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2 items-center">
+            {[["lista", "Lista"], ["semana", "Semana"], ["mes", "Mês"]].map(([id, label]) => <button key={id} onClick={() => setVisao(id)} className={cx("min-h-11 px-4 py-2 rounded-xl text-[13px] font-medium", ring, visao === id ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100")}>{label}</button>)}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[["hoje", "Hoje"], ["proximos", "Próximos"], ["semdata", "Sem data"], ["concluidos", "Concluídos"]].map(([id, label]) => <button key={id} onClick={() => selecionarFiltro(id)} className={cx("min-h-11 px-3 py-2 rounded-xl text-[13px] font-medium", ring, filtro === id ? "bg-teal-50 text-teal-800 ring-1 ring-teal-200" : "text-slate-500 hover:bg-slate-50")}>{label}</button>)}
+          </div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="relative min-w-0">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Cliente, OS, prédio ou endereço" className="pl-9" />
+            </div>
+            {empresa.temEquipe && <Select value={tecnicoId} onChange={(e) => setTecnicoId(e.target.value)} aria-label="Filtrar por técnico">
+              <option value="">Todos os técnicos</option>
+              {tecnicos.map((m) => <option key={m.usuarioId} value={m.usuarioId}>{m.usuario?.nome || "Técnico"}</option>)}
+            </Select>}
+          </div>
+        </div>
+      </Panel>}
+
+      {!tecnico && visao === "semana" && <div className="flex items-center gap-1 sm:gap-2 mb-6">
+        <button onClick={() => setDia(addDays(dia, -7))} aria-label="Semana anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowLeft className="w-4 h-4" /></button>
+        <div className="grid grid-cols-7 gap-1.5 sm:gap-2 flex-1 min-w-0">
           {semana.map((d) => {
             const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length;
             const sel = d === dia;
-            return (
-              <button key={d} onClick={() => setDia(d)} aria-pressed={sel} aria-label={`${diaSemana(d)} ${dataBR(d)}`}
-                className={cx("rounded-2xl py-3 text-center transition-colors", ring, sel ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200/70 text-slate-600 hover:ring-slate-300")}>
-                <p className={cx("text-[11px] uppercase tracking-wide", sel ? "text-slate-300" : d === HOJE ? "text-teal-700 font-semibold" : "text-slate-400")}>{diaCurto(d)}</p>
-                <p className={cx("text-[19px] font-semibold leading-tight mt-0.5 tabular-nums", d === HOJE && !sel && "text-teal-800")}>{d.slice(8)}</p>
-                <div className="h-2 flex justify-center items-center">{qtd > 0 && <span className={cx("w-1.5 h-1.5 rounded-full", sel ? "bg-teal-400" : "bg-teal-600")} />}</div>
-              </button>
-            );
+            return <button key={d} onClick={() => setDia(d)} className={cx("min-w-0 rounded-2xl py-3 text-center transition-colors", ring, sel ? "bg-slate-900 text-white" : "bg-white border border-slate-200 hover:border-slate-300")}>
+              <p className={cx("text-[10px] uppercase font-semibold", sel ? "text-slate-300" : "text-slate-400")}>{diaSemana(d).slice(0, 3)}</p>
+              <p className="text-lg font-semibold leading-tight mt-0.5">{d.slice(8)}</p>
+              <p className={cx("text-[10px] mt-1", sel ? "text-teal-300" : "text-slate-400")}>{qtd || "·"}</p>
+            </button>;
           })}
         </div>
-        <button onClick={() => setDia(addDays(dia, 7))} aria-label="Próxima semana" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowRight className="w-4 h-4" /></button>
-      </div>
+        <button onClick={() => setDia(addDays(dia, 7))} aria-label="Próxima semana" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowRight className="w-4 h-4" /></button>
+      </div>}
 
-      <Rotulo>{diaSemana(dia)}, {dataBR(dia)}{dia === HOJE ? " · hoje" : ""}</Rotulo>
-      <Panel className="divide-y divide-slate-100 overflow-hidden mb-8">
-        {doDia.length === 0 ? <Empty icon={CalendarDays} title="Nenhum atendimento neste dia" sub="Agende uma ordem de serviço para ela aparecer aqui." />
-          : doDia.map((os) => (
-            <Linha key={os.id}>
-              <div className="flex gap-4">
-                <button onClick={() => abrirOS(os.id)} className={cx("w-14 shrink-0 text-left", ring)}>
-                  <p className="text-[17px] font-semibold text-slate-900 leading-none tabular-nums">{os.hora || "—"}</p>
-                  <p className="text-[11px] text-slate-400 mt-1.5">{os.numero}</p>
-                </button>
-                <div className="min-w-0 flex-1">
-                  <button onClick={() => abrirOS(os.id)} className={cx("w-full text-left", ring)}>
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
-                      <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
-                    </div>
-                    <p className="text-[13px] text-slate-600 mt-1">{os.itens.length ? os.itens.map((i) => `${i.qtd}× ${i.nome}`).join(" · ") : resumoOS(os)}</p>
-                  </button>
-                  <div className="flex items-center gap-4 mt-2 text-[12px] flex-wrap">
-                    <Endereco valor={os.local} local={os.localServico} compacto className="max-w-full" />
-                    {empresa.temEquipe && <span className="flex items-center gap-1.5 text-slate-400"><User className="w-3.5 h-3.5" />{os.responsavel}</span>}
-                  </div>
-                </div>
-              </div>
-            </Linha>
-          ))}
-      </Panel>
+      {!tecnico && visao === "mes" && <Panel className="p-3 sm:p-4 mb-6">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <button onClick={() => setDia(moverMes(dia, -1))} aria-label="Mês anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl hover:bg-slate-50", ring)}><ArrowLeft className="w-4 h-4" /></button>
+          <button onClick={abrirHoje} className={cx("min-h-11 px-3 text-sm font-semibold text-slate-800", ring)}>{new Date(primeiroMes + "T12:00:00").toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}</button>
+          <button onClick={() => setDia(moverMes(dia, 1))} aria-label="Próximo mês" className={cx("min-h-11 min-w-11 p-3 rounded-xl hover:bg-slate-50", ring)}><ArrowRight className="w-4 h-4" /></button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase font-semibold text-slate-400 mb-1">{["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((x) => <span key={x}>{x}</span>)}</div>
+        <div className="grid grid-cols-7 gap-1">
+          {diasMes.map((d) => { const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length; const fora = !d.startsWith(mesAtual); return <button key={d} onClick={() => { setDia(d); setFiltro("hoje"); setVisao("lista"); }} className={cx("min-h-11 rounded-xl text-sm flex flex-col items-center justify-center", ring, d === hojeISO() ? "ring-1 ring-teal-300" : "", fora ? "text-slate-300" : "text-slate-700", qtd ? "bg-slate-50" : "hover:bg-slate-50")}><span>{Number(d.slice(8))}</span>{qtd > 0 && <span className="text-[9px] text-teal-700 font-semibold">{qtd}</span>}</button>; })}
+        </div>
+      </Panel>}
 
-      {semAgenda.length > 0 && (
-        <section>
+      {tecnico ? <>
+        {meuDia.overdue.length > 0 && <section className="mb-6"><Rotulo>Atrasados · {meuDia.overdue.length}</Rotulo><Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.overdue.map((os) => <CardAgenda key={os.id} os={os} atraso />)}</Panel></section>}
+        <section><Rotulo>{dia === hojeISO() ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`} · {meuDia.scheduled.length}</Rotulo>{meuDia.scheduled.length ? <Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.scheduled.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel> : <Empty icon={CalendarClock} title="Nenhum atendimento atribuído" text="Não há OS autorizadas para você neste dia." />}</section>
+      </> : <>
+        {ownerLista.length === 0 ? <Empty icon={CalendarClock} title={`Nenhum item em ${rotuloFiltro.toLowerCase()}`} text="Altere o filtro ou escolha outro período." />
+        : <div className="space-y-5 mb-8">{ownerGrupos.map((grupo) => <section key={grupo.date}><Rotulo>{rotuloGrupo(grupo.date)} · {grupo.orders.length}</Rotulo><Panel className="divide-y divide-slate-100 overflow-hidden">{grupo.orders.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel></section>)}</div>}
+
+        {filtro !== "semdata" && filtro !== "concluidos" && semAgenda.length > 0 && <section>
           <Rotulo>Aguardando agendamento · {semAgenda.length}</Rotulo>
-          <Panel className="divide-y divide-slate-100 overflow-hidden">
-            {semAgenda.map((os) => (
-              <Linha key={os.id}>
-                <div className="flex items-center justify-between gap-3">
-                  <button onClick={() => abrirOS(os.id)} className={cx("min-w-0 text-left", ring)}>
-                    <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
-                    <p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
-                  </button>
-                  <Btn size="sm" variant="soft" icon={CalendarClock} onClick={() => setAgendando(os)}>Agendar</Btn>
-                </div>
-              </Linha>
-            ))}
-          </Panel>
-        </section>
-      )}
+          <Panel className="divide-y divide-slate-100 overflow-hidden">{semAgenda.map((os) => <Linha key={os.id}><div className="flex items-center justify-between gap-3"><button onClick={() => abrirOS(os.id)} className={cx("min-w-0 text-left min-h-11", ring)}><p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p><p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p></button><Btn size="sm" variant="soft" icon={CalendarClock} onClick={() => setAgendando(os)}>Agendar</Btn></div></Linha>)}</Panel>
+        </section>}
+      </>}
 
-      <AgendarModal os={agendando} onClose={() => setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />
+      {!tecnico && <AgendarModal os={agendando} onClose={() => setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />}
+      {!tecnico && novaOS && <NovaOS onClose={() => setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} orcamentos={orcamentos} real={real} />}
     </>
   );
 }
 
 function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = [] }) {
   const [f, setF] = useState(null);
-  useEffect(() => { if (os) setF({ data: os.data || diaSugerido || HOJE, hora: os.hora || "09:00",
+  const [salvando, setSalvando] = useState(false);
+  const salvandoRef = useRef(false);
+  useEffect(() => { if (os) setF({ data: os.data || diaSugerido || hojeISO(), hora: os.hora || "09:00",
     responsavel: os.responsavel || empresa.responsavel, responsavelId: os.responsavelId || null }); }, [os]);
+  const fechar = () => { if (!salvandoRef.current) onClose(); };
+  const confirmar = async () => {
+    if (!f?.data || salvandoRef.current) return;
+    salvandoRef.current = true;
+    setSalvando(true);
+    try {
+      const salvo = await onSalvar(os.id, f);
+      if (salvo === true) onClose();
+    } finally {
+      salvandoRef.current = false;
+      setSalvando(false);
+    }
+  };
   if (!os || !f) return null;
   return (
-    <Modal open onClose={onClose} title="Agendar atendimento" sub={os.numero}
-      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn disabled={!f.data} onClick={() => { onSalvar(os.id, f); onClose(); }}>Confirmar agendamento</Btn></>}>
+    <Modal open onClose={fechar} busy={salvando} title="Agendar atendimento" sub={os.numero}
+      footer={<><Btn variant="ghost" disabled={salvando} onClick={fechar}>Cancelar</Btn>
+        <Btn disabled={!f.data || salvando} onClick={confirmar}>{salvando ? "Agendando..." : "Confirmar agendamento"}</Btn></>}>
       <div className="grid sm:grid-cols-2 gap-5">
-        <Field label="Data do atendimento"><Input type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></Field>
-        <Field label="Horário"><Input type="time" value={f.hora} onChange={(e) => setF({ ...f, hora: e.target.value })} /></Field>
+        <Field label="Data do atendimento"><Input disabled={salvando} type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></Field>
+        <Field label="Horário"><Input disabled={salvando} type="time" value={f.hora} onChange={(e) => setF({ ...f, hora: e.target.value })} /></Field>
       </div>
       {empresa.temEquipe && (
         <Field label="Responsável" hint="A ordem aparece em 'Minhas OS' de quem for atribuído.">
-          <Select value={f.responsavelId || ""} onChange={(e) => {
+          <Select disabled={salvando} value={f.responsavelId || ""} onChange={(e) => {
             const m = equipe.find((x) => x.usuarioId === e.target.value);
             setF({ ...f, responsavelId: e.target.value || null, responsavel: m?.usuario?.nome || f.responsavel });
           }}>
@@ -1535,7 +2115,7 @@ function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = []
 
 /* ================================================================ Clientes */
 function Clientes(p) {
-  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso } = p;
+  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso, excluirRegistro, papel, abrirV2 } = p;
   const [revisoesCliente, setRevisoesCliente] = useState([]);
   useEffect(() => {
     if (!real || !empresaId) return;
@@ -1545,7 +2125,19 @@ function Clientes(p) {
   }, [real, empresaId]);
   const [busca, setBusca] = useState("");
   const [form, setForm] = useState(null);
-  const lista = clientes.filter((c) => semAcento(c.nome + (c.fantasia || "") + c.documento + c.telefone).includes(semAcento(busca)));
+  const lista = clientes.filter((c) => !c.excluidoEm && semAcento(c.nome + (c.fantasia || "") + c.documento + c.telefone).includes(semAcento(busca)));
+
+  const [localCliente, setLocalCliente] = useState("");
+  useEffect(() => setLocalCliente(""), [clienteAberto]);
+  // BLOCO 4 · locais cadastrados (client_locations) do cliente aberto: base relacional do histórico por local.
+  const [locaisCadastrados, setLocaisCadastrados] = useState([]);
+  useEffect(() => {
+    setLocaisCadastrados([]);
+    if (!real || !clienteAberto || papel !== "proprietario") return;
+    let ativo = true;
+    listarLocaisClienteOrcamentoV2DB(clienteAberto).then((r) => { if (ativo) setLocaisCadastrados(r || []); }).catch(() => {});
+    return () => { ativo = false; };
+  }, [real, clienteAberto, papel]);
 
   if (clienteAberto) {
     const c = clientes.find((x) => x.id === clienteAberto);
@@ -1556,7 +2148,13 @@ function Clientes(p) {
     const gar = garantias.filter((g) => g.clienteId === c.id);
     const recebido = pgs.filter((l) => l.pago).reduce((t, l) => t + l.valor, 0);
     const aberto = pgs.filter((l) => !l.pago).reduce((t, l) => t + l.valor, 0);
-    const locais = [...new Set(oss.map((o) => o.localServico).filter(Boolean))];
+    // OS vinculada a local cadastrado é agrupada pelo vínculo; OS antiga só tem o texto do local.
+    const locaisVinculados = locaisCadastrados.filter((l) => oss.some((o) => o.localId === l.id));
+    const vinculada = (o) => Boolean(o.localId && locaisVinculados.some((l) => l.id === o.localId));
+    const locais = [...new Set(oss.filter((o) => !vinculada(o)).map((o) => o.localServico).filter(Boolean))];
+    const localSelecionadoId = localCliente.startsWith("loc:") ? localCliente.slice(4) : "";
+    const ossVisiveis = localCliente ? oss.filter((o) => (localSelecionadoId ? o.localId === localSelecionadoId : !vinculada(o) && o.localServico === localCliente)) : oss;
+    const nomeLocalCliente = localSelecionadoId ? (locaisVinculados.find((l) => l.id === localSelecionadoId)?.name || "local cadastrado") : localCliente;
     const retornos = real ? revisoesCliente.filter((r)=>r.clienteId===c.id && r.status==="pending").map((r)=>({ data:r.data, servico:r.descricao })) : oss.filter((o) => o.retorno).map((o) => o.retorno);
 
     return (
@@ -1570,11 +2168,13 @@ function Clientes(p) {
             <Avatar nome={c.nome} tipo={c.tipo} size="lg" />
             <div>
               <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{c.fantasia || c.nome}</h1>
-              <p className="text-[14px] text-slate-500 mt-1">{c.tipo === "PJ" ? c.nome : "Pessoa física"} · {c.documento}</p>
+              <p className="text-[14px] text-slate-500 mt-1">{c.tipo === "PJ" ? c.nome : "Pessoa física"} · {c.documento}{c.excluidoEm ? " · arquivado" : ""}</p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm(c)}>Editar</Btn>
+            {papel === "proprietario" && abrirV2 && <Btn variant="soft" size="sm" icon={MapPin} onClick={() => abrirV2("clientes-locais", { client: c.id })}>Locais no mapa</Btn>}
+            {papel === "proprietario" && <Btn variant="danger" size="sm" icon={Trash2} onClick={() => excluirRegistro("cliente", c.id, c.fantasia || c.nome, () => setClienteAberto(null))}>Excluir</Btn>}
             <Btn size="sm" icon={FileText} onClick={() => { setTela("orcamentos"); setOrcamentoAberto("novo:" + c.id); }}>Novo orçamento</Btn>
           </div>
         </div>
@@ -1600,11 +2200,13 @@ function Clientes(p) {
                 {c.whatsapp && <Btn variant="soft" size="sm" icon={Share2} className="w-full" onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp)}`, "_blank")}>Falar no WhatsApp</Btn>}
               </Panel>
             </section>
-            {locais.length > 0 && (
+            {(locaisVinculados.length > 0 || locais.length > 0) && (
               <section>
                 <Rotulo>Locais atendidos</Rotulo>
-                <Panel className="p-5 flex flex-wrap gap-2">
-                  {locais.map((l) => <Pill key={l} tone="neutro">{l}</Pill>)}
+                <Panel className="p-4 sm:p-5 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setLocalCliente("")} aria-pressed={!localCliente} className={cx("min-h-11 rounded-xl px-3 py-2 text-[13px] font-medium", !localCliente ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}>Todos os locais</button>
+                  {locaisVinculados.map((l) => <button type="button" key={l.id} onClick={() => setLocalCliente(`loc:${l.id}`)} aria-pressed={localCliente === `loc:${l.id}`} className={cx("min-h-11 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-medium text-left break-words", localCliente === `loc:${l.id}` ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}><MapPin className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />{l.name}</button>)}
+                  {locais.map((l) => <button type="button" key={l} onClick={() => setLocalCliente(l)} aria-pressed={localCliente === l} className={cx("min-h-11 rounded-xl px-3 py-2 text-[13px] font-medium text-left break-words", localCliente === l ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}>{l}</button>)}
                 </Panel>
               </section>
             )}
@@ -1673,9 +2275,9 @@ function Clientes(p) {
             </section>
 
             <section>
-              <Rotulo>Histórico de serviços</Rotulo>
+              <Rotulo>{localCliente ? `Histórico em ${nomeLocalCliente}` : "Histórico de serviços"}</Rotulo>
               <Panel className="divide-y divide-slate-100 overflow-hidden">
-                {oss.length === 0 ? <Empty icon={ClipboardList} title="Nenhuma OS ainda" /> : oss.map((o) => (
+                {ossVisiveis.length === 0 ? <Empty icon={ClipboardList} title={localCliente ? "Nenhuma OS neste local" : "Nenhuma OS ainda"} /> : ossVisiveis.map((o) => (
                   <Linha key={o.id} onClick={() => abrirOS(o.id)}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -1720,7 +2322,8 @@ function Clientes(p) {
 
   return (
     <>
-      <PageHead title="Clientes" sub={`${clientes.length} cadastrados`} action={<Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn>} />
+      <PageHead title="Clientes" sub={`${clientes.length} cadastrados`}
+        action={<div className="flex flex-wrap gap-2"><RecursosV2 aba="clientes" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn></div>} />
       <div className="mb-5 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder="Buscar por nome, documento ou telefone" /></div>
       {lista.length === 0 ? (
         <Panel><Empty icon={Users} title="Nenhum cliente encontrado" sub="Cadastre um cliente para começar a criar orçamentos." action={<Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn>} /></Panel>
@@ -1749,7 +2352,10 @@ function Clientes(p) {
    Mínimo para continuar: nome + telefone. O resto pode vir depois. */
 function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
   const [f, setF] = useState(null);
-  useEffect(() => { if (aberto) setF({ tipo: "PF", nome: nomeInicial, telefone: "", whatsapp: "", endereco: "", documento: "", fantasia: "", responsavel: "", obs: "" }); }, [aberto]);
+  const [salvando, setSalvando] = useState(false);
+  const salvandoRef = useRef(false);
+  useEffect(() => { if (aberto) setF({ tipo: "PF", nome: nomeInicial, telefone: "", whatsapp: "", endereco: "", documento: "", fantasia: "", responsavel: "", obs: "" }); else setF(null); }, [aberto]);
+  const { dirty } = useFormDirty(f, Boolean(aberto && f));
   if (!aberto || !f) return null;
   const set = (k, v) => setF({ ...f, [k]: v });
   const pj = f.tipo === "PJ";
@@ -1757,9 +2363,14 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
   const faltaFiscal = pj && !f.documento.trim();
 
   return (
-    <Modal open onClose={onClose} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
-      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn disabled={!pronto} onClick={() => { onSave({ ...f, whatsapp: f.whatsapp || f.telefone }); onClose(); }}>Salvar e usar</Btn></>}>
+    <Modal open onClose={onClose} dirty={dirty} busy={salvando} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
+      footer={(requestClose) => <><Btn variant="ghost" disabled={salvando} onClick={requestClose}>Cancelar</Btn>
+        <Btn disabled={!pronto || salvando} onClick={async () => {
+          if (salvandoRef.current) return;
+          salvandoRef.current = true; setSalvando(true);
+          try { const id = await onSave({ ...f, whatsapp: f.whatsapp || f.telefone }); if (id) onClose(); }
+          finally { salvandoRef.current = false; setSalvando(false); }
+        }}>{salvando ? "Salvando…" : "Salvar e usar"}</Btn></>}>
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
         {["PF", "PJ"].map((t) => (
           <button key={t} role="tab" aria-selected={f.tipo === t} onClick={() => set("tipo", t)}
@@ -1795,13 +2406,20 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
 }
 
 function ClienteForm({ form, setForm, onSave, onSaved }) {
+  const [salvandoCliente, setSalvandoCliente] = useState(false);
+  const { dirty } = useFormDirty(form, Boolean(form));
+  const rascunho = useFormDraft({ formType: "cliente-novo", enabled: Boolean(form && !form.id), value: form, dirty,
+    onRestore: (dados) => setForm((atual) => (atual && !atual.id ? { ...atual, ...dados } : atual)) });
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const pj = form.tipo === "PJ";
   return (
-    <Modal open onClose={() => setForm(null)} title={form.id ? "Editar cliente" : "Novo cliente"} wide
-      footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
-        <Btn onClick={() => { const id = onSave(form); setForm(null); onSaved?.(id); }} disabled={!form.nome}>Salvar cliente</Btn></>}>
+    <Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCliente} title={form.id ? "Editar cliente" : "Novo cliente"} wide
+      footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoCliente} onClick={requestClose}>Cancelar</Btn>
+        <Btn disabled={!form.nome || salvandoCliente}
+          onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); if (!id) return; setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
+          {salvandoCliente ? "Salvando…" : "Salvar cliente"}</Btn></>}>
+      <DraftRestoredNotice savedAt={rascunho.restoredAt} onDiscard={() => setForm(rascunho.discardDraft() || { tipo: "PF" })} />
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
         {["PF", "PJ"].map((t) => (
           <button key={t} role="tab" aria-selected={form.tipo === t} onClick={() => set("tipo", t)}
@@ -1819,9 +2437,9 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
       )}
       <div className="grid sm:grid-cols-2 gap-5">
         <Field label={pj ? "CNPJ" : "CPF"}><Input value={form.documento || ""} onChange={(e) => set("documento", e.target.value)} /></Field>
-        <Field label="Telefone"><Input value={form.telefone || ""} onChange={(e) => set("telefone", e.target.value)} placeholder="(00) 0000-0000" /></Field>
+        <Field label="Telefone"><Input inputMode="tel" value={form.telefone || ""} onChange={(e) => set("telefone", e.target.value)} placeholder="(00) 0000-0000" /></Field>
       </div>
-      <Field label="WhatsApp"><Input value={form.whatsapp || ""} onChange={(e) => set("whatsapp", e.target.value)} placeholder="(00) 00000-0000" /></Field>
+      <Field label="WhatsApp"><Input inputMode="tel" value={form.whatsapp || ""} onChange={(e) => set("whatsapp", e.target.value)} placeholder="(00) 00000-0000" /></Field>
       <Field label="Endereço"><Input value={form.endereco || ""} onChange={(e) => set("endereco", e.target.value)} placeholder="Rua, número, bairro, cidade" /></Field>
       <Field label="Observações" hint="Aparecem na ficha do cliente e na ordem de serviço.">
         <CampoVoz rows={3} valor={form.obs || ""} onChange={(v) => set("obs", v)} placeholder="Ex.: portaria libera acesso das 8h às 18h, falar com a síndica" />
@@ -1831,15 +2449,73 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
 }
 
 /* ==================================================== Catálogo (serviços + produtos) */
-function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
+function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirRegistro, papel, contexto, real, empresaId, aviso, abrirV2 }) {
   const [aba, setAba] = useState("servicos");
   const [busca, setBusca] = useState("");
   const [formS, setFormS] = useState(null);
   const [formP, setFormP] = useState(null);
   const [verInativos, setVerInativos] = useState(false);
+  const [scannerProduto, setScannerProduto] = useState(false);
+  const [imagemArquivo, setImagemArquivo] = useState(null);
+  const [imagemPreview, setImagemPreview] = useState(null);
+  const [removerImagem, setRemoverImagem] = useState(false);
+  const [salvandoProduto, setSalvandoProduto] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = null;
+    setImagemPreview(null);
+    if (imagemArquivo) {
+      createProductImagePreview(imagemArquivo).then((url) => {
+        if (!active) { URL.revokeObjectURL(url); return; }
+        objectUrl = url; setImagemPreview(url);
+      }).catch(() => { if (active) aviso("Não foi possível preparar a prévia. Escolha uma foto JPG, PNG ou WEBP válida."); });
+    } else if (formP?.imagemPath && !removerImagem) {
+      prepararPreviewImagemProdutoDB(formP.imagemPath).then((url) => {
+        if (!active) { if (url) URL.revokeObjectURL(url); return; }
+        objectUrl = url; setImagemPreview(url);
+      }).catch(() => { if (active) setImagemPreview(null); });
+    } else setImagemPreview(null);
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [imagemArquivo, formP?.imagemPath, removerImagem]);
+
+  const abrirFormProduto = (produto) => {
+    setImagemArquivo(null); setImagemPreview(null); setRemoverImagem(false); setScannerProduto(false);
+    setFormP(produto ? { ...produto, margemPct: produto.custo > 0 ? acrescimoSobreCusto(produto.custo, produto.preco) : "" } : { unidade: "unidade", ativo: true, preco: 0, custo: 0, margemPct: "", garantiaMeses: 0, sku: "", codigoBarras: "", descricao: "", imagemPath: null, vendaHabilitada: true, controlaEstoque: false, estoque: 0, estoqueMinimo: 0 });
+  };
+
+  const escolherImagemProduto = (file) => {
+    if (!file) return;
+    const nome = String(file.name || "").toLowerCase();
+    const tipo = String(file.type || "").toLowerCase();
+    if (tipo.includes("heic") || tipo.includes("heif") || /\.hei[cf]$/.test(nome)) { aviso("HEIC/HEIF ainda não é processado com segurança. No iPhone, escolha ou exporte a foto em JPG, PNG ou WEBP."); return; }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(tipo)) { aviso("Use uma foto JPG, PNG ou WEBP."); return; }
+    if (file.size > 2 * 1024 * 1024) { aviso("A foto do produto deve ter no máximo 2 MB."); return; }
+    setImagemArquivo(file); setRemoverImagem(false);
+  };
+
+  const salvarProdutoCompleto = async () => {
+    if (!formP?.nome || salvandoProduto) return;
+    const codigoBarras = String(formP.codigoBarras || "").replace(/\D/g, "");
+    if (codigoBarras && !/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(codigoBarras)) { aviso("Código de barras deve ter 8, 12, 13 ou 14 dígitos."); return; }
+    setSalvandoProduto(true);
+    try {
+      const payload = { ...formP, codigoBarras, imagemPath: removerImagem && !imagemArquivo ? null : formP.imagemPath };
+      const id = await salvarProduto(payload);
+      if (!id) return;
+      if (real && imagemArquivo) {
+        const uploaded = await salvarImagemProdutoDB(id, imagemArquivo, empresaId, formP.imagemPath || null);
+        await salvarProduto({ ...payload, id, imagemPath: uploaded.path });
+      } else if (real && removerImagem && formP.imagemPath) {
+        await removerImagemProdutoDB(id, empresaId, formP.imagemPath);
+      }
+      setFormP(null); setImagemArquivo(null); setImagemPreview(null); setRemoverImagem(false);
+    } catch (error) { aviso(mensagemErro(error)); }
+    finally { setSalvandoProduto(false); }
+  };
 
   const fs = servicos.filter((s) => semAcento(s.nome + s.categoria).includes(semAcento(busca)));
-  const fp = produtos.filter((p) => semAcento(`${p.nome} ${p.marca} ${p.modelo}`).includes(semAcento(busca)));
+  const fp = produtos.filter((p) => semAcento(`${p.nome} ${p.marca} ${p.modelo} ${p.sku || ""} ${p.codigoBarras || ""}`).includes(semAcento(busca)));
   const ativosS = fs.filter((s) => s.ativo), inativosS = fs.filter((s) => !s.ativo);
   const ativosP = fp.filter((p) => p.ativo), inativosP = fp.filter((p) => !p.ativo);
   const categorias = [...new Set(ativosS.map((s) => s.categoria))];
@@ -1865,12 +2541,12 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
     </Linha>
   );
   const LinhaProduto = ({ p, apagado }) => (
-    <Linha onClick={() => setFormP(p)} className={apagado ? "opacity-55" : ""}>
+    <Linha onClick={() => abrirFormProduto(p)} className={apagado ? "opacity-55" : ""}>
       <div className="flex items-center gap-4">
         <div className="min-w-0 flex-1">
           <p className="font-medium text-slate-900 truncate">{p.nome}</p>
           <p className="text-[13px] text-slate-500 truncate">
-            {[p.marca, p.modelo].filter(Boolean).join(" ")}{p.garantiaMeses > 0 ? ` · garantia de fábrica ${p.garantiaMeses} meses` : ""}
+            {[p.marca, p.modelo].filter(Boolean).join(" ")}{p.sku ? ` · SKU ${p.sku}` : ""}{p.garantiaMeses > 0 ? ` · garantia ${p.garantiaMeses} meses` : ""}
           </p>
         </div>
         <div className="text-right shrink-0">
@@ -1890,10 +2566,10 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
       <PageHead title="Serviços e produtos" sub="O que você vende, quanto cobra e como cobra."
         action={aba === "servicos"
           ? <Btn icon={Plus} onClick={() => setFormS({ unidade: "unidade", ativo: true, preco: 0, custo: 0, categoria: "", garantiaDias: 0, retornoDias: 0 })}>Novo serviço</Btn>
-          : <Btn icon={Plus} onClick={() => setFormP({ unidade: "unidade", ativo: true, preco: 0, custo: 0, garantiaMeses: 0 })}>Novo produto</Btn>} />
+          : <div className="flex flex-wrap gap-2"><RecursosV2 aba="catalogo" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => abrirFormProduto(null)}>Novo produto</Btn></div>} />
 
       <Tabs valor={aba} onChange={setAba} opcoes={[{ id: "servicos", label: `Serviços · ${ativosS.length}` }, { id: "produtos", label: `Produtos e materiais · ${ativosP.length}` }]} className="mb-5" />
-      <div className="mb-6 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder={aba === "servicos" ? "Buscar serviço" : "Buscar produto, marca ou modelo"} /></div>
+      <div className="mb-6 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder={aba === "servicos" ? "Buscar serviço" : "Buscar produto, marca, modelo, SKU ou código"} /></div>
 
       {aba === "servicos" ? (
         <div className="space-y-7">
@@ -1930,7 +2606,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
 
       {formS && (
         <Modal open onClose={() => setFormS(null)} title={formS.id ? "Editar serviço" : "Novo serviço"} wide
-          footer={<><Btn variant="ghost" onClick={() => setFormS(null)}>Cancelar</Btn>
+          footer={<>{formS.id && papel === "proprietario" && <Btn variant="danger" icon={Trash2} onClick={() => excluirRegistro("servico", formS.id, formS.nome, () => setFormS(null))}>Excluir</Btn>}<span className="flex-1" /><Btn variant="ghost" onClick={() => setFormS(null)}>Cancelar</Btn>
             <Btn onClick={() => { salvarServico(formS); setFormS(null); }} disabled={!formS.nome}>Salvar serviço</Btn></>}>
           <Field label="Nome do serviço"><Input value={formS.nome || ""} onChange={(e) => setFormS({ ...formS, nome: e.target.value })} placeholder="Ex.: Instalação de fechadura digital" /></Field>
           <div className="grid sm:grid-cols-2 gap-5">
@@ -2001,16 +2677,62 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
 
       {formP && (
         <Modal open onClose={() => setFormP(null)} title={formP.id ? "Editar produto" : "Novo produto ou material"} wide
-          footer={<><Btn variant="ghost" onClick={() => setFormP(null)}>Cancelar</Btn>
-            <Btn onClick={() => { salvarProduto(formP); setFormP(null); }} disabled={!formP.nome}>Salvar produto</Btn></>}>
+          footer={<>{formP.id && papel === "proprietario" && <Btn variant="danger" icon={Trash2} onClick={() => excluirRegistro("produto", formP.id, formP.nome, () => setFormP(null))}>Excluir</Btn>}<span className="flex-1" /><Btn variant="ghost" onClick={() => setFormP(null)}>Cancelar</Btn>
+            <Btn onClick={salvarProdutoCompleto} disabled={!formP.nome || salvandoProduto}>{salvandoProduto ? "Salvando…" : "Salvar produto"}</Btn></>}>
+          <div className="rounded-2xl ring-1 ring-slate-200 p-4">
+            <div className="flex flex-col min-[430px]:flex-row gap-4">
+              <div className="w-full min-[430px]:w-32 h-32 rounded-2xl bg-slate-50 ring-1 ring-slate-200 overflow-hidden flex items-center justify-center shrink-0">
+                {imagemPreview && !removerImagem ? <img src={imagemPreview} alt="Foto do produto" className="w-full h-full object-cover" /> : <div className="text-center text-slate-400"><Camera className="w-7 h-7 mx-auto" /><p className="text-[11px] mt-2">Sem foto</p></div>}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-900">Foto do produto</p>
+                <p className="text-[12.5px] text-slate-500 mt-1">JPG, PNG ou WEBP · até 2 MB. HEIC/HEIF precisa ser convertido para um formato compatível.</p>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <label className={cx("min-h-11 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3.5 py-2.5 text-sm font-medium text-white cursor-pointer", ring)}><Camera className="w-4 h-4" />Tirar foto<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="hidden" onChange={(e) => { escolherImagemProduto(e.target.files?.[0]); e.target.value = ""; }} /></label>
+                  <label className={cx("min-h-11 inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200 cursor-pointer", ring)}>Galeria<input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { escolherImagemProduto(e.target.files?.[0]); e.target.value = ""; }} /></label>
+                  {(imagemPreview || formP.imagemPath) && <button type="button" onClick={() => { setImagemArquivo(null); setImagemPreview(null); setRemoverImagem(true); }} className={cx("min-h-11 px-3.5 py-2.5 rounded-xl text-sm font-medium text-rose-700 hover:bg-rose-50", ring)}>Remover foto</button>}
+                </div>
+              </div>
+            </div>
+          </div>
           <Field label="Nome do produto"><Input value={formP.nome || ""} onChange={(e) => setFormP({ ...formP, nome: e.target.value })} placeholder="Ex.: Fechadura digital biométrica" /></Field>
           <div className="grid sm:grid-cols-2 gap-5">
             <Field label="Marca"><Input value={formP.marca || ""} onChange={(e) => setFormP({ ...formP, marca: e.target.value })} placeholder="Ex.: Intelbras" /></Field>
             <Field label="Modelo ou referência"><Input value={formP.modelo || ""} onChange={(e) => setFormP({ ...formP, modelo: e.target.value })} placeholder="Ex.: FR 320" /></Field>
           </div>
           <div className="grid sm:grid-cols-2 gap-5">
-            <Field label="Custo de compra"><Input type="number" min="0" value={formP.custo} onChange={(e) => setFormP({ ...formP, custo: Number(e.target.value) })} /></Field>
-            <Field label="Preço de venda"><Input type="number" min="0" value={formP.preco} onChange={(e) => setFormP({ ...formP, preco: Number(e.target.value) })} /></Field>
+            <Field label="SKU" hint="Código interno opcional."><Input value={formP.sku || ""} onChange={(e) => setFormP({ ...formP, sku: e.target.value })} placeholder="Ex.: INT-FR320" /></Field>
+            <Field label="Código de barras" hint="EAN, UPC ou GTIN. Pode digitar manualmente.">
+              <div className="flex gap-2"><Input inputMode="numeric" value={formP.codigoBarras || ""} onChange={(e) => setFormP({ ...formP, codigoBarras: e.target.value.replace(/\D/g, "") })} placeholder="789…" /><button type="button" onClick={() => setScannerProduto(true)} className={cx("min-h-11 shrink-0 rounded-xl px-3.5 ring-1 ring-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50", ring)}>Escanear</button></div>
+            </Field>
+          </div>
+          {/* CALCULADORA DE MARGEM SOBRE CUSTO — ferramenta local; só custo e preço são persistidos. */}
+          <div className="grid sm:grid-cols-3 gap-5">
+            <Field label="Custo de compra">
+              <Input type="number" min="0" step="0.01" value={formP.custo} onChange={(e) => {
+                const custo = Number(e.target.value);
+                const pct = formP.margemPct;
+                setFormP({ ...formP, custo, ...(pct !== "" && Number.isFinite(Number(pct)) ? { preco: precoComAcrescimo(custo, pct) } : {}) });
+              }} />
+            </Field>
+            <Field label="Acréscimo sobre custo (%)" hint="Ex.: R$ 80 + 45% = R$ 116">
+              <Input type="number" min="0" step="0.01" value={formP.margemPct ?? ""} placeholder="45" onChange={(e) => {
+                const raw = e.target.value;
+                const margemPct = raw === "" ? "" : Number(raw);
+                setFormP({ ...formP, margemPct, ...(raw !== "" ? { preco: precoComAcrescimo(formP.custo, margemPct) } : {}) });
+              }} />
+            </Field>
+            <Field label="Preço de venda">
+              <Input type="number" min="0" step="0.01" value={formP.preco} onChange={(e) => {
+                const preco = Number(e.target.value);
+                setFormP({ ...formP, preco, margemPct: formP.custo > 0 ? acrescimoSobreCusto(formP.custo, preco) : formP.margemPct });
+              }} />
+            </Field>
+          </div>
+          <div className="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 px-4 py-3 grid sm:grid-cols-3 gap-3 text-[13px]">
+            <div><span className="text-emerald-700">Custo</span><p className="font-semibold text-slate-900 tabular-nums">{brl(formP.custo)}</p></div>
+            <div><span className="text-emerald-700">Lucro bruto por unidade</span><p className="font-semibold text-slate-900 tabular-nums">{brl(Math.max(0, num(formP.preco) - num(formP.custo)))}</p></div>
+            <div><span className="text-emerald-700">Preço calculado</span><p className="font-semibold text-emerald-800 tabular-nums">{brl(formP.preco)}</p></div>
           </div>
           <div className="grid sm:grid-cols-2 gap-5">
             <Field label="Unidade">
@@ -2024,6 +2746,14 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
               </Select>
             </Field>
           </div>
+          <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="flex items-center gap-3 min-h-11"><input type="checkbox" checked={Boolean(formP.controlaEstoque)} onChange={(e) => setFormP({ ...formP, controlaEstoque: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" /><span className="text-[14px] text-slate-700">Controlar estoque deste produto</span></label>
+              {formP.id && contexto?.abrirRecursoV2 && <Btn size="sm" variant="soft" onClick={() => contexto.abrirRecursoV2("produtos", { origem: "catalogo", params: { product: formP.id } })}>Estoque e movimentações</Btn>}
+            </div>
+            {formP.controlaEstoque && <div className="grid min-[430px]:grid-cols-2 gap-4"><Field label="Estoque atual"><Input type="number" value={formP.estoque || 0} disabled className="bg-slate-50" /></Field><Field label="Estoque mínimo"><Input type="number" inputMode="numeric" min="0" value={formP.estoqueMinimo || 0} onChange={(e) => setFormP({ ...formP, estoqueMinimo: Math.max(0, Number(e.target.value)) })} /></Field></div>}
+            <label className="flex items-center gap-3 min-h-11"><input type="checkbox" checked={formP.vendaHabilitada !== false} onChange={(e) => setFormP({ ...formP, vendaHabilitada: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" /><span className="text-[14px] text-slate-700">Liberado para venda em campo</span></label>
+          </div>
           <Field label="Fornecedor" hint="Opcional."><Input value={formP.fornecedor || ""} onChange={(e) => setFormP({ ...formP, fornecedor: e.target.value })} /></Field>
           <Field label="Descrição" hint="Opcional."><Textarea rows={2} value={formP.descricao || ""} onChange={(e) => setFormP({ ...formP, descricao: e.target.value })} /></Field>
           <label className="flex items-center gap-3 py-1">
@@ -2032,38 +2762,44 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto }) {
           </label>
         </Modal>
       )}
+      {scannerProduto && <BarcodeScanner mode="barcode" onDetected={(codigo) => { setFormP((atual) => atual ? { ...atual, codigoBarras: codigo } : atual); setScannerProduto(false); }} onClose={() => setScannerProduto(false)} />}
     </>
   );
 }
 
 /* ============================================================== Orçamentos */
 function Orcamentos(p) {
-  const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto } = p;
+  const { orcamentos, nomeCliente, orcamentoAberto, setOrcamentoAberto, empresa, cliente, aviso, mudarStatusOrc } = p;
   const [filtro, setFiltro] = useState("todos");
-  const [voz, setVoz] = useState(false);
-  const [rascunhoVoz, setRascunhoVoz] = useState(null);
+  const [criado, setCriado] = useState(null);
+
+  const confirmacao = (
+    <OrcamentoCriado
+      id={criado} orcamentos={orcamentos} empresa={empresa} cliente={cliente}
+      aviso={aviso} mudarStatusOrc={mudarStatusOrc}
+      onVer={() => { setOrcamentoAberto(criado); setCriado(null); }}
+      onDepois={() => setCriado(null)}
+    />
+  );
 
   if (orcamentoAberto) {
     if (String(orcamentoAberto).startsWith("novo")) {
       const preCliente = String(orcamentoAberto).split(":")[1] || "";
-      return <OrcamentoEditor {...p} inicial={{ clienteId: preCliente }} onFechar={() => setOrcamentoAberto(null)} />;
+      return <>
+        <OrcamentoEditor {...p} inicial={{ clienteId: preCliente }} onOrcamentoCriado={setCriado} onFechar={() => setOrcamentoAberto(null)} />
+        {confirmacao}
+      </>;
     }
     const o = orcamentos.find((x) => x.id === orcamentoAberto);
-    if (o) return <OrcamentoDoc {...p} orc={o} />;
+    if (o) return <><OrcamentoDoc {...p} orc={o} />{confirmacao}</>;
   }
-  if (rascunhoVoz) return <OrcamentoEditor {...p} inicial={rascunhoVoz} onFechar={() => setRascunhoVoz(null)} />;
 
   const filtrados = orcamentos.filter((o) => filtro === "todos" || o.status === filtro);
 
   return (
     <>
       <PageHead title="Orçamentos" sub="Monte, envie e acompanhe a resposta do cliente."
-        action={
-          <div className="flex gap-2">
-            <Btn variant="soft" icon={Mic} onClick={() => setVoz(true)}>Por voz</Btn>
-            <Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo</Btn>
-          </div>
-        } />
+        action={<Btn icon={Plus} onClick={() => setOrcamentoAberto("novo")}>Novo orçamento</Btn>} />
       <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
         opcoes={[{ id: "todos", label: "Todos" }, { id: "rascunho", label: "Rascunhos" }, { id: "enviado", label: "Aguardando" }, { id: "aprovado", label: "Aprovados" }]} />
 
@@ -2073,8 +2809,10 @@ function Orcamentos(p) {
       ) : (
         <Panel className="divide-y divide-slate-100 overflow-hidden">
           {filtrados.map((o) => (
-            <Linha key={o.id} onClick={() => setOrcamentoAberto(o.id)}>
-              <div className="flex items-start justify-between gap-4">
+            <div key={o.id} className="px-4 sm:px-5 py-4 transition-colors hover:bg-slate-50/80">
+              <div className="flex items-stretch gap-2 sm:gap-3">
+                <button type="button" onClick={() => setOrcamentoAberto(o.id)} className="min-w-0 flex-1 text-left">
+                  <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="font-medium text-slate-900 truncate">{nomeCliente(o.clienteId)}</p>
                   <p className="text-[13px] text-slate-500">{o.numero} · {dataBR(o.data)} · {o.itens.length} item{o.itens.length > 1 ? "ns" : ""}</p>
@@ -2086,226 +2824,92 @@ function Orcamentos(p) {
                     ]} />
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-[17px] font-semibold text-slate-900 tabular-nums">{brl(totalDoc(o))}</p>
-                  <Pill tone={ST_ORC[o.status].tone} className="mt-1.5">{ST_ORC[o.status].label}</Pill>
-                </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[17px] font-semibold text-slate-900 tabular-nums">{brl(totalDoc(o))}</p>
+                      <Pill tone={ST_ORC[o.status].tone} className="mt-1.5">{ST_ORC[o.status].label}</Pill>
+                    </div>
+                  </div>
+                </button>
+                {/* APROVACAO RAPIDA ORCAMENTO — pode aprovar rascunho ou enviado sem obrigar envio pelo app. */}
+                {["rascunho", "enviado"].includes(o.status) && (
+                  <button
+                    type="button"
+                    aria-label={`Aprovar ${o.numero}`}
+                    title="Aprovar orçamento"
+                    onClick={() => mudarStatusOrc(o.id, "aprovado")}
+                    className="self-center shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[12px] font-semibold text-emerald-800 ring-1 ring-emerald-200 transition hover:bg-emerald-100 active:scale-[0.98]"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Aprovar</span>
+                  </button>
+                )}
               </div>
-            </Linha>
+            </div>
           ))}
         </Panel>
       )}
 
-      {voz && <OrcamentoVoz {...p} onClose={() => setVoz(false)} onConfirmar={(rasc) => { setVoz(false); setRascunhoVoz(rasc); }} />}
     </>
   );
 }
 
-/* ------------------------------------------- orçamento por voz (com confirmação) */
-function OrcamentoVoz({ onClose, onConfirmar, clientes, servicos, produtos, empresa, salvarCliente, aviso }) {
-  const [fala, setFala] = useState("");
-  const [carregando, setCarregando] = useState(false);
-  const [erro, setErro] = useState(null);
-  const [previa, setPrevia] = useState(null);
-  const [comando, setComando] = useState("");
-  const [novoCliente, setNovoCliente] = useState(null);
+/* -------- interpretação por IA reaproveitada DENTRO do editor manual --------
+   A lógica de leitura da fala continua a mesma que existia na tela separada
+   de "orçamento por voz"; o que muda é o destino: em vez de gerar um documento
+   próprio, ela devolve um patch que preenche o formulário manual já aberto. */
+function interpretarParaFormulario(bruto, { clientes, servicos, produtos, empresa }) {
+  const itens = (bruto.itens || []).map((i) => {
+    const cat = i.tipo === "produto"
+      ? produtos.find((p) => p.id === i.catalogoId)
+      : servicos.find((s) => s.id === i.catalogoId);
+    const precoCatalogo = cat?.preco;
+    return {
+      id: uid(), tipo: i.tipo || "servico", catalogoId: cat?.id || null,
+      nome: cat
+        ? (i.tipo === "produto" ? `${cat.nome}${cat.marca ? " · " + cat.marca : ""}${cat.modelo ? " " + cat.modelo : ""}` : cat.nome)
+        : i.nome,
+      unidade: cat?.unidade || i.unidade || "unidade",
+      qtd: Number(i.qtd) || 1,
+      preco: i.preco != null ? Number(i.preco) : (precoCatalogo ?? 0),
+      custo: cat?.custo || 0,
+      obs: "",
+      semPreco: i.preco == null && precoCatalogo == null,
+      foraDoCatalogo: !cat,
+    };
+  });
+  const cl = clientes.find((c) => c.id === bruto.clienteId);
+  const parecidos = !cl && bruto.clienteSugerido
+    ? clientes.filter((c) => !c.excluidoEm && semAcento(c.fantasia || c.nome).includes(semAcento(String(bruto.clienteSugerido).split(" ")[0] || "")))
+    : [];
+  const avisos = [...(bruto.avisos || [])];
+  itens.filter((i) => i.semPreco).forEach((i) => avisos.push(`Informe o preço de "${i.nome}".`));
+  itens.filter((i) => i.foraDoCatalogo).forEach((i) => avisos.push(`"${i.nome}" não está no catálogo e entrou como item livre.`));
 
-  const interpretar = async (comandoCorrecao) => {
-    setCarregando(true); setErro(null);
-    try {
-      const bruto = await chamarIA(promptOrcamento({
-        fala, clientes, servicos, produtos,
-        rascunho: comandoCorrecao ? previa.bruto : null, comando: comandoCorrecao,
-      }));
-      setPrevia(montarPrevia(bruto));
-      setComando("");
-    } catch (e) {
-      setErro("Não consegui interpretar agora. Você pode tentar de novo ou montar o orçamento manualmente.");
-    }
-    setCarregando(false);
+  return {
+    patch: {
+      clienteId: cl?.id || null,
+      itens,
+      desconto: Number(bruto.desconto) || 0,
+      acrescimo: Number(bruto.acrescimo) || 0,
+      validade: bruto.validadeDias ? addDays(hojeISO(), Number(bruto.validadeDias)) : null,
+      condicao: bruto.condicao || null,
+      obs: bruto.obs || null,
+      localServico: bruto.localServico || null,
+    },
+    avisos, clienteSugerido: bruto.clienteSugerido || null, parecidos,
   };
-
-  const montarPrevia = (bruto) => {
-    const itens = (bruto.itens || []).map((i) => {
-      const cat = i.tipo === "produto" ? produtos.find((p) => p.id === i.catalogoId) : servicos.find((s) => s.id === i.catalogoId);
-      const precoCatalogo = cat?.preco;
-      return {
-        id: uid(), tipo: i.tipo || "servico", catalogoId: cat?.id || null,
-        nome: cat ? (i.tipo === "produto" ? `${cat.nome}${cat.marca ? " · " + cat.marca : ""}${cat.modelo ? " " + cat.modelo : ""}` : cat.nome) : i.nome,
-        unidade: cat?.unidade || i.unidade || "unidade",
-        qtd: Number(i.qtd) || 1,
-        preco: i.preco != null ? Number(i.preco) : (precoCatalogo ?? null),
-        custo: cat?.custo || 0,
-        precoDito: i.preco != null && precoCatalogo != null && Number(i.preco) !== precoCatalogo,
-        semCatalogo: !cat,
-      };
-    });
-    const cl = clientes.find((c) => c.id === bruto.clienteId);
-    const parecidos = !cl && bruto.clienteSugerido
-      ? clientes.filter((c) => semAcento(c.fantasia || c.nome).includes(semAcento(bruto.clienteSugerido.split(" ")[0] || ""))) : [];
-    return { bruto, itens, clienteId: cl?.id || null, clienteSugerido: bruto.clienteSugerido, parecidos,
-      desconto: Number(bruto.desconto) || 0, acrescimo: Number(bruto.acrescimo) || 0,
-      validadeDias: bruto.validadeDias || empresa.validadePadrao,
-      condicao: bruto.condicao || empresa.condicaoPadrao, obs: bruto.obs || "",
-      localServico: bruto.localServico || "", avisos: bruto.avisos || [] };
-  };
-
-  const total = previa ? Math.max(0, previa.itens.reduce((t, i) => t + i.qtd * (i.preco || 0), 0) - previa.desconto + previa.acrescimo) : 0;
-  const faltaPreco = previa?.itens.some((i) => i.preco == null);
-
-  const confirmar = () => {
-    onConfirmar({
-      clienteId: previa.clienteId, itens: previa.itens.filter((i) => i.preco != null).map(({ precoDito, semCatalogo, ...i }) => i),
-      desconto: previa.desconto, acrescimo: previa.acrescimo,
-      validade: addDays(HOJE, previa.validadeDias), condicao: previa.condicao, obs: previa.obs,
-      localServico: previa.localServico, data: HOJE, status: "rascunho",
-    });
-  };
-
-  return (
-    <>
-      <Modal open onClose={onClose} wide title="Orçamento por voz"
-        sub={previa ? "Confira antes de criar. Nada é salvo sem a sua confirmação." : "Fale naturalmente o que o cliente pediu."}
-        footer={previa ? (
-          <>
-            <Btn variant="ghost" onClick={() => { setPrevia(null); }}>Recomeçar</Btn>
-            <Btn disabled={!previa.clienteId || previa.itens.length === 0 || faltaPreco} onClick={confirmar}>Confirmar e abrir orçamento</Btn>
-          </>
-        ) : (
-          <>
-            <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-            <Btn disabled={!fala.trim() || carregando} icon={carregando ? Loader2 : Sparkles} onClick={() => interpretar(null)}>
-              {carregando ? "Interpretando…" : "Interpretar"}
-            </Btn>
-          </>
-        )}>
-
-        {!previa && (
-          <>
-            <CampoVoz valor={fala} onChange={setFala} rows={6}
-              placeholder="Ex.: cria um orçamento para o Condomínio Jardins com duas instalações de fechadura digital, mais uma visita técnica, cem reais de desconto, validade de 15 dias, serviço na portaria"
-              dica="Você também pode digitar." />
-            {erro && <p className="text-[13px] text-rose-700">{erro}</p>}
-            <p className="text-[12px] text-slate-400 leading-relaxed">
-              A interpretação usa um serviço de IA online. Se ele estiver indisponível, monte o orçamento pela tela normal — o resultado é exatamente o mesmo tipo de orçamento.
-            </p>
-          </>
-        )}
-
-        {previa && (
-          <>
-            <p className="text-[14px] font-medium text-slate-700">Entendi seu orçamento assim:</p>
-
-            <div className="rounded-2xl ring-1 ring-slate-200 p-4">
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-1.5">Cliente</p>
-              {previa.clienteId ? (
-                <p className="text-[15px] font-medium text-slate-900">{clientes.find((c) => c.id === previa.clienteId)?.fantasia || clientes.find((c) => c.id === previa.clienteId)?.nome}</p>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-[14px] text-amber-800">Não encontrei “{previa.clienteSugerido || "o cliente"}” no seu cadastro.</p>
-                  {previa.parecidos.length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="text-[12px] text-slate-500">Você quis dizer:</p>
-                      {previa.parecidos.map((c) => (
-                        <button key={c.id} onClick={() => setPrevia({ ...previa, clienteId: c.id })}
-                          className={cx("w-full text-left rounded-xl ring-1 ring-slate-200 px-3.5 py-2.5 text-[14px] hover:ring-teal-500", ring)}>
-                          {c.fantasia || c.nome}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex gap-2 flex-wrap">
-                    <Select value="" onChange={(e) => setPrevia({ ...previa, clienteId: e.target.value })} className="max-w-[240px]">
-                      <option value="">Escolher da lista…</option>
-                      {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
-                    </Select>
-                    <Btn size="sm" variant="soft" icon={Plus} onClick={() => setNovoCliente({ tipo: "PF", nome: previa.clienteSugerido || "" })}>Cadastrar novo</Btn>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100">
-              {previa.itens.map((i, idx) => (
-                <div key={i.id} className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[15px] text-slate-900">{i.nome}</p>
-                      <p className="text-[12px] text-slate-500 mt-0.5">
-                        {i.qtd} {unidadeLabel(i.unidade)} × {i.preco != null ? brl(i.preco) : "preço não informado"}
-                        {i.tipo === "produto" && " · produto"}
-                      </p>
-                      {i.precoDito && <p className="text-[12px] text-amber-700 mt-1">Preço dito por você — o catálogo não será alterado.</p>}
-                      {i.semCatalogo && <p className="text-[12px] text-amber-700 mt-1">Não está no catálogo. Entra só neste orçamento.</p>}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <p className="text-[15px] font-semibold text-slate-900 tabular-nums">{i.preco != null ? brl(i.qtd * i.preco) : "—"}</p>
-                      <button onClick={() => setPrevia({ ...previa, itens: previa.itens.filter((_, k) => k !== idx) })}
-                        aria-label={`Remover ${i.nome}`} className={cx("p-1.5 rounded-lg text-slate-300 hover:text-rose-600", ring)}><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                  {i.preco == null && (
-                    <div className="mt-3 max-w-[200px]">
-                      <Field label="Informe o preço unitário">
-                        <Input type="number" min="0" onChange={(e) => setPrevia({ ...previa, itens: previa.itens.map((x, k) => k === idx ? { ...x, preco: Number(e.target.value) } : x) })} />
-                      </Field>
-                    </div>
-                  )}
-                </div>
-              ))}
-              <div className="p-4 space-y-1.5 text-[14px]">
-                {previa.desconto > 0 && <div className="flex justify-between text-slate-500"><span>Desconto</span><span className="tabular-nums">− {brl(previa.desconto)}</span></div>}
-                {previa.acrescimo > 0 && <div className="flex justify-between text-slate-500"><span>Acréscimo</span><span className="tabular-nums">+ {brl(previa.acrescimo)}</span></div>}
-                <div className="flex justify-between items-baseline pt-2">
-                  <span className="font-medium text-slate-700">Total</span>
-                  <span className="text-2xl font-semibold text-slate-900 tabular-nums">{brl(total)}</span>
-                </div>
-                <p className="text-[12px] text-slate-400 pt-1">Validade de {previa.validadeDias} dias · {previa.condicao}</p>
-                {previa.localServico && <p className="text-[12px] text-slate-400">Local do serviço: {previa.localServico}</p>}
-                {previa.obs && <p className="text-[12px] text-slate-400">Observações: {previa.obs}</p>}
-              </div>
-            </div>
-
-            {previa.avisos.length > 0 && (
-              <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 p-3.5 space-y-1">
-                {previa.avisos.map((a, i) => <p key={i} className="text-[13px] text-amber-900">{a}</p>)}
-              </div>
-            )}
-
-            <div>
-              <Field label="Quer corrigir algo? Fale ou escreva a correção">
-                <Input value={comando} onChange={(e) => setComando(e.target.value)} placeholder="Ex.: muda para três fechaduras e tira a visita técnica" />
-              </Field>
-              <div className="flex gap-2 mt-2">
-                <Btn size="sm" variant="soft" disabled={!comando.trim() || carregando} icon={carregando ? Loader2 : Sparkles} onClick={() => interpretar(comando)}>
-                  {carregando ? "Aplicando…" : "Aplicar correção"}
-                </Btn>
-              </div>
-              {erro && <p className="text-[13px] text-rose-700 mt-2">{erro}</p>}
-            </div>
-          </>
-        )}
-      </Modal>
-
-      <ClienteForm form={novoCliente} setForm={setNovoCliente} onSave={salvarCliente}
-        onSaved={(id) => id && setPrevia((pv) => ({ ...pv, clienteId: id }))} />
-    </>
-  );
 }
 
 /* -------------------------------------------------------- documento do orçamento */
 function OrcamentoDoc(p) {
-  const { orc, cliente, empresa, mudarStatusOrc, duplicarOrcamento, gerarOS, setOrcamentoAberto, aviso, pedirConfirmacao } = p;
+  const { orc, cliente, empresa, mudarStatusOrc, duplicarOrcamento, gerarOS, setOrcamentoAberto, aviso, pedirConfirmacao, excluirRegistro, papel } = p;
   const [editando, setEditando] = useState(false);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
   const c = cliente(orc.clienteId);
   if (editando) return <OrcamentoEditor {...p} inicial={orc} onFechar={() => setEditando(false)} />;
 
-  const [gerandoPdf, setGerandoPdf] = useState(false);
-  const arquivoPdf = `Orcamento-${orc.numero}.pdf`;
-  const textoWhats = () => {
-    const linhas = orc.itens.map((i) => `• ${i.qtd}× ${i.nome} — ${brl(i.qtd * i.preco)}`).join("\n");
-    return `*${empresa.nome}*\nOrçamento ${orc.numero}\n\n${linhas}\n\n*Total: ${brl(totalDoc(orc))}*\nValidade: ${dataBR(orc.validade)}\n${orc.condicao}`;
-  };
+  const arquivoPdf = nomeArquivoDoc(orc.numero, c?.fantasia || c?.nome);
+  const textoWhats = () => mensagemOrcamento(orc, c, empresa);
   const baixarPdf = async () => {
     if (gerandoPdf) return;
     setGerandoPdf(true);
@@ -2356,11 +2960,14 @@ function OrcamentoDoc(p) {
         </button>
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
-            <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{orc.numero}</h1>
+            <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">
+              {orc.numero}<span className="text-slate-400 font-normal"> — </span>{c?.fantasia || c?.nome || "Cliente"}
+            </h1>
             <Pill tone={ST_ORC[orc.status].tone}>{ST_ORC[orc.status].label}</Pill>
           </div>
           <div className="flex flex-wrap gap-2">
             <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setEditando(true)}>Editar</Btn>
+            {papel === "proprietario" && <Btn variant="danger" size="sm" icon={Trash2} onClick={() => excluirRegistro("orcamento", orc.id, `${orc.numero} — ${c?.fantasia || c?.nome || "Cliente"}`, () => setOrcamentoAberto(null))}>Excluir</Btn>}
             <Btn variant="soft" size="sm" icon={Copy} onClick={() => pedirConfirmacao({
               titulo: `Duplicar o ${orc.numero}?`,
               texto: "Cria um novo rascunho com o mesmo cliente, itens e condições. Aprovação, OS e pagamentos não são copiados.",
@@ -2465,17 +3072,51 @@ function OrcamentoDoc(p) {
 }
 
 /* -------------------------------------------------------------- editor de orçamento */
+function MiniaturaProdutoOrcamento({ imagemPath, nome }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let ativo = true;
+    setSrc(null);
+    if (!imagemPath) return () => { ativo = false; };
+    resolverImagemProdutoDB(imagemPath)
+      .then((url) => { if (ativo) setSrc(url || null); })
+      .catch(() => { if (ativo) setSrc(null); });
+    return () => { ativo = false; };
+  }, [imagemPath]);
+  if (!imagemPath) return null;
+  return (
+    <div className="mb-2 flex items-center gap-2">
+      <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-100 ring-1 ring-slate-200 shrink-0 flex items-center justify-center">
+        {src ? <img src={src} alt={nome || "Produto"} className="w-full h-full object-cover" /> : <Camera className="w-4 h-4 text-slate-400" aria-hidden="true" />}
+      </div>
+      <span className="text-[12px] text-slate-500">Foto do produto vinculada</span>
+    </div>
+  );
+}
+
 function OrcamentoEditor(p) {
-  const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente, inicial, onFechar, cliente } = p;
+  const { clientes, servicos, produtos, empresa, salvarOrcamento, salvarCliente,
+    salvarServico, salvarProduto, inicial, onFechar, cliente, aviso } = p;
   const [novoCliente, setNovoCliente] = useState(false);
+  const [cadastroRapido, setCadastroRapido] = useState(null);   // "servico" | "produto"
+  /* IA e voz são auxiliares: preenchem este mesmo formulário e nada é salvo
+     sem o usuário revisar e clicar em criar/salvar. */
+  const [iaAberta, setIaAberta] = useState(false);
+  const [iaTexto, setIaTexto] = useState("");
+  const [iaOcupada, setIaOcupada] = useState(false);
+  const [iaErro, setIaErro] = useState(null);
+  const [iaAvisos, setIaAvisos] = useState([]);
+  const [iaSugestoes, setIaSugestoes] = useState([]);
+  const [salvando, setSalvando] = useState(false);
   const [d, setD] = useState(() => ({
     id: inicial?.id, numero: inicial?.numero, clienteId: inicial?.clienteId || "",
-    status: inicial?.status || "rascunho", data: inicial?.data || HOJE,
-    validade: inicial?.validade || addDays(HOJE, empresa.validadePadrao),
+    status: inicial?.status || "rascunho", data: inicial?.data || hojeISO(),
+    validade: inicial?.validade || addDays(hojeISO(), empresa.validadePadrao),
     itens: inicial?.itens ? inicial.itens.map((i) => ({ ...i })) : [],
     desconto: inicial?.desconto || 0, acrescimo: inicial?.acrescimo || 0,
     condicao: inicial?.condicao || empresa.condicaoPadrao, obs: inicial?.obs ?? empresa.observacaoPadrao,
     local: inicial?.local || "", localServico: inicial?.localServico || "", osId: inicial?.osId || null,
+    mostrarImagensProdutos: inicial?.id ? Boolean(inicial.mostrarImagensProdutos) : true,
   }));
   const [buscaCat, setBuscaCat] = useState("");
   const [abaCat, setAbaCat] = useState("servicos");
@@ -2498,16 +3139,133 @@ function OrcamentoEditor(p) {
   const addLivre = (dados) => setD((st) => ({ ...st, itens: [...st.itens, itemLivre(dados)] }));
   const upItem = (id, k, v) => setD((s) => ({ ...s, itens: s.itens.map((i) => (i.id === id ? { ...i, [k]: v } : i)) }));
   const rmItem = (id) => setD((s) => ({ ...s, itens: s.itens.filter((i) => i.id !== id) }));
+  const imagemProdutoItem = (i) => i.tipo === "produto" ? (i.imagemPath || produtos.find((p) => p.id === i.catalogoId)?.imagemPath || null) : null;
+
+  /* Preenche o formulário aberto a partir do que foi falado/digitado.
+     Acrescenta itens em vez de descartar o que já existe, e só sobrescreve
+     um campo quando a fala trouxe informação para ele. */
+  const preencherComIA = async () => {
+    if (!iaTexto.trim()) return;
+    setIaOcupada(true); setIaErro(null); setIaAvisos([]); setIaSugestoes([]);
+    try {
+      const bruto = await chamarIA(promptOrcamento({ fala: iaTexto, clientes, servicos, produtos }));
+      const { patch, avisos, clienteSugerido, parecidos } =
+        interpretarParaFormulario(bruto, { clientes, servicos, produtos, empresa });
+
+      setD((st) => {
+        const proximo = { ...st, itens: [...st.itens, ...patch.itens.map(({ semPreco, foraDoCatalogo, ...i }) => i)] };
+        if (patch.clienteId && !st.clienteId) {
+          proximo.clienteId = patch.clienteId;
+          proximo.local = clientes.find((x) => x.id === patch.clienteId)?.endereco || st.local;
+        }
+        if (patch.desconto) proximo.desconto = patch.desconto;
+        if (patch.acrescimo) proximo.acrescimo = patch.acrescimo;
+        if (patch.validade) proximo.validade = patch.validade;
+        if (patch.condicao) proximo.condicao = patch.condicao;
+        if (patch.localServico) proximo.localServico = patch.localServico;
+        if (patch.obs) proximo.obs = st.obs && st.obs !== empresa.observacaoPadrao ? `${st.obs}\n${patch.obs}` : patch.obs;
+        return proximo;
+      });
+
+      const recados = [...avisos];
+      if (!patch.clienteId && clienteSugerido) recados.push(`Não encontrei "${clienteSugerido}" no cadastro. Selecione o cliente ou cadastre um novo.`);
+      setIaAvisos(recados);
+      setIaSugestoes(parecidos.slice(0, 4));
+      setIaTexto("");
+      aviso?.("Formulário preenchido. Revise antes de salvar.");
+    } catch (e) {
+      setIaErro("Não consegui interpretar agora. Continue preenchendo normalmente — o orçamento manual não depende da IA.");
+    }
+    setIaOcupada(false);
+  };
+
+  /* Salva e, quando é um orçamento novo, oferece os próximos passos em vez de
+     sair da tela ou baixar PDF sem o usuário pedir. */
+  const { dirty: orcamentoAlterado, markClean: orcamentoSalvo } = useFormDirty(d);
+  const saidaOrcamento = useDiscardGuard({ dirty: orcamentoAlterado, onClose: onFechar });
+
+  const salvarEDecidir = async () => {
+    if (!d.clienteId || d.itens.length === 0 || salvando) return;
+    setSalvando(true);
+    try {
+      const edicao = Boolean(d.id);
+      const id = await salvarOrcamento(d);
+      if (!id) return;                   // erro já foi avisado por salvarOrcamento
+      orcamentoSalvo();
+      if (edicao) { onFechar(); return; }
+      /* pós-criação: o registro já está salvo e a tela de Orçamentos abre as
+         próximas ações. Nada é baixado automaticamente. */
+      p.onOrcamentoCriado?.(id);
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  /* Cadastro rápido sem sair do orçamento: salva no catálogo e já usa o item. */
+  const cadastrarServicoRapido = async (dados) => {
+    const id = await salvarServico({ ...dados, ativo: true });
+    if (!id) return;
+    addServico({ ...dados, id });
+    setCadastroRapido(null);
+  };
+  const cadastrarProdutoRapido = async (dados) => {
+    const id = await salvarProduto({ ...dados, ativo: true });
+    if (!id) return;
+    addProduto({ ...dados, id });
+    setCadastroRapido(null);
+  };
 
   const dispS = servicos.filter((s) => s.ativo && semAcento(s.nome).includes(semAcento(buscaCat)));
   const dispP = produtos.filter((x) => x.ativo && semAcento(`${x.nome} ${x.marca} ${x.modelo}`).includes(semAcento(buscaCat)));
 
   return (
     <>
-      <button onClick={onFechar} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
+      <DiscardChangesPrompt open={saidaOrcamento.confirming} onKeepEditing={saidaOrcamento.keepEditing} onDiscard={saidaOrcamento.discard} />
+      <button onClick={saidaOrcamento.requestClose} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
         <ArrowLeft className="w-4 h-4" /> Voltar
       </button>
-      <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche." />
+      <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche."
+        action={
+          <Btn variant="soft" icon={Sparkles} onClick={() => setIaAberta((v) => !v)}>
+            {iaAberta ? "Fechar assistente" : "Preencher com IA / voz"}
+          </Btn>
+        } />
+
+      {iaAberta && (
+        <Panel className="p-5 mb-6">
+          <Rotulo>Assistente · opcional</Rotulo>
+          <p className="text-[13px] text-slate-500 mb-3 leading-relaxed">
+            Fale ou escreva o pedido do cliente. O ZiisTec preenche os campos abaixo e você continua editando tudo à mão.
+          </p>
+          <CampoVoz rows={3} valor={iaTexto} onChange={setIaTexto}
+            placeholder="Ex.: orçamento para o Condomínio Jardins com duas fechaduras digitais, uma visita técnica, cem reais de desconto e pagamento no Pix" />
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <Btn size="sm" icon={iaOcupada ? Loader2 : Sparkles} disabled={!iaTexto.trim() || iaOcupada} onClick={preencherComIA}>
+              {iaOcupada ? "Interpretando…" : "Preencher formulário"}
+            </Btn>
+            <span className="text-[12px] text-slate-400">Nada é salvo sem a sua confirmação.</span>
+          </div>
+          {iaErro && <p className="text-[13px] text-rose-700 mt-3">{iaErro}</p>}
+          {iaAvisos.length > 0 && (
+            <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 p-3.5 mt-3 space-y-1">
+              {iaAvisos.map((a, i) => <p key={i} className="text-[13px] text-amber-900">{a}</p>)}
+            </div>
+          )}
+          {iaSugestoes.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[12px] text-slate-500 mb-1.5">Você quis dizer:</p>
+              <div className="flex flex-wrap gap-2">
+                {iaSugestoes.map((c) => (
+                  <button key={c.id} onClick={() => { escolherCliente(c.id); setIaSugestoes([]); }}
+                    className={cx("rounded-xl ring-1 ring-slate-200 px-3 py-2 text-[13px] hover:ring-teal-500", ring)}>
+                    {c.fantasia || c.nome}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </Panel>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         <div className="lg:col-span-2 space-y-7">
@@ -2518,7 +3276,7 @@ function OrcamentoEditor(p) {
                 <div className="flex gap-2 flex-wrap sm:flex-nowrap">
                   <Select value={d.clienteId} onChange={(e) => escolherCliente(e.target.value)} className="flex-1">
                     <option value="">Selecione um cliente</option>
-                    {clientes.map((x) => <option key={x.id} value={x.id}>{x.fantasia || x.nome}</option>)}
+                    {clientes.filter((x) => !x.excluidoEm).map((x) => <option key={x.id} value={x.id}>{x.fantasia || x.nome}</option>)}
                   </Select>
                   <Btn variant="soft" icon={Plus} onClick={() => setNovoCliente(true)} className="shrink-0">Cadastrar novo cliente</Btn>
                 </div>
@@ -2559,6 +3317,11 @@ function OrcamentoEditor(p) {
                       </button>))}
                   {(abaCat === "servicos" ? dispS : dispP).length === 0 && <p className="text-[13px] text-slate-400 py-1">Nada encontrado com esse nome.</p>}
                 </div>
+                {/* o que ainda não está no catálogo pode ser cadastrado aqui mesmo */}
+                <button onClick={() => setCadastroRapido(abaCat === "servicos" ? "servico" : "produto")}
+                  className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
+                  + Cadastrar {abaCat === "servicos" ? "serviço" : "produto"} no catálogo
+                </button>
                 </>)}
               </div>
 
@@ -2570,6 +3333,7 @@ function OrcamentoEditor(p) {
                     <div key={i.id} className="p-4 sm:p-5">
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="min-w-0">
+                          {imagemProdutoItem(i) && <MiniaturaProdutoOrcamento imagemPath={imagemProdutoItem(i)} nome={i.nome} />}
                           {i.tipo === "livre" ? (
                             <Input value={i.nome} onChange={(e) => upItem(i.id, "nome", e.target.value)} aria-label="Descrição do item" className="font-medium" />
                           ) : <p className="font-medium text-slate-900">{i.nome}</p>}
@@ -2582,10 +3346,20 @@ function OrcamentoEditor(p) {
                         <button onClick={() => rmItem(i.id)} aria-label={`Remover ${i.nome}`}
                           className={cx("p-1.5 -m-1 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 shrink-0", ring)}><Trash2 className="w-4 h-4" /></button>
                       </div>
-                      <div className="grid grid-cols-3 gap-3 sm:gap-4 items-end">
-                        <Field label={`Qtd em ${unidadeLabel(i.unidade)}`}><Input type="number" min="0" step="0.5" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", num(e.target.value))} /></Field>
-                        <Field label="Valor unitário"><Input type="number" min="0" step="0.01" value={i.preco} onChange={(e) => upItem(i.id, "preco", num(e.target.value))} /></Field>
-                        <div className="text-right pb-3">
+                      <div className="grid grid-cols-1 min-[430px]:grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 items-end">
+                        <Field label={`Qtd em ${unidadeLabel(i.unidade)}`}>
+                          <div className="flex items-stretch gap-1.5">
+                            <button type="button" aria-label={`Diminuir quantidade de ${i.nome}`}
+                              onClick={() => upItem(i.id, "qtd", Math.max(0, num(i.qtd) - 1))}
+                              className={cx("w-11 shrink-0 rounded-xl ring-1 ring-slate-200 text-slate-600 text-lg leading-none hover:bg-slate-50", ring)}>−</button>
+                            <Input type="number" inputMode="decimal" min="0" step="0.5" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", num(e.target.value))} className="text-center" />
+                            <button type="button" aria-label={`Aumentar quantidade de ${i.nome}`}
+                              onClick={() => upItem(i.id, "qtd", num(i.qtd) + 1)}
+                              className={cx("w-11 shrink-0 rounded-xl ring-1 ring-slate-200 text-slate-600 text-lg leading-none hover:bg-slate-50", ring)}>+</button>
+                          </div>
+                        </Field>
+                        <Field label="Valor unitário"><InputMoeda valor={i.preco} onChange={(v) => upItem(i.id, "preco", v)} aria-label={`Valor unitário de ${i.nome}`} /></Field>
+                        <div className="text-left sm:text-right pb-1 sm:pb-3">
                           <p className="text-[12px] text-slate-400">Total</p>
                           <p className="text-[19px] font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</p>
                         </div>
@@ -2627,24 +3401,221 @@ function OrcamentoEditor(p) {
           <Panel className="p-5">
             <div className="flex justify-between text-[14px] text-slate-500 mb-4"><span>Subtotal</span><span className="tabular-nums">{brl(somaItens(d.itens))}</span></div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Desconto"><Input type="number" min="0" value={d.desconto} onChange={(e) => setD({ ...d, desconto: Number(e.target.value) })} /></Field>
-              <Field label="Acréscimo"><Input type="number" min="0" value={d.acrescimo} onChange={(e) => setD({ ...d, acrescimo: Number(e.target.value) })} /></Field>
+              <Field label="Desconto"><InputMoeda valor={d.desconto} onChange={(v) => setD({ ...d, desconto: v })} aria-label="Desconto" /></Field>
+              <Field label="Acréscimo"><InputMoeda valor={d.acrescimo} onChange={(v) => setD({ ...d, acrescimo: v })} aria-label="Acréscimo" /></Field>
             </div>
+            <label className="mt-5 flex items-start gap-3 rounded-xl bg-slate-50 ring-1 ring-slate-200 px-3.5 py-3 cursor-pointer">
+              <input type="checkbox" checked={Boolean(d.mostrarImagensProdutos)}
+                onChange={(e) => setD({ ...d, mostrarImagensProdutos: e.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-teal-700" />
+              <span>
+                <span className="block text-[13px] font-medium text-slate-800">Mostrar fotos dos produtos no PDF</span>
+                <span className="block text-[12px] text-slate-500 mt-0.5">Itens sem foto continuam normalmente, sem espaço vazio.</span>
+              </span>
+            </label>
             <div className="flex justify-between items-baseline pt-4 mt-4 border-t border-slate-200">
               <span className="text-[14px] font-medium text-slate-600">Total</span>
               <span className="text-[26px] font-semibold text-slate-900 tracking-tight tabular-nums">{brl(totalDoc(d))}</span>
             </div>
-            <Btn className="w-full mt-5" disabled={!d.clienteId || d.itens.length === 0} onClick={() => { salvarOrcamento(d); onFechar(); }}>
-              {d.id ? "Salvar alterações" : "Criar orçamento"}
+            <Btn className="w-full mt-5" disabled={!d.clienteId || d.itens.length === 0 || salvando} onClick={salvarEDecidir}>
+              {salvando ? "Salvando…" : d.id ? "Salvar alterações" : "Criar orçamento"}
             </Btn>
             <p className="text-[12px] text-slate-400 text-center mt-3 leading-relaxed">Mudar o valor aqui não altera o preço do seu catálogo.</p>
           </Panel>
         </section>
       </div>
 
+      {/* barra fixa no celular/tablet: total e ação principal sempre à mão */}
+      <div className="lg:hidden sticky bottom-0 -mx-4 sm:-mx-8 mt-6 border-t border-slate-200 bg-white/95 backdrop-blur px-4 sm:px-8 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex items-center justify-between gap-4 z-20">
+        <div>
+          <p className="text-[11px] text-slate-500 leading-none">Total</p>
+          <p className="text-[20px] font-semibold text-slate-900 tabular-nums leading-tight">{brl(totalDoc(d))}</p>
+        </div>
+        <Btn disabled={!d.clienteId || d.itens.length === 0 || salvando} onClick={salvarEDecidir} className="min-w-[170px]">
+          {salvando ? "Salvando…" : d.id ? "Salvar alterações" : "Criar orçamento"}
+        </Btn>
+      </div>
+
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={(novo) => { const id = salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); return id; }} />
+
+      <CadastroRapidoCatalogo
+        tipo={cadastroRapido}
+        verCusto={p.permitido ? p.permitido("verValores") : true}
+        onClose={() => setCadastroRapido(null)}
+        onSalvar={cadastroRapido === "servico" ? cadastrarServicoRapido : cadastrarProdutoRapido}
+      />
     </>
+  );
+}
+
+/* Confirmação após criar o orçamento. O documento já está salvo; aqui o usuário
+   escolhe o próximo passo. O PDF sai sempre do registro persistido e nunca é
+   baixado sem ele pedir. */
+function OrcamentoCriado({ id, orcamentos, empresa, cliente, aviso, mudarStatusOrc, onVer, onDepois }) {
+  const [ocupado, setOcupado] = useState(false);
+  if (!id) return null;
+  const orc = (orcamentos || []).find((o) => o.id === id);
+  if (!orc) return null;
+  const c = cliente(orc.clienteId);
+  const arquivo = nomeArquivoDoc(orc.numero, c?.fantasia || c?.nome);
+  const texto = () => mensagemOrcamento(orc, c, empresa);
+
+  const gerarPdf = async () => {
+    if (ocupado) return;
+    setOcupado(true);
+    try { await baixarOrcamentoPDF(orc.id, orc.empresaId, arquivo); aviso("PDF gerado a partir do orçamento salvo."); }
+    catch (e) { aviso(e?.message || "Não foi possível gerar o PDF."); }
+    finally { setOcupado(false); }
+  };
+
+  const enviar = async () => {
+    if (ocupado) return;
+    const txt = texto();
+    if (suportaCompartilharArquivo()) {
+      setOcupado(true);
+      try {
+        const r = await compartilharOrcamentoPDF({ quoteId: orc.id, companyId: orc.empresaId, filename: arquivo, text: txt });
+        if (r.shared) { if (orc.status === "rascunho") await mudarStatusOrc(orc.id, "enviado"); else aviso("PDF compartilhado."); setOcupado(false); return; }
+      } catch (e) { aviso(e?.message || "Não foi possível compartilhar o PDF."); setOcupado(false); return; }
+      setOcupado(false);
+    }
+    window.open(`https://wa.me/55${soDigitos(c?.whatsapp)}?text=${encodeURIComponent(txt)}`, "_blank");
+    if (orc.status === "rascunho") await mudarStatusOrc(orc.id, "enviado");
+  };
+
+  return (
+    <Modal open onClose={onDepois} title={`${orc.numero} criado`} sub={`${c?.fantasia || c?.nome || "Cliente"} · ${brl(totalDoc(orc))}`}>
+      <p className="text-[14px] text-slate-600 leading-relaxed">
+        O orçamento já está salvo. O que você quer fazer agora?
+      </p>
+      <div className="space-y-2.5">
+        <Btn className="w-full" icon={FileText} onClick={onVer}>Ver orçamento</Btn>
+        <Btn variant="soft" className="w-full" icon={Printer} disabled={ocupado} onClick={gerarPdf}>
+          {ocupado ? "Gerando…" : "Gerar PDF"}
+        </Btn>
+        <Btn variant="soft" className="w-full" icon={Send} disabled={ocupado} onClick={enviar}>Enviar pelo WhatsApp</Btn>
+        <Btn variant="ghost" className="w-full" onClick={onDepois}>Continuar depois</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/* Cadastro rápido de serviço/produto sem sair do orçamento. Só o essencial;
+   o cadastro completo continua em "Serviços e produtos". */
+function CadastroRapidoCatalogo({ tipo, onClose, onSalvar, verCusto = true }) {
+  const serv = tipo === "servico";
+  const vazio = { nome: "", categoria: "", marca: "", modelo: "", unidade: "unidade", preco: 0, custo: 0, margemPct: "", descricao: "", temGarantia: false, prazo: 0 };
+  const [f, setF] = useState(vazio);
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => { if (tipo) setF(vazio); }, [tipo]);
+  if (!tipo) return null;
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  const atalhos = serv ? [30, 60, 90, 180, 365] : [3, 6, 12, 24, 36];
+  const unidadePrazo = serv ? "dias" : "meses";
+
+  return (
+    <Modal open onClose={onClose} wide
+      title={serv ? "Cadastrar serviço" : "Cadastrar produto"}
+      sub="Fica salvo no catálogo e entra neste orçamento."
+      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn disabled={!f.nome.trim() || ocupado} onClick={async () => {
+          setOcupado(true);
+          const prazo = f.temGarantia ? Math.max(0, num(f.prazo)) : 0;
+          await onSalvar(serv
+            ? { nome: f.nome.trim(), categoria: f.categoria.trim(), descricao: f.descricao, unidade: f.unidade,
+                preco: num(f.preco), custo: verCusto ? num(f.custo) : 0, garantiaDias: prazo, retornoDias: 0 }
+            : { nome: f.nome.trim(), marca: f.marca.trim(), modelo: f.modelo.trim(), descricao: f.descricao,
+                unidade: f.unidade, preco: num(f.preco), custo: verCusto ? num(f.custo) : 0, garantiaMeses: prazo });
+          setOcupado(false);
+        }}>{ocupado ? "Salvando…" : "Salvar e adicionar"}</Btn></>}>
+      <Field label={serv ? "Nome do serviço" : "Nome do produto"}>
+        <Input value={f.nome} onChange={(e) => set("nome", e.target.value)} autoFocus
+          placeholder={serv ? "Ex.: Instalação de fechadura digital" : "Ex.: Fechadura digital biométrica"} />
+      </Field>
+      {serv ? (
+        <Field label="Categoria"><Input value={f.categoria} onChange={(e) => set("categoria", e.target.value)} placeholder="Ex.: Controle de acesso" /></Field>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Marca"><Input value={f.marca} onChange={(e) => set("marca", e.target.value)} /></Field>
+          <Field label="Modelo"><Input value={f.modelo} onChange={(e) => set("modelo", e.target.value)} /></Field>
+        </div>
+      )}
+      <div className={cx("grid gap-5", verCusto ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+        <Field label="Unidade">
+          <Select value={f.unidade} onChange={(e) => set("unidade", e.target.value)}>
+            {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Preço de venda"><InputMoeda valor={f.preco} onChange={(v) => set("preco", v)} aria-label="Preço" /></Field>
+        {verCusto && (
+          <Field label="Custo" hint="Uso interno."><InputMoeda valor={f.custo} onChange={(v) => set("custo", v)} aria-label="Custo" /></Field>
+        )}
+      </div>
+
+      {/* CALCULADORA RAPIDA DE MARGEM */}
+      {!serv && verCusto && (
+        <div className="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 p-4 space-y-3">
+          <div className="grid sm:grid-cols-2 gap-4 items-end">
+            <Field label="Acréscimo sobre custo (%)" hint="Ex.: R$ 80 + 45% = R$ 116">
+              <Input type="number" min="0" step="0.01" value={f.margemPct ?? ""} placeholder="45" onChange={(e) => {
+                const raw = e.target.value;
+                const margemPct = raw === "" ? "" : num(raw);
+                setF((s) => ({ ...s, margemPct, ...(raw !== "" ? { preco: precoComAcrescimo(s.custo, margemPct) } : {}) }));
+              }} />
+            </Field>
+            <div className="pb-1">
+              <p className="text-[12px] text-emerald-700">Preço calculado</p>
+              <p className="text-[20px] font-semibold text-emerald-900 tabular-nums">{brl(f.preco)}</p>
+              <p className="text-[12px] text-emerald-700">Lucro bruto/un.: {brl(Math.max(0, num(f.preco) - num(f.custo)))}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* garantia definida já no cadastro rápido: é o prazo padrão do catálogo,
+          usado automaticamente quando uma OS com este item for finalizada */}
+      <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-[14px] font-medium text-slate-800">Tem garantia?</p>
+            <p className="text-[12.5px] text-slate-500 mt-0.5">Vira o prazo padrão deste item no catálogo.</p>
+          </div>
+          <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
+            {[[false, "Não"], [true, "Sim"]].map(([v, label]) => (
+              <button key={label} type="button" onClick={() => setF((st) => ({ ...st, temGarantia: v, prazo: v ? (st.prazo || (serv ? 90 : 12)) : 0 }))}
+                aria-pressed={f.temGarantia === v}
+                className={cx("px-5 py-2 rounded-lg text-[14px] font-medium transition-colors", f.temGarantia === v ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {f.temGarantia && (
+          <div className="flex flex-wrap gap-2 items-end">
+            {atalhos.map((v) => (
+              <button key={v} type="button" onClick={() => set("prazo", v)} aria-pressed={num(f.prazo) === v}
+                className={cx("px-3.5 py-2.5 rounded-xl text-[13px] font-medium transition-colors", ring,
+                  num(f.prazo) === v ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+                {v} {unidadePrazo}
+              </button>
+            ))}
+            <div className="w-[150px]">
+              <Field label="Personalizado">
+                <Input type="number" min="1" value={f.prazo} aria-label={`Prazo em ${unidadePrazo}`}
+                  onChange={(e) => set("prazo", Math.max(1, num(e.target.value)))} />
+              </Field>
+            </div>
+          </div>
+        )}
+      </div>
+      <Field label="Descrição" hint="Opcional.">
+        <CampoVoz rows={2} valor={f.descricao} onChange={(v) => set("descricao", v)} placeholder="O que está incluso" />
+      </Field>
+      <p className="text-[12px] text-slate-400 leading-relaxed">
+        Retorno sugerido, estoque e demais campos continuam no cadastro completo em "Serviços e produtos".
+      </p>
+    </Modal>
   );
 }
 
@@ -2669,7 +3640,7 @@ function FormItemLivre({ onAdicionar, rotulo = "Adicionar ao orçamento" }) {
             {UNIDADES.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
           </Select>
         </Field>
-        <Field label="Preço unitário"><Input type="number" min="0" step="0.01" value={f.preco} onChange={(e) => set("preco", num(e.target.value))} /></Field>
+        <Field label="Preço unitário"><InputMoeda valor={f.preco} onChange={(v) => set("preco", v)} aria-label="Preço" /></Field>
         <div className="text-right pb-3">
           <p className="text-[12px] text-slate-400">Total</p>
           <p className="text-[19px] font-semibold text-slate-900 tabular-nums">{brl(total)}</p>
@@ -2686,10 +3657,11 @@ function FormItemLivre({ onAdicionar, rotulo = "Adicionar ao orçamento" }) {
 
 /* ====================================================== Ordens de serviço */
 function OrdensServico(p) {
-  const { ordens, nomeCliente, osAberta, setOsAberta, clientes, salvarOS, empresa, orcamentos, lancamentos, abrirOS, permitido } = p;
+  const { ordens, nomeCliente, osAberta, setOsAberta, clientes, salvarOS, empresa, orcamentos, lancamentos, abrirOS, permitido, equipe, usuarioAtual } = p;
   const soMinhas = !permitido("todasOS");
   const [filtro, setFiltro] = useState("dia");
   const [criando, setCriando] = useState(false);
+  const agora = useAgora(ordens.some((o) => o.status === "andamento"));
 
   if (osAberta) {
     const os = ordens.find((o) => o.id === osAberta);
@@ -2697,9 +3669,11 @@ function OrdensServico(p) {
   }
 
   const viva = (o) => o.status !== "concluida" && o.status !== "cancelada";
-  const hoje = ordens.filter((o) => viva(o) && o.data === HOJE).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const proximos = ordens.filter((o) => viva(o) && o.data > HOJE).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
-  const atrasadas = ordens.filter((o) => viva(o) && o.data && o.data < HOJE);
+  const hojeBase = ordens.filter((o) => viva(o) && o.data === hojeISO());
+  /* técnico: em andamento primeiro, depois horário marcado, depois as demais atribuídas */
+  const hoje = soMinhas ? sortTechnicianDay(hojeBase) : hojeBase.sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const proximos = ordens.filter((o) => viva(o) && o.data > hojeISO()).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
+  const atrasadas = ordens.filter((o) => viva(o) && o.data && o.data < hojeISO());
   const semData = ordens.filter((o) => viva(o) && !o.data);
   const concluidas = ordens.filter((o) => o.status === "concluida").sort((a, b) => (b.data || "").localeCompare(a.data || ""));
 
@@ -2715,7 +3689,9 @@ function OrdensServico(p) {
               {os.localServico && <span className="text-[13px] text-slate-400">· {os.localServico}</span>}
             </div>
             <p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
-            <p className="text-[12px] text-slate-400 mt-1">{os.data ? `${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : "Sem agendamento"}{empresa.temEquipe ? ` · ${os.responsavel}` : ""}</p>
+            <p className="text-[12px] text-slate-400 mt-1">{os.data ? `${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : "Sem agendamento"}{empresa.temEquipe ? ` · ${nomeResponsavelOS(os, equipe, usuarioAtual)}` : ""}</p>
+            <TimerAtendimento os={os} agora={agora} className="mt-1" />
+            <AvisoAtendimentoLongo os={os} agora={agora} className="mt-2" />
             <div className="mt-2.5">
               <Trilha etapas={[
                 { label: orc ? orc.numero : "OS direta", feito: true },
@@ -2746,7 +3722,7 @@ function OrdensServico(p) {
 
   return (
     <>
-      <PageHead title={soMinhas ? "Minhas ordens de serviço" : "Ordens de serviço"} sub={`${diaSemana(HOJE)}, ${dataBR(HOJE)}`}
+      <PageHead title={soMinhas ? "Minhas ordens de serviço" : "Ordens de serviço"} sub={`${diaSemana(hojeISO())}, ${dataBR(hojeISO())}`}
         action={permitido("todasOS") ? <Btn icon={Plus} onClick={() => setCriando(true)}>Nova OS</Btn> : null} />
       <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
         opcoes={[{ id: "dia", label: "Meu dia" }, { id: "abertas", label: "Todas em aberto" }, { id: "concluidas", label: "Concluídas" }]} />
@@ -2769,44 +3745,87 @@ function OrdensServico(p) {
 
 /* Abertura de OS pensada para o campo: descrever o problema já basta.
    O catálogo é atalho, não obrigação. */
-function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual }) {
+function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual, dataInicial = "", real = false }) {
   const [novoCliente, setNovoCliente] = useState(false);
   const [f, setF] = useState({
-    clienteId: "", descricaoLivre: "", local: "", localServico: "",
-    itens: [], data: "", hora: "09:00", responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null, obs: "",
+    clienteId: "", orcamentoId: "", descricaoLivre: "", local: "", localServico: "", localId: "",
+    itens: [], data: dataInicial || "", hora: "09:00", responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null, obs: "",
   });
   const [catalogo, setCatalogo] = useState(false);
   const [abaCat, setAbaCat] = useState("servicos");
+  const [erroCriacao, setErroCriacao] = useState("");
+  const requestIdRef = useRef(null);
+  const { dirty } = useFormDirty(f);
+  const rascunho = useFormDraft({ formType: "os-nova", enabled: real, value: { ...f, requestId: requestIdRef.current }, dirty,
+    onRestore: ({ requestId, ...dados }) => { setF((s) => ({ ...s, ...dados })); if (requestId) requestIdRef.current = requestId; } });
+  const descartarRascunho = () => {
+    const inicial = rascunho.discardDraft();
+    if (!inicial) return;
+    const { requestId, ...vazio } = inicial;
+    setF(vazio);
+    requestIdRef.current = requestId || null;
+  };
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const escolherCliente = (id) => {
     const cl = clientes.find((x) => x.id === id);
-    setF((s) => ({ ...s, clienteId: id, local: cl?.endereco || s.local }));
+    // Local cadastrado pertence ao cliente: trocar o cliente sempre limpa o vínculo.
+    setF((s) => ({ ...s, clienteId: id, localId: id === s.clienteId ? s.localId : "", orcamentoId: orcamentos.some((o) => o.id === s.orcamentoId && o.clienteId === id) ? s.orcamentoId : "", local: cl?.endereco || s.local }));
   };
-  const pronto = f.clienteId && (f.descricaoLivre.trim() || f.itens.length > 0);
+  const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];
+  const orcamentoSelecionado = orcamentosCliente.find((o) => o.id === f.orcamentoId);
+  const pronto = f.clienteId && (orcamentoSelecionado?.osId || f.descricaoLivre.trim() || f.itens.length > 0);
 
-  const criar = () => {
-    salvarOS({
-      ...f, status: f.data ? "agendada" : "aguardando", checklist: [],
-      responsavel: f.responsavel || empresa.responsavel,
-    });
-    onClose();
+  const [criando, setCriando] = useState(false);
+  const criar = async () => {
+    if (criando) return;
+    setCriando(true);
+    setErroCriacao("");
+    try {
+      if (!requestIdRef.current) {
+        if (!globalThis.crypto?.randomUUID) throw new Error("Seu navegador precisa ser atualizado para salvar esta OS com segurança.");
+        requestIdRef.current = globalThis.crypto.randomUUID();
+      }
+      const salvoId = await salvarOS({
+        ...f, requestId: requestIdRef.current, status: f.data ? "agendada" : "aguardando", checklist: [],
+        responsavel: f.responsavel || empresa.responsavel,
+      }, { propagarErro: true });
+      if (!salvoId) {
+        setErroCriacao("Não foi possível salvar a ordem. Os dados preenchidos foram mantidos; tente novamente.");
+        return;
+      }
+      onClose();
+    } catch (e) {
+      setErroCriacao(mensagemErro(e) || "Não foi possível salvar a ordem. Tente novamente.");
+    } finally {
+      setCriando(false);
+    }
   };
 
   return (
     <>
-      <Modal open onClose={onClose} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
-        footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-          <Btn disabled={!pronto} onClick={criar}>Abrir ordem de serviço</Btn></>}>
+      <Modal open onClose={onClose} dirty={dirty} busy={criando} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
+        footer={(requestClose) => <><Btn variant="ghost" disabled={criando} onClick={requestClose}>Cancelar</Btn>
+          <Btn disabled={!pronto || criando} onClick={criar}>{criando ? "Criando…" : "Abrir ordem de serviço"}</Btn></>}>
 
+        <DraftRestoredNotice savedAt={rascunho.restoredAt} onDiscard={descartarRascunho} detail="Itens do catálogo não ficam no rascunho; adicione-os de novo se precisar." />
+        {erroCriacao && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">{erroCriacao}</div>}
         <Field label="Cliente">
           <div className="flex gap-2 flex-wrap sm:flex-nowrap">
             <Select value={f.clienteId} onChange={(e) => escolherCliente(e.target.value)} className="flex-1">
               <option value="">Selecione um cliente</option>
-              {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+              {clientes.filter((c) => !c.excluidoEm).map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
             </Select>
             <Btn variant="soft" icon={Plus} onClick={() => setNovoCliente(true)} className="shrink-0">Cadastrar novo cliente</Btn>
           </div>
         </Field>
+
+        {f.clienteId && <Field label="Orçamento vinculado (opcional)">
+          <Select value={f.orcamentoId || ""} onChange={(e) => set("orcamentoId", e.target.value)}>
+            <option value="">Sem orçamento vinculado</option>
+            {orcamentosCliente.map((o) => <option key={o.id} value={o.id}>{o.numero}{o.osId ? " · OS já criada" : ""}</option>)}
+          </Select>
+          <p className="mt-1.5 text-[12px] text-slate-500">Mostra somente orçamentos deste cliente. Se já houver uma OS vinculada, ela será aberta em vez de criar outra.</p>
+        </Field>}
 
         <Field label="O que precisa ser feito?" hint="Fale ou escreva com suas palavras. Isso já é suficiente para abrir a ordem.">
           <CampoVoz rows={4} valor={f.descricaoLivre} onChange={(v) => set("descricaoLivre", v)}
@@ -2817,6 +3836,11 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
           <Field label="Endereço do atendimento"><Input value={f.local} onChange={(e) => set("local", e.target.value)} placeholder="Rua, número, bairro" /></Field>
           <Field label="Local do serviço" hint="Ex.: Portaria, Apto 304, Loja 4."><Input value={f.localServico} onChange={(e) => set("localServico", e.target.value)} /></Field>
         </div>
+
+        {real && f.clienteId && (
+          <QuoteClientLocationField clientId={f.clienteId} value={f.localId || ""}
+            onSelect={(loc) => setF((s) => ({ ...s, localId: loc?.id || "", localServico: loc ? (s.localServico || loc.name) : s.localServico, local: loc?.address || s.local }))} />
+        )}
 
         <div>
           <button onClick={() => setCatalogo((v) => !v)} className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
@@ -2883,7 +3907,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
       </Modal>
 
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={(novo) => { const id = salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); return id; }} />
     </>
   );
 }
@@ -2891,7 +3915,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, empresa, salvarOS, salv
 function OSDetalhe(p) {
   const { os, cliente, nomeCliente, setOsAberta, mudarStatusOS, setOrdens, servicos, produtos, orcamentos, setTela, setOrcamentoAberto,
     lancamentos, ordens, agendarOS, desagendarOS, empresa, pedirConfirmacao, garantias, finalizarOS, abrirGarantia, abrirOS,
-    permitido, equipe, usuarioAtual, real, empresaId, aviso, papel, resolverPrecificacao } = p;
+    permitido, equipe, usuarioAtual, real, empresaId, aviso, papel, resolverPrecificacao, excluirRegistro } = p;
   const verValores = permitido("verValores");
   const [precosPendentes, setPrecosPendentes] = useState({});
   const [liberandoCobranca, setLiberandoCobranca] = useState(false);
@@ -2905,6 +3929,8 @@ function OSDetalhe(p) {
   const [txtCheck, setTxtCheck] = useState("");
   const [agendando, setAgendando] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
+  const [comprovanteAberto, setComprovanteAberto] = useState(false);
+  const agora = useAgora(os.status === "andamento");
   const orc = orcamentos.find((o) => o.id === os.orcamentoId);
   const cobranca = lancamentos.find((l) => l.origemTipo === "os" && l.origemId === os.id);
   const gar = garantias.filter((g) => g.osId === os.id);
@@ -2917,7 +3943,19 @@ function OSDetalhe(p) {
     setOrdens((l) => l.map((x) => (x.id === os.id ? { ...x, ...patch } : x)));
     if (real) {
       clearTimeout(persistTimer.current);
-      persistTimer.current = setTimeout(() => { const tarefa = patch.fotos ? persistirFotosOSDB(os.id, patch.fotos, empresaId, usuarioAtual?.id) : persistirEdicaoOSDB(next, patch, empresaId, usuarioAtual?.id, papel); tarefa.then((r) => { if (r?.checklist) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, checklist: r.checklist } : x)); if (r?.fotos) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, fotos: r.fotos } : x)); }).catch((e) => aviso(mensagemErro(e))); }, 500);
+      persistTimer.current = setTimeout(async () => {
+        try {
+          const { fotos: fotosPatch, ...patchSemFotos } = patch;
+          const tarefas = [];
+          if (fotosPatch) tarefas.push(persistirFotosOSDB(os.id, fotosPatch, empresaId, usuarioAtual?.id));
+          if (Object.keys(patchSemFotos).length) tarefas.push(persistirEdicaoOSDB(next, patchSemFotos, empresaId, usuarioAtual?.id, papel));
+          const resultados = await Promise.all(tarefas);
+          resultados.forEach((r) => {
+            if (r?.checklist) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, checklist: r.checklist } : x));
+            if (r?.fotos) setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, fotos: r.fotos } : x));
+          });
+        } catch (e) { aviso(mensagemErro(e)); }
+      }, 500);
     }
   };
   const toggleCheck = (id) => up({ checklist: os.checklist.map((k) => (k.id === id ? { ...k, feito: !k.feito } : k)) });
@@ -2927,35 +3965,59 @@ function OSDetalhe(p) {
   const cobrado = totalOS(os);
   const margem = cobrado > 0 ? Math.round(((cobrado - custoTotal) / cobrado) * 100) : 0;
 
+  const podeAdministrarOS = permitido("todasOS");
   const acoes = [];
-  if (os.status === "aguardando") acoes.push({ label: "Agendar", icon: CalendarClock, fn: () => setAgendando(true), principal: true });
+  if (podeAdministrarOS && os.status === "aguardando") acoes.push({ label: "Agendar", icon: CalendarClock, fn: () => setAgendando(true), principal: true });
   if (os.status === "agendada") {
     acoes.push({ label: "Iniciar atendimento", fn: () => mudarStatusOS(os, "andamento"), principal: true });
-    acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
+    if (podeAdministrarOS) acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
   }
   if (os.status === "andamento") acoes.push({ label: "Finalizar atendimento", icon: Check, fn: () => setFinalizando(true), principal: true });
+  // BLOCO 3 · Comprovante de Serviço (documento não fiscal): proprietário, OS concluída e banco real.
+  // A emissão também é recusada pelo backend para técnico.
+  if (verValores && real && os.status === "concluida") acoes.push({ label: "Comprovante de Serviço", icon: Receipt, fn: () => setComprovanteAberto(true), principal: true });
+  // BLOCO 4 · histórico do local cadastrado: somente proprietário (o banco também recusa técnico).
+  const historicoLocalVisivel = Boolean(real && os.localId && verValores);
+  const acaoPrincipal = acoes.find((acao) => acao.principal);
+  const acoesSecundarias = acoes.filter((acao) => !acao.principal);
 
   return (
-    <>
+    <div className="min-w-0 max-w-full [overflow-wrap:anywhere] [&_h2]:min-w-0 [&_section>div:first-child]:flex-wrap">
       <button onClick={() => setOsAberta(null)} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
         <ArrowLeft className="w-4 h-4" /> Ordens de serviço
       </button>
 
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{os.numero}</h1>
           <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
+          <TimerAtendimento os={os} agora={agora} />
         </div>
-        <div className="flex flex-wrap gap-2">
-          {acoes.map((a) => <Btn key={a.label} size="sm" icon={a.icon} variant={a.principal ? "primary" : "soft"} onClick={a.fn}>{a.label}</Btn>)}
-          {os.status !== "concluida" && os.status !== "cancelada" && (
-            <Btn size="sm" variant="danger" onClick={() => pedirConfirmacao({
-              titulo: `Cancelar a ${os.numero}?`, texto: "A ordem sai da agenda e da lista de trabalhos em aberto. O histórico continua disponível.",
-              confirmar: "Cancelar ordem", acao: () => mudarStatusOS(os, "cancelada"),
-            })}>Cancelar OS</Btn>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {acaoPrincipal && <Btn icon={acaoPrincipal.icon} onClick={acaoPrincipal.fn}>{acaoPrincipal.label}</Btn>}
+          {(acoesSecundarias.length > 0 || papel === "proprietario" || (podeAdministrarOS && os.status !== "concluida" && os.status !== "cancelada")) && (
+            <details className="relative group" data-no-edge-swipe>
+              <summary className={cx("list-none min-h-11 cursor-pointer inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-medium bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50", ring)}>Mais<ChevronDown className="w-4 h-4" /></summary>
+              <div className="absolute right-0 z-20 mt-2 w-56 rounded-2xl bg-white p-2 shadow-xl ring-1 ring-slate-200">
+                {acoesSecundarias.map((acao) => <button key={acao.label} type="button" onClick={acao.fn} className={cx("w-full min-h-11 rounded-xl px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50", ring)}>{acao.label}</button>)}
+                {papel === "proprietario" && <button type="button" onClick={() => excluirRegistro("os", os.id, os.numero, () => setOsAberta(null))} className={cx("w-full min-h-11 rounded-xl px-3 py-2.5 text-left text-sm text-rose-700 hover:bg-rose-50", ring)}>Excluir OS</button>}
+                {podeAdministrarOS && os.status !== "concluida" && os.status !== "cancelada" && <button type="button" onClick={() => pedirConfirmacao({ titulo: `Cancelar a ${os.numero}?`, texto: "A ordem sai da agenda e da lista de trabalhos em aberto. O histórico continua disponível.", confirmar: "Cancelar ordem", acao: () => mudarStatusOS(os, "cancelada") })} className={cx("w-full min-h-11 rounded-xl px-3 py-2.5 text-left text-sm text-rose-700 hover:bg-rose-50", ring)}>Cancelar OS</button>}
+              </div>
+            </details>
           )}
         </div>
       </div>
+
+      <AvisoAtendimentoLongo os={os} agora={agora} className="mb-5" />
+
+      <Panel className="p-4 sm:p-5 mb-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Cliente</p><p className="mt-1 font-medium text-slate-900 truncate">{c?.fantasia || c?.nome || nomeCliente(os.clienteId)}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Data e horário</p><p className="mt-1 text-sm text-slate-700">{os.data ? `${dataBR(os.data)}${os.hora ? ` · ${os.hora}` : ""}` : "Sem agendamento"}</p></div>
+          <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Endereço</p><div className="mt-1"><Endereco valor={os.local} local={os.localServico} className="min-w-0 max-w-full [&>span]:min-w-0" /></div></div>
+          <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Serviço</p><p className="mt-1 text-sm text-slate-700 line-clamp-2">{resumoOS(os)}</p></div>
+        </div>
+      </Panel>
 
       <Panel className="px-5 py-4 mb-6">
         <Trilha etapas={[
@@ -2983,23 +4045,23 @@ function OSDetalhe(p) {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
-        <div className="lg:col-span-2 space-y-7">
+      <div className="grid min-w-0 max-w-full lg:grid-cols-3 gap-6 lg:gap-8 items-start">
+        <div className="min-w-0 max-w-full lg:col-span-2 space-y-7">
           <section>
-            <Rotulo acao={os.data ? (
+            <Rotulo acao={podeAdministrarOS && os.data ? (
               <button onClick={() => pedirConfirmacao({ titulo: "Remover agendamento?", texto: "A ordem volta para a lista de trabalhos sem data.", confirmar: "Remover", acao: () => desagendarOS(os.id) })}
-                className="text-[13px] font-medium text-slate-500 hover:text-rose-700">Remover agendamento</button>) : null}>Agendamento e local</Rotulo>
-            <Panel className="p-5 space-y-5">
+                className="min-h-11 text-left text-[13px] font-medium text-slate-500 hover:text-rose-700">Remover agendamento</button>) : null}>Agendamento e local</Rotulo>
+            <Panel className="min-w-0 p-4 sm:p-5 space-y-5">
               {os.data ? (
                 <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="text-center px-4 py-2 rounded-xl bg-slate-900 text-white">
+                  <div className="flex min-w-0 max-w-full items-center gap-3">
+                    <div className="shrink-0 text-center px-4 py-2 rounded-xl bg-slate-900 text-white">
                       <p className="text-[11px] uppercase tracking-wide text-slate-300">{diaCurto(os.data)}</p>
                       <p className="text-xl font-semibold leading-tight tabular-nums">{os.data.slice(8)}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-[15px] font-medium text-slate-900">{diaSemana(os.data)}, {dataBR(os.data)}{os.hora ? ` às ${os.hora}` : ""}</p>
-                      {empresa.temEquipe && <p className="text-[13px] text-slate-500">Responsável: {os.responsavel}</p>}
+                      {empresa.temEquipe && <p className="text-[13px] text-slate-500">Responsável: {nomeResponsavelOS(os, equipe, usuarioAtual)}</p>}
                     </div>
                   </div>
                   <Btn size="sm" variant="soft" icon={CalendarClock} onClick={() => setAgendando(true)}>Alterar</Btn>
@@ -3014,12 +4076,19 @@ function OSDetalhe(p) {
                 <Field label="Endereço"><Input value={os.local} onChange={(e) => up({ local: e.target.value })} /></Field>
                 <Field label="Local do serviço" hint="Ex.: Apto 304, Bloco B, Portaria, Loja 4."><Input value={os.localServico || ""} onChange={(e) => up({ localServico: e.target.value })} /></Field>
               </div>
-              <a href={mapsUrl([os.localServico, os.local].filter(Boolean).join(", "))} target="_blank" rel="noreferrer"
-                className={cx("flex items-center justify-center gap-2 w-full rounded-xl bg-slate-900 text-white py-3 text-[14px] font-medium hover:bg-slate-800", ring)}>
-                <Navigation className="w-[18px] h-[18px]" />Abrir rota até o cliente
-              </a>
+              <RouteButton destino={resolverDestinoRota({ endereco: os.local, localServico: os.localServico, cliente: c })} />
             </Panel>
           </section>
+
+          {historicoLocalVisivel && (
+            <section>
+              <Rotulo>Atendimentos anteriores neste local</Rotulo>
+              <Panel className="overflow-hidden">
+                <LocationHistoryPanel clientId={os.clienteId} locationId={os.localId} currentWorkOrderId={os.id}
+                  owner={verValores} onAbrirOS={abrirOS} />
+              </Panel>
+            </section>
+          )}
 
           <section>
             <Rotulo acao={permitido("catalogo")
@@ -3030,44 +4099,44 @@ function OSDetalhe(p) {
                 <>
                   <div className="divide-y divide-slate-100">
                     {os.itens.map((i) => (
-                      <div key={i.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
+                      <div key={i.id} className="flex min-w-0 flex-col items-stretch gap-2 px-4 sm:px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
-                          <p className="text-[15px] text-slate-800 truncate">{i.nome}</p>
+                          <p className="text-[15px] text-slate-800 whitespace-normal break-words">{i.nome}</p>
                           <p className="text-[12px] text-slate-400">
                             {i.qtd} {unidadeLabel(i.unidade)}{verValores ? ` × ${brl(i.preco)}` : ""}{i.tipo === "produto" ? " · produto" : ""}
                           </p>
                         </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          {verValores && <span className="font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</span>}
+                        <div className="flex min-w-0 items-center justify-between gap-3 sm:shrink-0 sm:justify-end">
+                          {verValores && <span className="max-w-full font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</span>}
                           {os.status !== "concluida" && (
                             <button onClick={() => up({ itens: os.itens.filter((x) => x.id !== i.id) })} aria-label={`Remover ${i.nome}`}
-                              className={cx("p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50", ring)}><Trash2 className="w-4 h-4" /></button>
+                              className={cx("min-h-11 min-w-11 shrink-0 inline-flex items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50", ring)}><Trash2 className="w-4 h-4" /></button>
                           )}
                         </div>
                       </div>
                     ))}
                     {(os.adicionais || []).map((a) => (
-                      <div key={a.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
+                      <div key={a.id} className="flex min-w-0 flex-col items-stretch gap-2 px-4 sm:px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
-                          <p className="text-[15px] text-slate-800 truncate">{a.nome}</p>
+                          <p className="text-[15px] text-slate-800 whitespace-normal break-words">{a.nome}</p>
                           <p className="text-[12px] text-amber-700">
                             adicional durante a execução · {a.qtd} {unidadeLabel(a.unidade)}{verValores ? ` × ${brl(a.preco)}` : ""}
                             {!verValores && a.aguardandoValor ? " · valor a definir pelo proprietário" : ""}
                           </p>
                         </div>
-                        {verValores && <span className="font-semibold text-slate-900 tabular-nums">{brl(a.qtd * a.preco)}</span>}
+                        {verValores && <span className="max-w-full font-semibold text-slate-900 tabular-nums">{brl(a.qtd * a.preco)}</span>}
                       </div>
                     ))}
                     {os.valorAdicional > 0 && (
-                      <div className="flex items-center justify-between gap-3 px-5 py-3.5">
+                      <div className="flex min-w-0 flex-col items-stretch gap-2 px-4 sm:px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                         <div><p className="text-[15px] text-slate-800">{os.descricaoAdicional || "Valor adicional"}</p>
                           <p className="text-[12px] text-amber-700">adicional durante a execução</p></div>
-                        <span className="font-semibold text-slate-900 tabular-nums">{brl(os.valorAdicional)}</span>
+                        <span className="max-w-full font-semibold text-slate-900 tabular-nums">{brl(os.valorAdicional)}</span>
                       </div>
                     )}
                   </div>
                   {verValores && (
-                    <div className="flex justify-between items-baseline px-5 py-4 border-t border-slate-100 bg-slate-50/60">
+                    <div className="flex flex-wrap justify-between items-baseline gap-x-4 gap-y-2 px-4 sm:px-5 py-4 border-t border-slate-100 bg-slate-50/60">
                       <span className="text-[14px] font-medium text-slate-600">Total do atendimento</span>
                       <span className="text-xl font-semibold text-slate-900 tabular-nums">{brl(cobrado)}</span>
                     </div>
@@ -3088,7 +4157,7 @@ function OSDetalhe(p) {
                   {(os.itens || []).filter((i) => i.aguardandoValor).map((i) => (
                     <div key={i.id} className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 rounded-xl bg-white/80 px-3.5 py-3 ring-1 ring-amber-200/70">
                       <div className="min-w-0 flex-1">
-                        <p className="text-[14px] font-medium text-slate-800 truncate">{i.nome}</p>
+                        <p className="text-[14px] font-medium text-slate-800 whitespace-normal break-words">{i.nome}</p>
                         <p className="text-[12px] text-slate-500">{i.qtd} {unidadeLabel(i.unidade)} · informado pelo técnico</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -3165,6 +4234,8 @@ function OSDetalhe(p) {
             </section>
           )}
 
+          <BaseTecnicaPainel os={os} real={real} recarregar={finalizando} />
+
           <section>
             <Rotulo acao={os.relato ? <span className="text-[12px] text-slate-400">salvo automaticamente</span> : null}>O que foi feito</Rotulo>
             <Panel className="p-5">
@@ -3180,18 +4251,19 @@ function OSDetalhe(p) {
 
           <section>
             <Rotulo>Checklist do atendimento</Rotulo>
-            <Panel className="p-5">
+            <Panel className="p-4 sm:p-5">
+              {papel === "proprietario" && <ChecklistTemplatePicker companyId={empresaId} workOrderId={os.id} onApplied={async()=>{const checklist=await carregarChecklistOSV2DB(os.id);setOrdens(l=>l.map(x=>x.id===os.id?{...x,checklist:checklist.map(c=>({id:c.id,texto:c.text,feito:Boolean(c.done),obrigatorio:Boolean(c.required),templateId:c.source_template_id||null}))}:x));}} />}
               {os.checklist.length > 0 && (
                 <div className="space-y-0.5 mb-4">
                   {os.checklist.map((k) => (
-                    <button key={k.id} onClick={() => toggleCheck(k.id)} aria-pressed={k.feito} className={cx("w-full flex items-center gap-3 py-2.5 text-left group", ring)}>
+                    <button key={k.id} onClick={() => toggleCheck(k.id)} aria-pressed={k.feito} className={cx("w-full min-h-11 flex items-center gap-3 py-2.5 text-left group", ring)}>
                       {k.feito ? <CheckCircle2 className="w-5 h-5 text-teal-700 shrink-0" /> : <Circle className="w-5 h-5 text-slate-300 shrink-0 group-hover:text-slate-400" />}
-                      <span className={cx("text-[14px]", k.feito ? "text-slate-400 line-through" : "text-slate-700")}>{k.texto}</span>
+                      <span className={cx("min-w-0 flex-1 break-words text-[14px]", k.feito ? "text-slate-400 line-through" : "text-slate-700")}>{k.texto}</span>{k.obrigatorio&&<span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800">Obrigatório</span>}
                     </button>
                   ))}
                 </div>
               )}
-              <div className="flex gap-2">
+              <div className="flex min-w-0 gap-2 [&>input]:min-w-0">
                 <Input value={txtCheck} onChange={(e) => setTxtCheck(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCheck()} placeholder="Adicionar item ao checklist" aria-label="Novo item do checklist" />
                 <Btn variant="soft" icon={Plus} onClick={addCheck} title="Adicionar item" />
               </div>
@@ -3213,18 +4285,18 @@ function OSDetalhe(p) {
           )}
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 max-w-full space-y-6">
           <section>
             <Rotulo>Cliente</Rotulo>
             <Panel className="p-5">
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
                 <Avatar nome={c?.nome} tipo={c?.tipo} />
                 <div className="min-w-0">
                   <p className="font-medium text-slate-900 truncate">{nomeCliente(os.clienteId)}</p>
                   <p className="text-[13px] text-slate-500">{c?.telefone}</p>
                 </div>
               </div>
-              <div className="mt-3 text-[13px]"><Endereco valor={os.local} local={os.localServico} /></div>
+              <div className="mt-3 text-[13px]"><Endereco valor={os.local} local={os.localServico} className="min-w-0 max-w-full [&>span]:min-w-0" /></div>
               {c?.whatsapp && (
                 <Btn variant="soft" size="sm" icon={Share2} className="w-full mt-4"
                   onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp)}?text=${encodeURIComponent(`Olá! Confirmando nosso atendimento${os.data ? ` dia ${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : ""}.`)}`, "_blank")}>
@@ -3248,10 +4320,10 @@ function OSDetalhe(p) {
             <section>
               <Rotulo>Resultado deste serviço</Rotulo>
               <Panel className="p-5 space-y-3 text-[14px]">
-                <div className="flex justify-between"><span className="text-slate-500">Cobrado</span><span className="font-medium tabular-nums">{brl(cobrado)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Custo de itens</span><span className="tabular-nums">− {brl(somaCustos(os.itens))}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Outros custos</span><span className="tabular-nums">− {brl(os.custosExtras || 0)}</span></div>
-                <div className="flex justify-between pt-3 border-t border-slate-100">
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1"><span className="text-slate-500">Cobrado</span><span className="font-medium tabular-nums">{brl(cobrado)}</span></div>
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1"><span className="text-slate-500">Custo de itens</span><span className="tabular-nums">− {brl(somaCustos(os.itens))}</span></div>
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1"><span className="text-slate-500">Outros custos</span><span className="tabular-nums">− {brl(os.custosExtras || 0)}</span></div>
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 pt-3 border-t border-slate-100">
                   <span className="font-medium text-slate-700">Resultado bruto</span>
                   <span className={cx("font-semibold tabular-nums", cobrado - custoTotal >= 0 ? "text-emerald-700" : "text-rose-700")}>{brl(cobrado - custoTotal)}</span>
                 </div>
@@ -3269,7 +4341,7 @@ function OSDetalhe(p) {
                   return (
                     <button key={g.id} onClick={() => abrirGarantia(g.id)} className={cx("w-full flex items-start justify-between gap-3 text-left", ring)}>
                       <div className="min-w-0">
-                        <p className="text-[13.5px] text-slate-800 truncate">{g.descricao}</p>
+                        <p className="text-[13.5px] text-slate-800 whitespace-normal break-words">{g.descricao}</p>
                         <p className="text-[12px] text-slate-400">{g.tipo === "servico" ? "Serviço" : "Fabricante"}{g.serie ? ` · série ${g.serie}` : ""} · {st.detalhe}</p>
                       </div>
                       <span className="text-[12px] text-slate-500 shrink-0 tabular-nums">até {dataBR(g.ate)}</span>
@@ -3296,7 +4368,13 @@ function OSDetalhe(p) {
         </div>
       </div>
 
-      <AgendarModal os={agendando ? os : null} onClose={() => setAgendando(false)} onSalvar={agendarOS} empresa={empresa} diaSugerido={HOJE} equipe={equipe} />
+      <AgendarModal os={agendando ? os : null} onClose={() => setAgendando(false)} onSalvar={agendarOS} empresa={empresa} diaSugerido={hojeISO()} equipe={equipe} />
+
+      {comprovanteAberto && (
+        <Modal open onClose={() => setComprovanteAberto(false)} title={`Comprovante de Serviço · ${os.numero}`} sub="Documento não fiscal emitido pelo proprietário">
+          <ServiceReceiptPanel workOrderId={os.id} telefoneCliente={c?.whatsapp || c?.telefone || ""} onAviso={aviso} />
+        </Modal>
+      )}
 
       {novoItem && (
         <Modal open onClose={() => setNovoItem(null)} title="Adicionar ao atendimento" sub="Do seu catálogo" wide>
@@ -3306,7 +4384,7 @@ function OSDetalhe(p) {
               <button key={x.id} onClick={() => { up({ itens: [...os.itens, novoItem === "servicos" ? itemServico(x, 1) : itemProduto(x, 1)] }); setNovoItem(null); }}
                 className={cx("w-full flex items-center justify-between gap-4 rounded-xl ring-1 ring-slate-200 px-4 py-3.5 text-left hover:ring-teal-500", ring)}>
                 <div><p className="font-medium text-slate-800">{x.nome}</p><p className="text-[12px] text-slate-400">{x.categoria || [x.marca, x.modelo].filter(Boolean).join(" ")}</p></div>
-                <div className="text-right"><p className="font-semibold text-slate-900 tabular-nums">{brl(x.preco)}</p><p className="text-[12px] text-slate-400">por {unidadeLabel(x.unidade)}</p></div>
+                <div className="text-right"><p className="max-w-full font-semibold text-slate-900 tabular-nums">{brl(x.preco)}</p><p className="text-[12px] text-slate-400">por {unidadeLabel(x.unidade)}</p></div>
               </button>
             ))}
           </div>
@@ -3314,8 +4392,23 @@ function OSDetalhe(p) {
       )}
 
       {finalizando && <FinalizarAtendimento os={os} onClose={() => setFinalizando(false)} servicos={servicos} produtos={produtos}
-        onSalvarParcial={(patch) => up(patch)} onFinalizar={(extras) => { finalizarOS(os.id, extras); setFinalizando(false); }} jaConcluida={os.status === "concluida"} verValores={verValores} />}
-    </>
+        onSalvarParcial={(patch) => up(patch)} onFinalizar={async(extras) => {
+          if(extras.precisaRetornar){
+            try{
+              up({relato:extras.relato,fotos:extras.fotos,pendencia:extras.pendencia});
+              if(real) await marcarRetornoOSV2DB({workOrderId:os.id,reason:extras.retornoMotivo,materialNeeded:extras.retornoMaterial,notes:extras.retornoObs,priority:extras.retornoPrioridade,expectedReturnDate:extras.retornoPrevisao,requestId:extras.retornoRequestId});
+              setOrdens(l=>l.map(x=>x.id===os.id?{...x,precisaRetorno:true,pendencia:extras.pendencia||x.pendencia,historico:[...(x.historico||[]),{id:uid(),quando:hojeISO(),texto:`Precisa retornar · ${extras.retornoMotivo}` }]}:x));
+              setFinalizando(false);
+              return true;
+            }catch(e){aviso(mensagemErro(e)); return false;}
+          }
+          /* a conclusão só fecha o fechamento quando deu certo; se falhar, o texto continua na tela para tentar de novo */
+          const concluiu = await finalizarOS(os.id, extras);
+          if (concluiu === false) return false;
+          setFinalizando(false);
+          return true;
+        }} jaConcluida={os.status === "concluida"} verValores={verValores} real={real} />}
+    </div>
   );
 }
 
@@ -3344,8 +4437,8 @@ function BlocoRelato({ valor, onChange, placeholder, destaque = true, rows = 5 }
 }
 
 /* --------------------------------------------------- finalizar atendimento */
-function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produtos, jaConcluida, verValores = true }) {
-  const [etapa, setEtapa] = useState(0);
+function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servicos = [], produtos, jaConcluida, verValores = true, real = false, fechamentoInicial, etapaInicial = 0 }) {
+  const [etapa, setEtapa] = useState(etapaInicial);
   const [relato, setRelato] = useState(os.relato || "");
   const [materiais, setMateriais] = useState([]);
   const [temAdicional, setTemAdicional] = useState((os.adicionais || []).length > 0 ? true : null);
@@ -3353,27 +4446,203 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
   const [custosExtras, setCustosExtras] = useState(os.custosExtras || 0);
   const [temPendencia, setTemPendencia] = useState(os.pendencia ? true : null);
   const [pendencia, setPendencia] = useState(os.pendencia || "");
+  /* resultado operacional do atendimento: finalizado, precisa voltar ou não finalizado */
+  const [resultado, setResultado] = useState("finalizado");
+  const [retornoMotivo,setRetornoMotivo]=useState('');
+  const [retornoMaterial,setRetornoMaterial]=useState('');
+  const [retornoObs,setRetornoObs]=useState('');
+  const [retornoPrioridade,setRetornoPrioridade]=useState('normal');
+  const [retornoPrevisao,setRetornoPrevisao]=useState('');
+  const [retornoRequestId]=useState(()=>novoReturnRequestId());
+  const [concluindo, setConcluindo] = useState(false);
   const [fotos, setFotos] = useState(os.fotos || []);
   const [addProduto, setAddProduto] = useState(false);
+  const [garantiaOverrides, setGarantiaOverrides] = useState({});
+  const { dirty: registroAlterado } = useFormDirty({ relato, materiais, temAdicional, adicionais, custosExtras, temPendencia, pendencia, resultado,
+    retornoMotivo, retornoMaterial, retornoObs, retornoPrioridade, retornoPrevisao, fotos, garantiaOverrides });
 
-  const anexarFotos = (ev, categoria) => {
+  /* ---- Field Execution Intelligence V1: Base Técnica (interna), relatório do cliente e confirmação de recebimento ----
+     O banco decide quem pode gravar. Sem a migration 0111 o fechamento segue exatamente como antes (fechamento = "indisponivel"). */
+  const [fechamento, setFechamento] = useState(fechamentoInicial ?? (real && !jaConcluida ? "carregando" : "indisponivel"));
+  const [base, setBase] = useState(emptyTechnicalBase);
+  const [noBanco, setNoBanco] = useState({ base: emptyTechnicalBase(), recebidoPor: "", ausente: false });
+  const [recebidoPor, setRecebidoPor] = useState("");
+  const [ausente, setAusente] = useState(false);
+  const [usoIA, setUsoIA] = useState(null);
+  const [idsBase] = useState(() => createContentRequestIds());
+  const [idsConfirmacao] = useState(() => createContentRequestIds());
+  const [idsRelatorio] = useState(() => createReportRequestIds());
+  const [iaGerada, setIaGerada] = useState(null);
+  const [relatoAntes, setRelatoAntes] = useState(null);
+  const [gerando, setGerando] = useState(false);
+  const [avisoIA, setAvisoIA] = useState("");
+  const [erroIA, setErroIA] = useState("");
+  const [erroFechamento, setErroFechamento] = useState("");
+  const confirmacao = normalizeConfirmation({ name: recebidoPor, absent: ausente });
+  const fechamentoAlterado = technicalBaseChanged(base, noBanco.base) || (recebidoPor.trim() !== noBanco.recebidoPor) || ausente !== noBanco.ausente;
+  const alterado = registroAlterado || fechamentoAlterado;
+  useFormDraft({ formType: "base-tecnica", enabled: real && !jaConcluida,
+    value: { workOrderId: os.id, cause: base.cause, solution: base.solution, difficulty: base.difficulty, learning: base.learning, relato }, dirty: alterado,
+    onRestore: (d) => {
+      if (d.workOrderId !== os.id) return;
+      setBase((atual) => normalizeTechnicalBase({ cause: d.cause ?? atual.cause, solution: d.solution ?? atual.solution, difficulty: d.difficulty ?? atual.difficulty, learning: d.learning ?? atual.learning }));
+      if (d.relato) setRelato(d.relato);
+    } });
+  useEffect(() => {
+    if (!real || jaConcluida) return undefined;
+    let vivo = true;
+    Promise.all([carregarFechamentoTecnico(os.id), carregarUsoRelatorioIADB(os.id).catch(() => null)])
+      .then(([r, uso]) => {
+        if (!vivo) return;
+        if (!r.available) { setFechamento("indisponivel"); return; }
+        const confirmada = r.confirmationSaved ? r.confirmation : { name: "", absent: false };
+        setNoBanco({ base: r.baseSaved ? r.base : emptyTechnicalBase(), recebidoPor: confirmada.name, ausente: confirmada.absent });
+        /* o que o técnico já digitou (ou o rascunho restaurado) vale mais que o que veio do banco */
+        setBase((atual) => (technicalBaseHasContent(atual) ? atual : r.base));
+        setRecebidoPor((atual) => atual || confirmada.name);
+        setAusente((atual) => atual || confirmada.absent);
+        setUsoIA(uso);
+        setFechamento("disponivel");
+      })
+      .catch(() => { if (vivo) setFechamento("disponivel"); });
+    return () => { vivo = false; };
+  }, [real, os.id, jaConcluida]);
+
+  const mudarBase = (campo, valor) => setBase((atual) => ({ ...atual, [campo]: campo === "difficulty" ? valor : String(valor).slice(0, TECHNICAL_BASE_MAX) }));
+
+  /* Grava Base Técnica e confirmação antes de qualquer passo que dependa delas (relatório com IA, conclusão, salvar sem concluir).
+     Mesmo conteúdo reaproveita o mesmo identificador (retry não duplica); falha devolve a mensagem e a tela continua como está. */
+  const salvarFechamento = async () => {
+    if (fechamento !== "disponivel") return "";
+    if (technicalBaseTooLong(base)) return `Cada campo da Base Técnica aceita até ${TECHNICAL_BASE_MAX} caracteres.`;
+    try {
+      const limpa = normalizeTechnicalBase(base);
+      let proximo = noBanco;
+      if (technicalBaseChanged(limpa, noBanco.base)) {
+        const r = await salvarBaseTecnicaDB({ workOrderId: os.id, base: limpa, requestId: idsBase.idFor(limpa) });
+        if (r.unavailable) { setFechamento("indisponivel"); return ""; }
+        proximo = { ...proximo, base: limpa };
+      }
+      if (confirmacao.ok && (confirmacao.absent !== proximo.ausente || confirmacao.name !== proximo.recebidoPor)) {
+        const r = await salvarConfirmacaoDB({ workOrderId: os.id, name: confirmacao.name, absent: confirmacao.absent, requestId: idsConfirmacao.idFor({ name: confirmacao.name, absent: confirmacao.absent }) });
+        if (r.unavailable) { setFechamento("indisponivel"); return ""; }
+        proximo = { ...proximo, recebidoPor: confirmacao.name, ausente: confirmacao.absent };
+      }
+      setNoBanco(proximo);
+      return "";
+    } catch (e) {
+      return mensagemErro(e) || "Não foi possível salvar agora. Seus dados continuam aqui; toque para tentar de novo.";
+    }
+  };
+
+  const aplicarRelatorio = (texto, origem, requestId = null) => {
+    setRelatoAntes((anterior) => (anterior === null ? relato : anterior));
+    setRelato(texto);
+    setIaGerada({ source: origem, text: texto, requestId });
+  };
+  const usarTextoPadrao = () => {
+    setAvisoIA(""); setErroIA("");
+    aplicarRelatorio(buildStandardReportText(os, { base, extraMaterials: materiais, returnNeeded: resultado === "retorno", returnReason: retornoMotivo }), "standard");
+  };
+  const descartarGerado = () => {
+    setRelato(relatoAntes ?? ""); setRelatoAntes(null); setIaGerada(null); setAvisoIA(""); setErroIA("");
+  };
+  const gerarRelatorio = async () => {
+    if (gerando) return;
+    setGerando(true); setAvisoIA(""); setErroIA("");
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroIA(falha); return; }
+      let resposta;
+      const requestId = idsRelatorio.current();
+      try {
+        resposta = await gerarRelatorioIA({ workOrderId: os.id, requestId, materiais });
+      } catch (e) {
+        /* sem resposta do servidor (rede) ou geração em andamento: mantém o identificador para o retry não gastar outra vaga */
+        if (e.kind === "network" || e.kind === "busy") { setErroIA(e.kind === "network" ? reportFallbackMessage("network") : e.message); return; }
+        idsRelatorio.settle();
+        if (e.kind === "unavailable") { aplicarRelatorio(buildStandardReportText(os, { base, extraMaterials: materiais }), "standard"); setAvisoIA("O relatório com IA ainda não está habilitado neste ambiente. Montamos um texto padrão com os fatos confirmados da OS."); return; }
+        setErroIA(e.message || "Não foi possível gerar o relatório agora.");
+        return;
+      }
+      idsRelatorio.settle();
+      if (resposta.usage) setUsoIA(resposta.usage);
+      aplicarRelatorio(resposta.text, resposta.source === "ai" ? "ai" : "standard", resposta.source === "ai" ? requestId : null);
+      if (resposta.source === "fallback") setAvisoIA(reportFallbackMessage(resposta.reason));
+    } finally { setGerando(false); }
+  };
+  /* auditoria: qual geração virou o relato salvo e se foi editada depois; nunca bloqueia a conclusão */
+  const registrarUsoIA = async () => {
+    if (iaGerada?.source !== "ai" || !iaGerada.requestId || !relato.trim()) return;
+    await marcarRelatorioIAUsadoDB({ workOrderId: os.id, requestId: iaGerada.requestId, finalText: relato });
+  };
+
+  const anexarFotos =(ev, categoria) => {
     const arquivos = Array.from(ev.target.files || []);
     setFotos((f) => [...f, ...arquivos.map((a) => ({ id: uid(), nome: a.name, categoria, url: URL.createObjectURL(a), arquivo: a }))]);
   };
 
   const itensFinais = [...os.itens, ...materiais];
+
+  /* Garantia efetiva por linha da OS. O proprietário pode mudar apenas este
+     atendimento; o catálogo continua sendo o padrão dos próximos serviços. */
+  const execucaoPrevista = os.data || hojeISO();
+  const itensGarantia = os.emGarantia ? [] : itensFinais.filter((i) =>
+    (i.tipo === "servico" || i.tipo === "produto") && i.catalogoId
+  );
+  const garantiaAtual = (i) => {
+    const local = garantiaOverrides[i.id] || {};
+    const politica = local.policy || i.garantiaPolitica || "catalog";
+    if (i.tipo === "servico") {
+      const cat = servicos.find((x) => x.id === i.catalogoId);
+      const catalogo = Math.max(0, Number(cat?.garantiaDias || 0));
+      const dias = Math.max(1, Math.min(3650, Number(local.days ?? i.garantiaDiasOverride ?? (catalogo || 90))));
+      const efetivo = politica === "disabled" ? 0 : politica === "custom" ? dias : catalogo;
+      return { politica, dias, meses: null, efetivo, unidade: "dias", origem: "Serviço", prazo: efetivo > 0 ? `${efetivo} dias` : "sem garantia", ate: efetivo > 0 ? addDays(execucaoPrevista, efetivo) : null };
+    }
+    const cat = produtos.find((x) => x.id === i.catalogoId);
+    const catalogo = Math.max(0, Number(cat?.garantiaMeses || 0));
+    const meses = Math.max(1, Math.min(120, Number(local.months ?? i.garantiaMesesOverride ?? (catalogo || 12))));
+    const efetivo = politica === "disabled" ? 0 : politica === "custom" ? meses : catalogo;
+    return { politica, dias: null, meses, efetivo, unidade: "meses", origem: "Fabricante", prazo: efetivo > 0 ? `${efetivo} meses` : "sem garantia", ate: efetivo > 0 ? addMesesISO(execucaoPrevista, efetivo) : null };
+  };
+  const ajustarGarantia = (i, patch) => {
+    const atual = garantiaAtual(i);
+    setGarantiaOverrides((prev) => ({
+      ...prev,
+      [i.id]: { policy: patch.policy ?? atual.politica, days: patch.days ?? atual.dias, months: patch.months ?? atual.meses },
+    }));
+  };
+  const itensComGarantia = itensFinais.map((i) => {
+    if (!itensGarantia.some((x) => x.id === i.id)) return i;
+    const g = garantiaAtual(i);
+    return { ...i, garantiaPolitica: g.politica, garantiaDiasOverride: g.politica === "custom" ? g.dias : null, garantiaMesesOverride: g.politica === "custom" ? g.meses : null };
+  });
+  const garantiaPayload = verValores && !os.emGarantia ? (os.itens || [])
+    .filter((i) => (i.tipo === "servico" || i.tipo === "produto") && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(i.id || "")))
+    .map((i) => {
+      const g = garantiaAtual(i);
+      return { item_id: i.id, policy: g.politica, ...(g.politica === "custom" ? (i.tipo === "servico" ? { days: g.dias } : { months: g.meses }) : {}) };
+    }) : null;
+  const garantiasPrevistas = itensGarantia.map((i) => ({ item: i, ...garantiaAtual(i) })).filter((g) => g.efetivo > 0);
   const adicionaisFinais = temAdicional ? adicionais : [];
   const somaAdd = adicionaisFinais.reduce((t, a) => t + a.qtd * a.preco, 0);
   const total = itensFinais.reduce((t, i) => t + i.qtd * i.preco, 0) + somaAdd;
   const extras = {
-    relato, itens: itensFinais, adicionais: adicionaisFinais, valorAdicional: 0, descricaoAdicional: "",
-    custosExtras: num(custosExtras), pendencia: temPendencia ? pendencia : "", fotos,
+    relato, itens: itensComGarantia, adicionais: adicionaisFinais, valorAdicional: 0, descricaoAdicional: "",
+    custosExtras: num(custosExtras),
+    pendencia: temPendencia ? pendencia : (resultado === "retorno" ? retornoMotivo.trim() : ""),
+    precisaRetornar: resultado === "retorno",
+    retornoMotivo:retornoMotivo.trim(),retornoMaterial:retornoMaterial.trim(),retornoObs:retornoObs.trim(),
+    retornoPrioridade,retornoPrevisao:retornoPrevisao||null,retornoRequestId,
+    garantiaOverrides: garantiaPayload,
+    fotos,
   };
 
   /* edição do registro depois de concluído: sem etapas, só o que faz sentido rever */
   if (jaConcluida) {
     return (
-      <Modal open onClose={onClose} wide title="Editar registro do atendimento" sub={os.numero}
+      <Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title="Editar registro do atendimento" sub={os.numero}
         footer={<><Btn variant="ghost" onClick={onClose}>Fechar</Btn>
           <Btn onClick={() => { onSalvarParcial({ relato, fotos, pendencia }); onClose(); }}>Salvar alterações</Btn></>}>
         <Field label="O que foi feito">
@@ -3390,6 +4659,16 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
     );
   }
 
+  /* consulta rápida ao banco antes de montar as etapas: evita trocar o número de etapas com o técnico no meio do fluxo */
+  if (fechamento === "carregando") {
+    return (
+      <Modal open onClose={onClose} wide title="Preparando o fechamento" sub={os.numero}
+        footer={<Btn variant="ghost" onClick={onClose}>Cancelar</Btn>}>
+        <p className="flex items-center gap-2 text-[14px] text-slate-500"><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />Carregando os dados do atendimento…</p>
+      </Modal>
+    );
+  }
+
   const SimNao = ({ valor, onChange, sim = "Sim", nao = "Não" }) => (
     <div className="flex gap-2">
       {[[false, nao], [true, sim]].map(([v, label]) => (
@@ -3402,7 +4681,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
     </div>
   );
 
-  const etapas = [
+  const etapasLegado = [
     {
       titulo: "O que foi feito?",
       sub: "Fale naturalmente. Você revisa antes de salvar.",
@@ -3442,7 +4721,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
           )}
           <Btn variant="soft" icon={Package} onClick={() => setAddProduto(true)} className="w-full">Adicionar material do catálogo</Btn>
           <Field label="Outros custos que você teve" hint="Uso interno, entra no cálculo do resultado deste serviço." className="mt-5">
-            <Input type="number" min="0" step="0.01" value={custosExtras} onChange={(e) => setCustosExtras(e.target.value)} className="max-w-[180px]" />
+            <InputMoeda valor={custosExtras} onChange={setCustosExtras} className="max-w-[180px]" aria-label="Outros custos" />
           </Field>
         </>
       ),
@@ -3541,6 +4820,84 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
               <span className="text-[14px] text-slate-500">Pendência</span>
               <span className="text-[14px] text-slate-800 text-right">{temPendencia && pendencia.trim() ? pendencia : "nenhuma"}</span>
             </div>
+            <div className="px-4 py-3.5">
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-2">Garantias deste atendimento</p>
+              {itensGarantia.length === 0 ? (
+                <p className="text-[13.5px] text-slate-500 leading-relaxed">
+                  {os.emGarantia
+                    ? "Atendimento em garantia: a garantia original continua valendo."
+                    : "Nenhum serviço ou produto deste atendimento está ligado ao catálogo."}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {itensGarantia.map((i) => {
+                    const g = garantiaAtual(i);
+                    return (
+                      <div key={i.id} className="rounded-xl bg-slate-50 ring-1 ring-slate-200 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[13.5px] font-medium text-slate-800 truncate">{i.nome}</p>
+                            <p className="text-[12px] text-slate-400">{g.origem} · {g.prazo}{g.ate ? ` · até ${dataBR(g.ate)}` : ""}</p>
+                          </div>
+                          {!verValores && <span className="text-[12px] text-slate-500 shrink-0">Padrão do catálogo</span>}
+                        </div>
+                        {verValores && (
+                          <div className="grid sm:grid-cols-[1fr_150px] gap-2 mt-3">
+                            <Select value={g.politica} onChange={(e) => ajustarGarantia(i, { policy: e.target.value })} aria-label={`Garantia de ${i.nome}`}>
+                              <option value="catalog">Padrão do catálogo</option>
+                              <option value="disabled">Sem garantia nesta OS</option>
+                              <option value="custom">Prazo personalizado</option>
+                            </Select>
+                            {g.politica === "custom" ? (
+                              <div className="flex items-center gap-2">
+                                <Input type="number" min="1" max={i.tipo === "servico" ? 3650 : 120}
+                                  value={i.tipo === "servico" ? g.dias : g.meses}
+                                  onChange={(e) => i.tipo === "servico"
+                                    ? ajustarGarantia(i, { days: Math.max(1, Math.min(3650, Number(e.target.value) || 1)) })
+                                    : ajustarGarantia(i, { months: Math.max(1, Math.min(120, Number(e.target.value) || 1)) })} />
+                                <span className="text-[12px] text-slate-500 shrink-0">{i.tipo === "servico" ? "dias" : "meses"}</span>
+                              </div>
+                            ) : <div className="hidden sm:block" />}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {verValores && (
+                    <p className="text-[12px] text-slate-400 leading-relaxed">
+                      A mudança feita aqui vale somente para esta OS e não altera o prazo padrão em “Serviços e produtos”.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[13px] font-medium text-slate-600 mb-2">Como este atendimento terminou?</p>
+            <div className="grid sm:grid-cols-3 gap-2">
+              {[["finalizado", "Finalizado"], ["retorno", "Precisa retornar"], ["naoFinalizado", "Não finalizado"]].map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setResultado(v)} aria-pressed={resultado === v}
+                  className={cx("py-3.5 rounded-xl text-[14px] font-medium transition-colors", ring,
+                    resultado === v ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {resultado === "retorno" && (
+              <div className="mt-3 space-y-3 rounded-2xl bg-amber-50 p-3.5 ring-1 ring-amber-200/70">
+                <p className="text-[12.5px] leading-relaxed text-amber-900">A OS continuará em andamento. Nenhuma cobrança, garantia ou relatório final será criado agora.</p>
+                <Field label="Motivo do retorno"><textarea value={retornoMotivo} onChange={e=>setRetornoMotivo(e.target.value.slice(0,3000))} rows={3} placeholder="Ex.: falta peça de acabamento" className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
+                <Field label="Material necessário"><textarea value={retornoMaterial} onChange={e=>setRetornoMaterial(e.target.value.slice(0,3000))} rows={2} placeholder="Peça, cabo, fonte, ferramenta..." className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
+                <Field label="Observação"><textarea value={retornoObs} onChange={e=>setRetornoObs(e.target.value.slice(0,5000))} rows={3} className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
+                <div className="grid gap-3 sm:grid-cols-2"><Field label="Prioridade"><select value={retornoPrioridade} onChange={e=>setRetornoPrioridade(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></Field><Field label="Previsão de retorno"><input type="date" min={hojeISO()} value={retornoPrevisao} onChange={e=>setRetornoPrevisao(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field></div>
+              </div>
+            )}
+            {resultado === "naoFinalizado" && (
+              <p className="text-[12.5px] text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-xl px-3.5 py-3 mt-3 leading-relaxed">
+                Nada é concluído agora: relato, fotos e pendência ficam salvos e a ordem continua em andamento. Materiais só são lançados quando o atendimento for concluído.
+              </p>
+            )}
           </div>
 
           <div className="rounded-2xl bg-slate-50 ring-1 ring-slate-200 p-4">
@@ -3562,19 +4919,166 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
     },
   ];
 
+  /* ---- Fluxo com Base Técnica (0111 disponível): Diagnóstico → Materiais → Evidências → registros → Relatório → Confirmação ----
+     Sem a migration, `etapasLegado` segue como era. A conclusão continua sendo a mesma chamada atômica de sempre. */
+  const novoFluxo = fechamento === "disponivel";
+  const etapaBase = {
+    titulo: "Diagnóstico",
+    fase: "Diagnóstico",
+    sub: "Uso interno da empresa. Não aparece para o cliente.",
+    pular: null,
+    conteudo: (
+      <div className="space-y-5">
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Causa encontrada</p>
+          <CampoVoz rows={3} valor={base.cause} onChange={(v) => mudarBase("cause", v)} placeholder="Ex.: fonte da fechadura queimada" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Solução aplicada</p>
+          <CampoVoz rows={3} valor={base.solution} onChange={(v) => mudarBase("solution", v)} placeholder="Ex.: substituí a fonte e testei a abertura" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Nível de dificuldade</p>
+          <div className="grid grid-cols-3 gap-2" role="group" aria-label="Nível de dificuldade">
+            {DIFFICULTY_OPTIONS.map((opcao) => (
+              <button key={opcao.value} type="button" aria-pressed={base.difficulty === opcao.value}
+                onClick={() => mudarBase("difficulty", base.difficulty === opcao.value ? "" : opcao.value)}
+                className={cx("min-h-11 py-3 rounded-xl text-[14px] font-medium transition-colors", ring,
+                  base.difficulty === opcao.value ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+                {opcao.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Necessita retorno?</p>
+          <SimNao valor={resultado === "retorno"} onChange={(v) => setResultado(v ? "retorno" : (resultado === "retorno" ? "finalizado" : resultado))} />
+          {resultado === "retorno" && (
+            <p className="text-[12.5px] text-slate-500 mt-2 leading-relaxed">O motivo, o material necessário e a previsão do retorno você informa na última etapa.</p>
+          )}
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Observação técnica final</p>
+          <CampoVoz rows={3} valor={base.learning} onChange={(v) => mudarBase("learning", v)} placeholder="Algo útil para a próxima vez neste local ou equipamento" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        {fechamentoAlterado && <p className="text-[12px] text-slate-400">Será salva ao gerar o relatório, concluir ou salvar o atendimento.</p>}
+      </div>
+    ),
+  };
+  const etapaEvidencias = {
+    titulo: "Evidências do atendimento",
+    fase: "Evidências",
+    sub: "Opcional. Ajuda em garantia e em qualquer dúvida futura do cliente.",
+    pular: "Sem fotos",
+    conteudo: (
+      <>
+        <p className="text-[13px] font-medium text-slate-600 mb-3">{evidenceCountLabel(fotos.length)}</p>
+        <FotosDoAtendimento fotos={fotos} anexar={anexarFotos} />
+      </>
+    ),
+  };
+  const proveniencia = reportProvenance({ source: iaGerada?.source === "ai" ? "ai" : null, generatedText: iaGerada?.text, finalText: relato });
+  const iaEsgotada = Boolean(usoIA) && Number(usoIA.remaining) <= 0;
+  const etapaRelatorio = {
+    titulo: "Relatório do atendimento",
+    fase: "Relatório",
+    sub: "Texto para o cliente. Revise e edite antes de seguir.",
+    pular: null,
+    conteudo: (
+      <div className="space-y-3">
+        <CampoVoz rows={8} valor={relato} onChange={setRelato} placeholder="Descreva o que foi feito no atendimento" rotuloVoz="Ditar" />
+        {proveniencia.label && (
+          <p className="inline-flex items-center gap-1.5 text-[12px] text-slate-500"><Sparkles className="w-3.5 h-3.5" aria-hidden="true" />{proveniencia.label}</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Btn icon={gerando ? Loader2 : Sparkles} disabled={gerando || resultado !== "finalizado" || iaEsgotada} onClick={gerarRelatorio}>
+            {gerando ? "Gerando…" : iaGerada ? "Gerar novamente com IA" : "Gerar relatório com IA"}
+          </Btn>
+          <Btn variant="soft" disabled={gerando} onClick={usarTextoPadrao}>Montar texto padrão</Btn>
+          {relatoAntes !== null && <Btn variant="ghost" disabled={gerando} onClick={descartarGerado}>Descartar texto gerado</Btn>}
+        </div>
+        {usoIA && <p className="text-[12px] text-slate-500">{reportUsageLabel(usoIA)}</p>}
+        {resultado !== "finalizado" && (
+          <p className="text-[12.5px] text-slate-500 leading-relaxed">Com retorno previsto ou sem concluir, o relatório final do cliente é feito quando o serviço for concluído. O texto padrão e o ditado continuam disponíveis.</p>
+        )}
+        {avisoIA && <p role="status" className="text-[12.5px] text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-xl px-3 py-2 leading-relaxed">{avisoIA}</p>}
+        {erroIA && <p role="alert" className="text-[12.5px] text-rose-700 leading-relaxed">{erroIA}</p>}
+        <p className="text-[12px] text-slate-400 leading-relaxed">
+          A IA só organiza o que está confirmado nesta OS: serviço, causa, solução, materiais e retorno. Ela não vê valores, custos nem as observações internas.
+          O relatório é opcional: a OS pode ser concluída sem ele.
+        </p>
+      </div>
+    ),
+  };
+  const blocoConfirmacao = (
+    <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-3">
+      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em]">Confirmação do atendimento</p>
+      <div>
+        <label htmlFor="recebido-por" className="block text-[13px] font-medium text-slate-600 mb-1.5">Nome de quem recebeu o serviço</label>
+        <Input id="recebido-por" value={recebidoPor} disabled={ausente} autoComplete="off" maxLength={120} placeholder="Ex.: Maria Souza"
+          onChange={(e) => setRecebidoPor(e.target.value.slice(0, 120))} />
+      </div>
+      <button type="button" aria-pressed={ausente} onClick={() => { setAusente(!ausente); setRecebidoPor(""); }}
+        className={cx("w-full min-h-11 py-3 rounded-xl text-[14px] font-medium transition-colors", ring,
+          ausente ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+        Responsável ausente
+      </button>
+      <p className="text-[12px] text-slate-400">{evidenceCountLabel(fotos.length)}.</p>
+    </div>
+  );
+  const etapaConfirmacao = { ...etapasLegado[5], fase: "Confirmação", conteudo: <div className="space-y-4">{blocoConfirmacao}{etapasLegado[5].conteudo}</div> };
+  const etapas = novoFluxo
+    ? [etapaBase, { ...etapasLegado[1], fase: "Diagnóstico" }, etapaEvidencias, { ...etapasLegado[3], fase: "Registro" }, { ...etapasLegado[4], fase: "Registro" }, etapaRelatorio, etapaConfirmacao]
+    : etapasLegado;
+
   const atual = etapas[etapa];
   const ultima = etapa === etapas.length - 1;
 
+  /* Concluir: grava Base Técnica e confirmação primeiro (o técnico não consegue gravar depois que a OS fecha) e só então chama a
+     mesma conclusão atômica de sempre. Falha de rede em qualquer ponto mantém tudo na tela e permite tentar de novo. */
+  const concluir = async () => {
+    if (concluindo) return;
+    setErroFechamento("");
+    if (resultado === "retorno" && !retornoMotivo.trim()) { setErroFechamento("Informe o motivo do retorno para salvar."); return; }
+    if (novoFluxo && resultado === "finalizado" && !confirmacao.ok) { setErroFechamento(confirmacao.error); return; }
+    setConcluindo(true);
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroFechamento(falha); return; }
+      await registrarUsoIA();
+      const ok = await onFinalizar(extras);
+      if (ok === false) setErroFechamento("Não foi possível concluir agora. Seus dados continuam aqui; toque para tentar de novo. Se já concluiu antes, feche e confira a OS.");
+    } finally { setConcluindo(false); }
+  };
+  const salvarSemConcluir = async () => {
+    if (concluindo) return;
+    setErroFechamento("");
+    setConcluindo(true);
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroFechamento(falha); return; }
+      await registrarUsoIA();
+      onSalvarParcial({ relato, fotos, pendencia: temPendencia ? pendencia : "" });
+      onClose();
+    } finally { setConcluindo(false); }
+  };
+
   return (
     <>
-      <Modal open onClose={onClose} wide title={atual.titulo} sub={atual.sub}
-        footer={
+      <Modal open onClose={onClose} dirty={alterado} busy={concluindo || gerando} wide title={atual.titulo} sub={atual.sub}
+        footer={(requestClose) =>
           <div className="flex items-center justify-between gap-3 w-full">
-            <Btn variant="ghost" onClick={() => (etapa === 0 ? onClose() : setEtapa(etapa - 1))}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
+            <Btn variant="ghost" disabled={concluindo} onClick={() => { if (!concluindo) etapa === 0 ? requestClose() : setEtapa(etapa - 1); }}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
             <div className="flex items-center gap-3">
               {atual.pular && <Btn variant="ghost" onClick={() => setEtapa(etapa + 1)}>{atual.pular}</Btn>}
               {ultima
-                ? <Btn icon={Check} onClick={() => onFinalizar(extras)}>Concluir atendimento</Btn>
+                ? (resultado === "naoFinalizado"
+                    ? <Btn variant="soft" icon={Check} disabled={concluindo} onClick={salvarSemConcluir}>
+                        {concluindo ? "Salvando…" : "Salvar sem concluir"}
+                      </Btn>
+                    : <Btn icon={Check} disabled={concluindo} onClick={concluir}>
+                        {concluindo ? "Concluindo…" : resultado === "retorno" ? "Salvar retorno sem concluir" : "Concluir atendimento"}
+                      </Btn>)
                 : <Btn icon={ArrowRight} disabled={!!atual.bloqueio} onClick={() => setEtapa(etapa + 1)}>Continuar</Btn>}
             </div>
           </div>
@@ -3584,8 +5088,10 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, produ
             <span key={i} className={cx("h-1 flex-1 rounded-full", i <= etapa ? "bg-teal-600" : "bg-slate-200")} aria-hidden="true" />
           ))}
         </div>
+        {novoFluxo && atual.fase && <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Etapa {etapa + 1} de {etapas.length} · {atual.fase}</p>}
         {atual.conteudo}
         {atual.bloqueio && <p className="text-[12.5px] text-slate-400">{atual.bloqueio}</p>}
+        {erroFechamento && <p role="alert" className="text-[13px] text-rose-700 bg-rose-50 ring-1 ring-rose-200/70 rounded-xl px-3.5 py-3 leading-relaxed">{erroFechamento}</p>}
       </Modal>
 
       {addProduto && (
@@ -3632,7 +5138,7 @@ function FotosDoAtendimento({ fotos, anexar }) {
 }
 
 /* ================================================================= Compras */
-function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, setCompraAberta, setTela, pedirConfirmacao }) {
+function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, setCompraAberta, setTela, pedirConfirmacao, excluirRegistro, papel }) {
   const [form, setForm] = useState(null);
   const total = (c) => c.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
 
@@ -3650,15 +5156,15 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
               <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{c.numero}</h1>
               <p className="text-[15px] text-slate-500 mt-1">{c.fornecedor} · {dataBR(c.data)}</p>
             </div>
-            <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm({ ...c, jaPago: Boolean(lanc?.pago) })}>Editar</Btn>
+            <div className="flex gap-2 flex-wrap"><Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm({ ...c, jaPago: Boolean(lanc?.pago) })}>Editar</Btn>{papel === "proprietario" && <Btn variant="danger" size="sm" icon={Trash2} onClick={() => excluirRegistro("compra", c.id, `${c.numero} · ${c.fornecedor}`, () => setCompraAberta(null))}>Excluir</Btn>}</div>
           </div>
 
           {lanc && (
             <div className={cx("rounded-2xl px-5 py-4 mb-6 flex flex-wrap items-center justify-between gap-3 ring-1",
-              lanc.pago ? "bg-emerald-50 ring-emerald-200/70" : lanc.vencimento < HOJE ? "bg-rose-50 ring-rose-200/70" : "bg-amber-50 ring-amber-200/70")}>
-              <p className={cx("text-[14px]", lanc.pago ? "text-emerald-900" : lanc.vencimento < HOJE ? "text-rose-900" : "text-amber-900")}>
+              lanc.pago ? "bg-emerald-50 ring-emerald-200/70" : lanc.vencimento < hojeISO() ? "bg-rose-50 ring-rose-200/70" : "bg-amber-50 ring-amber-200/70")}>
+              <p className={cx("text-[14px]", lanc.pago ? "text-emerald-900" : lanc.vencimento < hojeISO() ? "text-rose-900" : "text-amber-900")}>
                 {lanc.pago ? `Pago em ${dataBR(lanc.pagoEm)}${lanc.forma ? ` via ${lanc.forma}` : ""}.`
-                  : `Conta a pagar de ${brl(lanc.valor)} · vence ${dataBR(lanc.vencimento)}${lanc.vencimento < HOJE ? " · vencida" : ""}`}
+                  : `Conta a pagar de ${brl(lanc.valor)} · vence ${dataBR(lanc.vencimento)}${lanc.vencimento < hojeISO() ? " · vencida" : ""}`}
               </p>
               <Btn size="sm" variant="soft" icon={Wallet} onClick={() => setTela("financeiro")}>Ver no financeiro</Btn>
             </div>
@@ -3714,7 +5220,7 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
   return (
     <>
       <PageHead title="Compras" sub="Materiais comprados de fornecedores. Cada compra vira uma conta a pagar."
-        action={<Btn icon={Plus} onClick={() => setForm({ fornecedor: "", data: HOJE, itens: [], forma: "Boleto", vencimento: addDays(HOJE, 15), anexos: [], obs: "", jaPago: false })}>Nova compra</Btn>} />
+        action={<Btn icon={Plus} onClick={() => setForm({ fornecedor: "", data: hojeISO(), itens: [], forma: "Boleto", vencimento: addDays(hojeISO(), 15), anexos: [], obs: "", jaPago: false })}>Nova compra</Btn>} />
       {compras.length === 0 ? (
         <Panel><Empty icon={ShoppingCart} title="Nenhuma compra registrada" sub="Registre a compra e o ZiisTec cria a conta a pagar automaticamente." /></Panel>
       ) : (
@@ -3762,6 +5268,8 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
 
 function CompraForm({ form, setForm, onSave, produtos }) {
   const [novoItem, setNovoItem] = useState(false);
+  const [salvandoCompra, setSalvandoCompra] = useState(false);
+  const { dirty } = useFormDirty(form, Boolean(form));
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const total = form.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
@@ -3771,11 +5279,12 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 
   return (
     <>
-      <Modal open onClose={() => setForm(null)} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
+      <Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCompra} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
         sub={form.id ? "" : "Ao salvar, a conta a pagar é criada no financeiro."}
-        footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
-          <Btn disabled={!form.fornecedor || form.itens.length === 0} onClick={() => { onSave(form); setForm(null); }}>
-            {form.id ? "Salvar alterações" : `Registrar compra de ${brl(total)}`}
+        footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoCompra} onClick={requestClose}>Cancelar</Btn>
+          <Btn disabled={!form.fornecedor || form.itens.length === 0 || salvandoCompra}
+            onClick={async () => { if (salvandoCompra) return; setSalvandoCompra(true); try { const salvo = await onSave(form); if (salvo === false) return; if (salvo?.ok === false) { setForm((atual) => atual ? { ...atual, id: salvo.id, requestId: salvo.requestId } : atual); return; } setForm(null); } finally { setSalvandoCompra(false); } }}>
+            {salvandoCompra ? "Registrando…" : form.id ? "Salvar alterações" : `Registrar compra de ${brl(total)}`}
           </Btn></>}>
         <div className="grid sm:grid-cols-2 gap-5">
           <Field label="Fornecedor"><Input value={form.fornecedor} onChange={(e) => set("fornecedor", e.target.value)} placeholder="Ex.: Distribuidora Eletro Sul" /></Field>
@@ -3793,10 +5302,10 @@ function CompraForm({ form, setForm, onSave, produtos }) {
                     <button onClick={() => setForm({ ...form, itens: form.itens.filter((x) => x.id !== i.id) })} aria-label="Remover item"
                       className={cx("p-2 rounded-lg text-slate-300 hover:text-rose-600 shrink-0", ring)}><Trash2 className="w-4 h-4" /></button>
                   </div>
-                  <div className="grid grid-cols-3 gap-3 items-end mt-3">
-                    <Field label="Quantidade"><Input type="number" min="1" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", Number(e.target.value))} /></Field>
-                    <Field label="Custo unitário"><Input type="number" min="0" value={i.custo} onChange={(e) => upItem(i.id, "custo", Number(e.target.value))} /></Field>
-                    <div className="text-right pb-3"><p className="text-[12px] text-slate-400">Total</p>
+                  <div className="grid grid-cols-1 min-[430px]:grid-cols-2 sm:grid-cols-3 gap-3 items-end mt-3">
+                    <Field label="Quantidade"><Input type="number" inputMode="numeric" min="1" value={i.qtd} onChange={(e) => upItem(i.id, "qtd", Number(e.target.value))} /></Field>
+                    <Field label="Custo unitário"><Input type="number" inputMode="decimal" step="0.01" min="0" value={i.custo} onChange={(e) => upItem(i.id, "custo", Number(e.target.value))} /></Field>
+                    <div className="text-left sm:text-right pb-1 sm:pb-3"><p className="text-[12px] text-slate-400">Total</p>
                       <p className="text-[17px] font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.custo)}</p></div>
                   </div>
                 </div>
@@ -3856,11 +5365,16 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 }
 
 /* ============================================================== Financeiro */
-function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId }) {
-  const [mes, setMes] = useState(mesRef(HOJE));
-  const [aba, setAba] = useState("receber");
+function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId, empresa: empresaDados, excluirRegistro, papel, abrirV2 }) {
+  const [mes, setMes] = useState(mesRef(hojeISO()));
+  const [aba, setAba] = useState("visao");
   const [form, setForm] = useState(null);
+  const [salvandoLancamento, setSalvandoLancamento] = useState(false);
+  const { dirty: lancamentoAlterado } = useFormDirty(form, Boolean(form));
   const [baixando, setBaixando] = useState(null);
+  const [recibo, setRecibo] = useState(null);
+  const [janela, setJanela] = useState(30);
+  const [filtro, setFiltro] = useState({ status: "todos", origem: "todas", clienteId: "", busca: "" });
 
   /* regra única de período: pago conta no mês do pagamento; em aberto conta no mês do vencimento */
   const noMes = (l) => mesRef(l.pago ? l.pagoEm : l.vencimento) === mes;
@@ -3870,22 +5384,27 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   const aReceberMes = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && noMes(l));
   const pagoMes = lancamentos.filter((l) => l.tipo === "despesa" && l.pago && noMes(l));
   const aPagarMes = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && noMes(l));
-  const vencidosReceber = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento < HOJE);
-  const vencidosPagar = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento < HOJE);
+  const vencidosReceber = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento < hojeISO());
+  const vencidosPagar = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento < hojeISO());
   const resultado = soma(recebidoMes) - soma(pagoMes);
 
   const futuroReceber = soma(lancamentos.filter((l) => l.tipo === "receita" && !l.pago)) - soma(aReceberMes);
   const futuroPagar = soma(lancamentos.filter((l) => l.tipo === "despesa" && !l.pago)) - soma(aPagarMes);
 
-  /* fluxo de caixa 30 dias: atraso fica separado, previsão olha somente para frente */
+  /* fluxo de caixa: janela escolhida pelo usuário. Atraso fica separado,
+     porque previsão olha só para frente. */
   const saldoAtual = soma(lancamentos.filter((l) => l.tipo === "receita" && l.pago)) - soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago));
-  const limite = addDays(HOJE, 30);
-  const entradas30 = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
-  const saidas30 = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
-  const projetado = saldoAtual + soma(entradas30) - soma(saidas30);
+  const limite = addDays(hojeISO(), janela);
+  const entradasJanela = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= hojeISO() && l.vencimento <= limite);
+  const saidasJanela = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= hojeISO() && l.vencimento <= limite);
+  const projetado = saldoAtual + soma(entradasJanela) - soma(saidasJanela);
+
+  /* o que exige ação hoje */
+  const receberHoje = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento === hojeISO());
+  const pagarHoje = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento === hojeISO());
 
   /* margem dos serviços: usa conclusão real e cobrança efetivamente gerada para a OS */
-  const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || HOJE) === mes);
+  const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || hojeISO()) === mes);
   const cobrancaDaOS = (o) => lancamentos.find((l) => l.tipo === "receita" && l.origemTipo === "os" && l.origemId === o.id);
   const custoDiretoOS = (o) => {
     const materiaisJaNosItens = (o.itens || []).some((i) => i.materialRegistrado);
@@ -3906,6 +5425,17 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
     setMes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   };
 
+  /* filtros de leitura: status, origem, cliente e busca livre */
+  const aplicarFiltro = (itens) => itens.filter((l) => {
+    if (filtro.status === "vencido" && !(!l.pago && l.vencimento < hojeISO())) return false;
+    if (filtro.status === "aberto" && (l.pago || l.vencimento < hojeISO())) return false;
+    if (filtro.status === "pago" && !l.pago) return false;
+    if (filtro.origem !== "todas" && (l.origemTipo || "manual") !== filtro.origem) return false;
+    if (filtro.clienteId && l.clienteId !== filtro.clienteId) return false;
+    if (filtro.busca && !semAcento(l.descricao || "").includes(semAcento(filtro.busca))) return false;
+    return true;
+  }).slice();
+
   const ListaLanc = ({ itens, vazio }) => (
     <Panel className="divide-y divide-slate-100 overflow-hidden">
       {itens.length === 0 ? <Empty icon={Wallet} title="Nada neste período" sub={vazio} /> : itens.map((l) => {
@@ -3919,7 +5449,9 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
                   <p className="font-medium text-slate-800 truncate">{l.descricao}</p>
                 </button>
                 <p className="text-[12px] text-slate-400">
-                  {l.pago ? `${l.tipo === "receita" ? "Recebido" : "Pago"} em ${dataBR(l.pagoEm)}${l.forma ? ` · ${l.forma}` : ""}` : `Vence ${dataBR(l.vencimento)}`} · {l.categoria}
+                  {l.pago ? `${l.tipo === "receita" ? "Recebido" : "Pago"} em ${dataBR(l.pagoEm)}${l.forma ? ` · ${l.forma}` : ""}` : `Vence ${dataBR(l.vencimento)}`}
+                  {" · "}{ORIGEM_LANC[l.origemTipo] || "Lançamento manual"}
+                  {l.clienteId ? ` · ${clientes.find((c) => c.id === l.clienteId)?.fantasia || clientes.find((c) => c.id === l.clienteId)?.nome || ""}` : ""}
                 </p>
               </div>
               <div className="flex items-center gap-3 shrink-0">
@@ -3927,6 +5459,22 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
                 <span className={cx("font-semibold tabular-nums", l.tipo === "receita" ? "text-slate-900" : "text-slate-500")}>
                   {l.tipo === "despesa" ? "− " : ""}{brl(l.valor)}
                 </span>
+                {l.tipo === "receita" && !l.pago && (() => {
+                  const c = clientes.find((x) => x.id === l.clienteId);
+                  if (!c?.whatsapp && !c?.telefone) return null;
+                  return (
+                    <Btn size="sm" variant="ghost" icon={Share2} ariaLabel={`Cobrar ${l.descricao} pelo WhatsApp`} title="Cobrar pelo WhatsApp"
+                      onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp || c.telefone)}?text=${encodeURIComponent(`Olá! Sobre ${l.descricao}: valor de ${brl(l.valor)} com vencimento em ${dataBR(l.vencimento)}.`)}`, "_blank")}>
+                      Cobrar
+                    </Btn>
+                  );
+                })()}
+                {l.tipo === "receita" && (
+                  <Btn size="sm" variant="ghost" icon={Receipt}
+                    title={l.pago ? "Gerar recibo não fiscal" : "Gerar documento de cobrança"}
+                    ariaLabel={`${l.pago ? "Gerar recibo" : "Gerar cobrança"} de ${l.descricao}`}
+                    onClick={() => setRecibo(l)}>{l.pago ? "Recibo" : "Cobrança"}</Btn>                )}
+                {papel === "proprietario" && <Btn size="sm" variant="danger" icon={Trash2} title="Excluir lançamento" ariaLabel={`Excluir ${l.descricao}`} onClick={() => excluirRegistro("financeiro", l.id, l.descricao)}>Excluir</Btn>}
                 {l.pago ? (
                   <Btn size="sm" variant="ghost" onClick={() => pedirConfirmacao({
                     titulo: "Desfazer baixa?", texto: `O lançamento volta para ${l.tipo === "receita" ? "contas a receber" : "contas a pagar"}.`,
@@ -3946,13 +5494,34 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   return (
     <>
       <PageHead title="Financeiro" sub="Quanto entrou, quanto falta entrar e quanto sai."
-        action={<Btn icon={Plus} onClick={() => setForm({ tipo: "despesa", vencimento: HOJE, pago: false, valor: 0, categoria: "Materiais", origemTipo: "manual" })}>Novo lançamento</Btn>} />
+        action={<div className="flex flex-wrap gap-2"><RecursosV2 aba="financeiro" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => setForm({ tipo: "despesa", vencimento: hojeISO(), pago: false, valor: 0, categoria: "Materiais", origemTipo: "manual" })}>Novo lançamento</Btn></div>} />
 
       <div className="flex items-center justify-between gap-2 mb-6">
         <button onClick={() => mudarMes(-1)} aria-label="Mês anterior" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700", ring)}><ArrowLeft className="w-4 h-4" /></button>
         <p className="text-[15px] font-medium text-slate-800">{nomeMes(mes)}</p>
         <button onClick={() => mudarMes(1)} aria-label="Próximo mês" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700", ring)}><ArrowRight className="w-4 h-4" /></button>
       </div>
+
+      {(receberHoje.length > 0 || pagarHoje.length > 0) && (
+        <Panel className="p-4 sm:p-5 mb-4">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+            <div>
+              <p className="text-[12.5px] text-slate-500">Receber hoje</p>
+              <p className="text-[18px] font-semibold text-emerald-700 tabular-nums">{brl(soma(receberHoje))}
+                <span className="text-[12px] font-normal text-slate-400"> · {receberHoje.length} conta{receberHoje.length > 1 ? "s" : ""}</span></p>
+            </div>
+            <div>
+              <p className="text-[12.5px] text-slate-500">Pagar hoje</p>
+              <p className="text-[18px] font-semibold text-slate-900 tabular-nums">{brl(soma(pagarHoje))}
+                <span className="text-[12px] font-normal text-slate-400"> · {pagarHoje.length} conta{pagarHoje.length > 1 ? "s" : ""}</span></p>
+            </div>
+            <div className="flex gap-2 ml-auto">
+              {receberHoje.length > 0 && <Btn size="sm" variant="soft" onClick={() => setAba("receber")}>Ver a receber</Btn>}
+              {pagarHoje.length > 0 && <Btn size="sm" variant="soft" onClick={() => setAba("pagar")}>Ver a pagar</Btn>}
+            </div>
+          </div>
+        </Panel>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-4">
         <Panel className="p-4 sm:p-5"><p className="text-[12.5px] text-slate-500">Recebido no mês</p>
@@ -3977,43 +5546,69 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
       </p>
 
       <Tabs valor={aba} onChange={setAba} className="mb-5"
-        opcoes={[{ id: "receber", label: "A receber" }, { id: "recebido", label: "Recebido" }, { id: "pagar", label: "A pagar" },
-          { id: "pago", label: "Pago" }, { id: "fluxo", label: "Fluxo de caixa" }, { id: "resultado", label: "Meu resultado" }]} />
+        opcoes={[{ id: "visao", label: "Visão geral" }, { id: "receber", label: "A receber" },
+          { id: "pagar", label: "A pagar" }, { id: "documentos", label: "Documentos" }]} />
 
-      {aba === "receber" && (<><Rotulo>A receber neste mês</Rotulo>
-        <ListaLanc itens={aReceberMes.slice().sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Conclua uma ordem de serviço para gerar a cobrança automaticamente." /></>)}
-      {aba === "recebido" && (<><Rotulo>Recebido neste mês</Rotulo><ListaLanc itens={recebidoMes} vazio="Nenhum recebimento registrado neste mês." /></>)}
-      {aba === "pagar" && (<><Rotulo>A pagar neste mês</Rotulo>
-        <ListaLanc itens={aPagarMes.slice().sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Registre uma compra para gerar a conta a pagar automaticamente." /></>)}
-      {aba === "pago" && (<><Rotulo>Pago neste mês</Rotulo><ListaLanc itens={pagoMes} vazio="Nenhum pagamento registrado neste mês." /></>)}
+      {aba === "receber" && (<>
+        <FiltrosLancamento filtro={filtro} setFiltro={setFiltro} clientes={clientes} tipo="receita" />
+        <Rotulo>A receber neste mês</Rotulo>
+        <ListaLanc itens={aplicarFiltro(aReceberMes).sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Conclua uma ordem de serviço para gerar a cobrança automaticamente." />
+        <div className="mt-7"><Rotulo>Já recebido neste mês</Rotulo>
+          <ListaLanc itens={aplicarFiltro(recebidoMes)} vazio="Nenhum recebimento registrado neste mês." /></div>
+      </>)}
 
-      {aba === "fluxo" && (
+      {aba === "pagar" && (<>
+        <FiltrosLancamento filtro={filtro} setFiltro={setFiltro} clientes={clientes} tipo="despesa" />
+        <Rotulo>A pagar neste mês</Rotulo>
+        <ListaLanc itens={aplicarFiltro(aPagarMes).sort((a, b) => a.vencimento.localeCompare(b.vencimento))} vazio="Registre uma compra para gerar a conta a pagar automaticamente." />
+        <div className="mt-7"><Rotulo>Já pago neste mês</Rotulo>
+          <ListaLanc itens={aplicarFiltro(pagoMes)} vazio="Nenhum pagamento registrado neste mês." /></div>
+      </>)}
+
+      {aba === "documentos" && (
+        <DocumentosFinanceiro
+          compras={compras} lancamentos={lancamentos} clientes={clientes} ordens={ordens}
+          abrirCompra={abrirCompra} onRecibo={(l) => setRecibo(l)} />
+      )}
+
+      {aba === "visao" && (
         <>
-          <Rotulo>Previsão dos próximos 30 dias</Rotulo>
+          <Rotulo acao={
+            <div className="flex gap-1.5">
+              {[7, 30, 60].map((d) => (
+                <button key={d} type="button" onClick={() => setJanela(d)} aria-pressed={janela === d}
+                  className={cx("px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors", ring,
+                    janela === d ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600")}>
+                  {d} dias
+                </button>
+              ))}
+            </div>
+          }>Previsão dos próximos {janela} dias</Rotulo>
           <Panel className="p-5 sm:p-6">
             <div className="space-y-4 text-[15px]">
               <div className="flex justify-between"><span className="text-slate-500">Saldo registrado</span><span className="font-medium tabular-nums">{brl(saldoAtual)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Entradas previstas</span><span className="font-medium text-emerald-700 tabular-nums">+ {brl(soma(entradas30))}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Saídas previstas</span><span className="font-medium text-rose-700 tabular-nums">− {brl(soma(saidas30))}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Entradas previstas</span><span className="font-medium text-emerald-700 tabular-nums">+ {brl(soma(entradasJanela))}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Saídas previstas</span><span className="font-medium text-rose-700 tabular-nums">− {brl(soma(saidasJanela))}</span></div>
               <div className="flex justify-between items-baseline pt-4 border-t border-slate-200">
                 <span className="font-medium text-slate-700">Saldo projetado</span>
                 <span className={cx("text-2xl font-semibold tabular-nums", projetado >= 0 ? "text-slate-900" : "text-rose-700")}>{brl(projetado)}</span>
               </div>
             </div>
             <p className="text-[12.5px] text-slate-400 mt-4 leading-relaxed">
-              {projetado >= 0 ? "Se todos os recebimentos entrarem no prazo, o mês fecha positivo." : "Atenção: pelas datas atuais, o caixa fica negativo. Antecipe recebimentos ou renegocie vencimentos."}
-              {" "}Saldo registrado considera apenas movimentações que passaram pelo ZiisTec; contas vencidas ficam fora da previsão dos próximos 30 dias.
+              {projetado >= 0 ? "Se todos os recebimentos entrarem no prazo, o período fecha positivo." : "Atenção: pelas datas atuais, o caixa fica negativo. Antecipe recebimentos ou renegocie vencimentos."}
+              {" "}Saldo registrado considera apenas movimentações que passaram pelo ZiisTec; contas vencidas ficam fora da previsão dos próximos {janela} dias.
             </p>
           </Panel>
           <div className="grid sm:grid-cols-2 gap-6 mt-6">
-            <div><Rotulo>Entradas previstas</Rotulo><ListaLanc itens={entradas30} vazio="Nenhuma entrada prevista." /></div>
-            <div><Rotulo>Saídas previstas</Rotulo><ListaLanc itens={saidas30} vazio="Nenhuma saída prevista." /></div>
+            <div><Rotulo>Entradas previstas</Rotulo><ListaLanc itens={entradasJanela} vazio="Nenhuma entrada prevista." /></div>
+            <div><Rotulo>Saídas previstas</Rotulo><ListaLanc itens={saidasJanela} vazio="Nenhuma saída prevista." /></div>
           </div>
         </>
       )}
 
-      {aba === "resultado" && (
+      {aba === "visao" && (
         <>
+          <div className="mt-8" />
           <Rotulo>Meu resultado em {nomeMes(mes).toLowerCase()}</Rotulo>
           <Panel className="p-5 sm:p-6">
             <div className="space-y-4 text-[15px]">
@@ -4059,6 +5654,10 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
         </>
       )}
 
+      <ReciboModal
+        lanc={recibo} onClose={() => setRecibo(null)}
+        empresa={empresaDados} clientes={clientes} ordens={ordens} aviso={aviso} />
+
       {/* baixa com forma de pagamento */}
       {baixando && (
         <Modal open onClose={() => setBaixando(null)} title={baixando.tipo === "receita" ? "Registrar recebimento" : "Registrar pagamento"} sub={`${baixando.descricao} · ${brl(baixando.valor)}`}>
@@ -4070,21 +5669,31 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
               ))}
             </div>
           </Field>
-          <p className="text-[12.5px] text-slate-400">A data do {baixando.tipo === "receita" ? "recebimento" : "pagamento"} será hoje, {dataBR(HOJE)}.</p>
+          <p className="text-[12.5px] text-slate-400">A data do {baixando.tipo === "receita" ? "recebimento" : "pagamento"} será hoje, {dataBR(hojeISO())}.</p>
         </Modal>
       )}
 
       {form && (
-        <Modal open onClose={() => setForm(null)} title="Novo lançamento" wide
-          footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
-            <Btn disabled={!form.descricao || !form.valor} onClick={async () => {
+        <Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} busy={salvandoLancamento} title="Novo lançamento" wide
+          footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoLancamento} onClick={requestClose}>Cancelar</Btn>
+            <Btn disabled={!form.descricao || !form.valor || salvandoLancamento} onClick={async () => {
               if (real) {
-                try { const salvo = await salvarLancamentoDB({ ...form, pagoEm: form.pago ? HOJE : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }
+                if (salvandoLancamento) return;
+                // Duplo toque/retry reaproveita o mesmo requestId: o banco devolve o mesmo lançamento.
+                let requestId = form.requestId;
+                if (!requestId) {
+                  if (!globalThis.crypto?.randomUUID) { aviso("Atualize o navegador para salvar o lançamento com segurança."); return; }
+                  requestId = globalThis.crypto.randomUUID();
+                  setForm((f) => (f ? { ...f, requestId } : f));
+                }
+                setSalvandoLancamento(true);
+                try { const salvo = await salvarLancamentoDB({ ...form, requestId, pagoEm: form.pago ? hojeISO() : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }
                 catch (e) { aviso(mensagemErro(e)); }
+                finally { setSalvandoLancamento(false); }
                 return;
               }
-              setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? HOJE : null }, ...l]); setForm(null); aviso("Lançamento registrado");
-            }}>Salvar lançamento</Btn></>}>
+              setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? hojeISO() : null }, ...l]); setForm(null); aviso("Lançamento registrado");
+            }}>{salvandoLancamento ? "Salvando…" : "Salvar lançamento"}</Btn></>}>
           <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
             {[["despesa", "Despesa"], ["receita", "Receita"]].map(([id, label]) => (
               <button key={id} role="tab" aria-selected={form.tipo === id} onClick={() => setForm({ ...form, tipo: id })}
@@ -4093,7 +5702,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
           </div>
           <Field label="Descrição"><Input value={form.descricao || ""} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Ex.: Aluguel da oficina" /></Field>
           <div className="grid sm:grid-cols-2 gap-5">
-            <Field label="Valor"><Input type="number" min="0" value={form.valor} onChange={(e) => setForm({ ...form, valor: Number(e.target.value) })} /></Field>
+            <Field label="Valor"><InputMoeda valor={form.valor} onChange={(v) => setForm({ ...form, valor: v })} aria-label="Valor" /></Field>
             <Field label="Vencimento"><Input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} /></Field>
           </div>
           <Field label="Categoria"><Input value={form.categoria || ""} onChange={(e) => setForm({ ...form, categoria: e.target.value })} /></Field>
@@ -4101,7 +5710,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
             <Field label="Cliente">
               <Select value={form.clienteId || ""} onChange={(e) => setForm({ ...form, clienteId: e.target.value })}>
                 <option value="">Sem vínculo</option>
-                {clientes.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+                {clientes.filter((c) => !c.excluidoEm).map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
               </Select>
             </Field>
           )}
@@ -4120,11 +5729,251 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   );
 }
 
+/* nome do arquivo: "ORC-0003 - Fabio.pdf", com acentos e símbolos saneados */
+const nomeArquivoDoc = (numero, nomeCliente) => {
+  const limpo = String(nomeCliente || "Cliente").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9 ._-]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40) || "Cliente";
+  return `${numero} - ${limpo}.pdf`;
+};
+
+/* mensagem de WhatsApp com os dados reais do orçamento, em tom humano */
+const mensagemOrcamento = (orc, cliente, empresa) => {
+  const primeiro = String(cliente?.fantasia || cliente?.nome || "").trim().split(/\s+/)[0] || "";
+  const saudacao = primeiro ? `Olá, ${primeiro}! 👋` : "Olá! 👋";
+  const validade = orc.validade ? `\nVálido até ${dataBR(orc.validade)}.` : "";
+  const condicao = orc.condicao ? `\n${orc.condicao}` : "";
+  return `${saudacao}\n\nSegue o orçamento ${orc.numero} preparado pela ${empresa?.nome || "nossa equipe"}.\n\n`
+    + `*Valor total: ${brl(totalDoc(orc))}*${validade}${condicao}\n\nQualquer dúvida, estamos à disposição.`;
+};
+
+const ORIGEM_LANC = { os: "Ordem de serviço", compra: "Compra", contrato: "Contrato", orcamento: "Orçamento", manual: "Lançamento manual" };
+
+/* Filtros de leitura do financeiro. Não alteram dado nenhum: só recortam a
+   lista que a RLS já entregou para o proprietário. */
+function FiltrosLancamento({ filtro, setFiltro, clientes, tipo }) {
+  const set = (k, v) => setFiltro((f) => ({ ...f, [k]: v }));
+  const origens = tipo === "receita"
+    ? [["todas", "Todas as origens"], ["os", "Ordem de serviço"], ["contrato", "Contrato"], ["manual", "Manual"]]
+    : [["todas", "Todas as origens"], ["compra", "Compra"], ["manual", "Manual"]];
+  return (
+    <Panel className="p-4 mb-5">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <SearchBox value={filtro.busca} onChange={(v) => set("busca", v)} placeholder="Buscar na descrição" />
+        <Select value={filtro.status} onChange={(e) => set("status", e.target.value)} aria-label="Situação">
+          <option value="todos">Qualquer situação</option>
+          <option value="aberto">Em dia</option>
+          <option value="vencido">Vencido</option>
+          <option value="pago">{tipo === "receita" ? "Recebido" : "Pago"}</option>
+        </Select>
+        <Select value={filtro.origem} onChange={(e) => set("origem", e.target.value)} aria-label="Origem">
+          {origens.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+        </Select>
+        {tipo === "receita" ? (
+          <Select value={filtro.clienteId} onChange={(e) => set("clienteId", e.target.value)} aria-label="Cliente">
+            <option value="">Todos os clientes</option>
+            {clientes.filter((c) => !c.excluidoEm).map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+          </Select>
+        ) : <div className="hidden lg:block" />}
+      </div>
+    </Panel>
+  );
+}
+
+/* Documentos do financeiro: reúne o que já existe — boletos/notas anexados às
+   compras (bucket privado, URL assinada) e recibos que podem ser gerados sob
+   demanda a partir das contas a receber. Nada novo é persistido em banco. */
+function DocumentosFinanceiro({ compras, lancamentos, clientes, ordens, abrirCompra, onRecibo }) {
+  const [busca, setBusca] = useState("");
+  const t = semAcento(busca);
+
+  const anexos = (compras || []).flatMap((c) => (c.anexos || []).map((a) => ({ ...a, compra: c })))
+    .filter((a) => semAcento(`${a.nome} ${a.compra.fornecedor} ${a.compra.numero}`).includes(t));
+
+  const receitas = (lancamentos || []).filter((l) => l.tipo === "receita")
+    .filter((l) => semAcento(l.descricao || "").includes(t))
+    .sort((a, b) => String(b.pagoEm || b.vencimento).localeCompare(String(a.pagoEm || a.vencimento)))
+    .slice(0, 40);
+
+  return (
+    <>
+      <div className="mb-5 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder="Buscar por fornecedor, cliente ou documento" /></div>
+
+      <Rotulo>Boletos e notas de compras</Rotulo>
+      <Panel className="divide-y divide-slate-100 overflow-hidden">
+        {anexos.length === 0 ? (
+          <Empty icon={Paperclip} title="Nenhum documento anexado" sub="Anexe o boleto ou a nota ao registrar uma compra e ele aparece aqui." />
+        ) : anexos.map((a) => (
+          <Linha key={a.id}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex items-center gap-2.5">
+                <Paperclip className="w-4 h-4 text-slate-400 shrink-0" aria-hidden="true" />
+                <div className="min-w-0">
+                  <p className="text-[14px] font-medium text-slate-800 truncate">{a.nome}</p>
+                  <p className="text-[12px] text-slate-400 truncate">
+                    {a.compra.numero} · {a.compra.fornecedor} · vence {dataBR(a.compra.vencimento)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Btn size="sm" variant="ghost" onClick={() => abrirCompra(a.compra.id)}>Ver compra</Btn>
+                {a.url
+                  ? <a href={a.url} target="_blank" rel="noreferrer"
+                      className={cx("inline-flex items-center gap-2 rounded-xl bg-white ring-1 ring-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50", ring)}>
+                      Abrir documento
+                    </a>
+                  : <span className="text-[12px] text-slate-400">disponível ao salvar a compra</span>}
+              </div>
+            </div>
+          </Linha>
+        ))}
+      </Panel>
+
+      <div className="mt-8">
+        <Rotulo>Documentos e comprovantes para o cliente</Rotulo>
+        <Panel className="divide-y divide-slate-100 overflow-hidden">
+          {receitas.length === 0 ? (
+            <Empty icon={Receipt} title="Nenhuma cobrança registrada" sub="Conclua uma ordem de serviço ou lance uma receita para emitir o recibo." />
+          ) : receitas.map((l) => {
+            const st = statusLanc(l);
+            return (
+              <Linha key={l.id}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[14px] font-medium text-slate-800 truncate">{l.descricao}</p>
+                    <p className="text-[12px] text-slate-400">
+                      {l.pago ? `recebido em ${dataBR(l.pagoEm)}` : `vence ${dataBR(l.vencimento)}`} · {brl(l.valor)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <Pill tone={st.tone}>{st.label}</Pill>
+                    <Btn size="sm" variant="soft" icon={Receipt} onClick={() => onRecibo(l)}>
+                      {l.pago ? "Gerar recibo" : "Gerar cobrança"}
+                    </Btn>                  </div>
+                </div>
+              </Linha>
+            );
+          })}
+        </Panel>
+      </div>
+
+      <Panel className="p-5 mt-6">
+        <div className="flex gap-3">
+          <FileText className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="text-[13px] text-slate-600 leading-relaxed">
+            <span className="font-medium text-slate-800">Nota fiscal:</span> integração ainda não configurada.
+            O recibo do ZiisTec é um comprovante de cobrança e não substitui documento fiscal.
+          </p>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+/* Recibo / documento de cobrança. Não é nota fiscal e o PDF diz isso. */
+function ReciboModal({ lanc, onClose, empresa, clientes, ordens, aviso }) {
+  const [obs, setObs] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => { if (lanc) setObs(""); }, [lanc]);
+  if (!lanc) return null;
+
+  const cli = clientes.find((c) => c.id === lanc.clienteId) || null;
+  const os = lanc.origemTipo === "os" ? (ordens || []).find((o) => o.id === lanc.origemId) : null;
+  const quitado = Boolean(lanc.pago);
+  const numero = `${quitado ? "REC" : "COB"}-${String(lanc.id || "").slice(-6).toUpperCase()}`;
+  const itens = os
+    ? [...(os.itens || []).map((i) => ({ nome: i.nome, qtd: i.qtd, unidade: unidadeLabel(i.unidade), total: i.qtd * i.preco })),
+       ...(os.adicionais || []).map((a) => ({ nome: `${a.nome} (adicional)`, qtd: a.qtd, unidade: unidadeLabel(a.unidade), total: a.qtd * a.preco }))]
+    : [{ nome: lanc.descricao, total: lanc.valor }];
+
+  const dados = {
+    empresa: { nome: empresa?.nome, documento: empresa?.documento, telefone: empresa?.telefone, email: empresa?.email, endereco: empresa?.endereco },
+    cliente: { nome: cli?.nome || cli?.fantasia || "Cliente", documento: cli?.documento, telefone: cli?.telefone, endereco: cli?.endereco },
+    numero,
+    titulo: lanc.pago ? "RECIBO" : "COBRANÇA",    origem: os ? `Ordem de serviço ${os.numero}` : lanc.descricao,
+    itens, valor: lanc.valor,
+    vencimento: lanc.pago ? null : lanc.vencimento,
+    pagoEm: lanc.pago ? lanc.pagoEm : null,
+    forma: lanc.forma || null,
+    observacoes: obs,
+  };
+
+  const dadosComLogo = async () => {
+    if (!empresa?.logoPath && !empresa?.logoUrl) return dados;
+    try {
+      const url = empresa.logoUrl || await resolverLogoEmpresaDB(empresa.logoPath);
+      if (!url) return dados;
+      const r = await fetch(url);
+      if (!r.ok) return dados;
+      const tipo = r.headers.get("content-type") || "";
+      if (!/image\/(png|jpe?g)/i.test(tipo)) return dados;
+      return { ...dados, logoBytes: await r.arrayBuffer(), logoTipo: tipo };
+    } catch { return dados; }
+  };
+
+  const gerar = async () => {
+    if (ocupado) return;
+    setOcupado(true);
+    try { await baixarReciboPDF(await dadosComLogo(), numero); aviso(`${quitado ? "Recibo" : "Documento de cobrança"} gerado. Documento não fiscal.`); }
+    catch (e) { aviso(e?.message || "Não foi possível gerar o recibo."); }
+    finally { setOcupado(false); }
+  };
+
+  const compartilhar = async () => {
+    if (ocupado) return;
+    const texto = `${empresa?.nome || "ZiisTec"} · ${numero}\n${dados.origem}\nValor: ${brl(lanc.valor)}\nDocumento não fiscal.`;
+    setOcupado(true);
+    try {
+      if (suportaCompartilharRecibo()) {
+        const r = await compartilharReciboPDF(await dadosComLogo(), numero, texto);
+        if (r.shared) { setOcupado(false); return; }
+      }
+      window.open(`https://wa.me/55${soDigitos(cli?.whatsapp || cli?.telefone)}?text=${encodeURIComponent(texto)}`, "_blank");
+    } catch (e) { aviso(e?.message || "Não foi possível compartilhar o recibo."); }
+    finally { setOcupado(false); }
+  };
+
+  return (
+    <Modal open onClose={onClose} wide
+      title={lanc.pago ? "Recibo do cliente" : "Documento de cobrança"}
+      sub={`${numero} · ${brl(lanc.valor)}`}      footer={<><Btn variant="ghost" onClick={onClose}>Fechar</Btn>
+        <Btn variant="soft" icon={Share2} disabled={ocupado} onClick={compartilhar}>Enviar pelo WhatsApp</Btn>
+        <Btn icon={Printer} disabled={ocupado} onClick={gerar}>{ocupado ? "Gerando…" : "Gerar PDF"}</Btn></>}>
+      <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3">
+        <p className="text-[13px] font-semibold text-amber-900">DOCUMENTO NÃO FISCAL</p>
+        <p className="text-[12.5px] text-amber-900/90 mt-1 leading-relaxed">
+          {lanc.pago ? "Comprovante de pagamento do serviço." : "Documento de cobrança do serviço."} Este documento não substitui NF-e ou NFS-e.
+        </p>
+        <p className="text-[12px] text-amber-900/80 mt-2">
+          Situação fiscal: <span className="font-medium">não emitida</span> · integração com provedor de NFS-e ainda não configurada.
+        </p>
+      </div>
+
+      <div className="rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100 text-[14px]">
+        <div className="px-4 py-3 flex justify-between gap-3"><span className="text-slate-500">Cliente</span><span className="text-slate-800 text-right">{dados.cliente.nome}</span></div>
+        <div className="px-4 py-3 flex justify-between gap-3"><span className="text-slate-500">Referente a</span><span className="text-slate-800 text-right">{dados.origem}</span></div>
+        <div className="px-4 py-3 flex justify-between gap-3">
+          <span className="text-slate-500">{lanc.pago ? "Pago em" : "Vencimento"}</span>
+          <span className="text-slate-800">{dataBR(lanc.pago ? lanc.pagoEm : lanc.vencimento)}{lanc.forma ? ` · ${lanc.forma}` : ""}</span>
+        </div>
+        <div className="px-4 py-3 flex justify-between items-baseline gap-3">
+          <span className="text-slate-500">Valor</span>
+          <span className="text-xl font-semibold text-slate-900 tabular-nums">{brl(lanc.valor)}</span>
+        </div>
+      </div>
+
+      <Field label="Observações do recibo" hint="Opcional. Sai no documento.">
+        <CampoVoz rows={2} valor={obs} onChange={setObs} placeholder="Ex.: pagamento referente à segunda parcela" />
+      </Field>
+    </Modal>
+  );
+}
+
 /* =========================================================== Configurações */
 function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssinatura, pedirConfirmacao }) {
   const [f, setF] = useState(empresa);
   const logoRef = useRef(null);
   const set = (k, v) => setF({ ...f, [k]: v });
+  const resumoAss = resumoAssinatura(assinatura);
   useEffect(() => {
     let ativo = true;
     if (f.logoPath && !f.logoUrl) resolverLogoEmpresaDB(f.logoPath).then((url) => { if (ativo && url) { setF((v) => ({ ...v, logoUrl: url })); setEmpresa((v) => ({ ...v, logoUrl: url })); } }).catch(() => {});
@@ -4198,31 +6047,28 @@ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssina
           </Panel>
         </section>
 
-        {assinatura && (
+        {/* BETA ACCESS · assinatura sem checkout: o texto segue o status real; renovação e cancelamento ficam com a ZiisTec. */}
+        {resumoAss && (
           <section>
             <Rotulo>Minha assinatura</Rotulo>
             <Panel className="p-5 sm:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-[15px] font-medium text-slate-900">{assinatura.plano}</p>
-                  <p className="text-[13px] text-slate-500 mt-0.5">
-                    {brl(assinatura.valor)} por mês · próxima cobrança em {dataBR(assinatura.proximaCobranca)}
-                  </p>
+                  <p className="text-[15px] font-medium text-slate-900">{resumoAss.plano}</p>
+                  {resumoAss.destaque && <p className="text-[13px] text-slate-600 mt-0.5 tabular-nums">{resumoAss.destaque}</p>}
                 </div>
-                <Pill tone={ST_ASSINATURA[assinatura.status].tone}>{ST_ASSINATURA[assinatura.status].label}</Pill>
+                <Pill tone={resumoAss.tom}>{resumoAss.titulo}</Pill>
               </div>
-              <div className="flex flex-wrap gap-2 mt-5">
-                <Btn variant="soft" size="sm" icon={CreditCard} onClick={() => aviso("Pagamento depende do provedor que ainda vamos integrar")}>
-                  Forma de pagamento
-                </Btn>
-                <Btn variant="ghost" size="sm" onClick={() => pedirConfirmacao({
-                  titulo: "Cancelar assinatura?",
-                  texto: "O acesso ao ZiisTec será interrompido ao confirmar. Seus dados não são apagados — cancelar assinatura é diferente de excluir a conta. Você pode reativar enquanto o período atual ainda estiver válido.",
-                  confirmar: "Cancelar assinatura", acao: () => mudarAssinatura(empresaId, "cancelada"),
-                })}>Cancelar assinatura</Btn>
-              </div>
-              <p className="text-[12px] text-slate-400 mt-4 leading-relaxed">
-                Cobrança e checkout dependem de um provedor de pagamento ainda não integrado. O cancelamento, porém, já é gravado no servidor e mantém todos os seus dados.
+              {resumoAss.linhas.length > 0 && (
+                <dl className="mt-4 space-y-2 text-[14px]">
+                  {resumoAss.linhas.map(([rotulo, valor]) => (
+                    <div key={rotulo} className="flex justify-between gap-3"><dt className="text-slate-500">{rotulo}</dt><dd className="font-medium tabular-nums">{valor}</dd></div>
+                  ))}
+                </dl>
+              )}
+              {(resumoAss.aviso || resumoAss.mensagem) && <p className="text-[13px] text-slate-500 mt-4 leading-relaxed">{resumoAss.aviso || resumoAss.mensagem}</p>}
+              <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">
+                Durante o beta, renovação, cancelamento e mudança de plano são feitos pela equipe ZiisTec. Entre em contato com a ZiisTec para renovar o acesso.
               </p>
             </Panel>
           </section>
@@ -4254,7 +6100,7 @@ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssina
 /* =============================================================== Garantias
    Consulta e acionamento. As garantias não são cadastradas aqui: elas nascem
    da OS concluída, a partir do prazo configurado em cada serviço.           */
-function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso }) {
+function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, excluirRegistro, papel, abrirV2 }) {
   const [filtro, setFiltro] = useState("ativas");
   const [busca, setBusca] = useState("");
   const [acionando, setAcionando] = useState(false);
@@ -4300,7 +6146,7 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
               {g.tipo === "servico" ? "Garantia do serviço executado" : "Garantia do fabricante"} · {st.detalhe}
             </p>
           </div>
-          {st.ativa && <Btn icon={ShieldCheck} onClick={() => { setRelatoProblema(""); setAcionando(true); }}>Abrir atendimento em garantia</Btn>}
+          <div className="flex gap-2 flex-wrap">{papel === "proprietario" && <Btn variant="danger" icon={Trash2} onClick={() => excluirRegistro("garantia", g.id, g.descricao, () => setGarantiaAberta(null))}>Excluir</Btn>}{st.ativa && <Btn icon={ShieldCheck} onClick={() => { setRelatoProblema(""); setAcionando(true); }}>Abrir atendimento em garantia</Btn>}</div>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 items-start">
@@ -4310,10 +6156,12 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
               <Panel className="divide-y divide-slate-100">
                 {[
                   ["Cliente", nomeCliente(g.clienteId), () => abrirCliente(g.clienteId)],
+                  ["Origem", g.tipo === "servico" ? "Serviço executado" : "Produto instalado", null],
                   ["Local do serviço", g.local || "—", null],
                   ["Executado em", dataBR(g.inicio), null],
                   ["Prazo", g.tipo === "servico" ? `${g.dias} dias` : `${g.meses} meses do fabricante`, null],
                   ["Válida até", dataBR(g.ate), null],
+                  ["Tempo restante", st.detalhe, null],
                   ["Ordem de origem", origem ? origem.numero : "—", origem ? () => abrirOS(origem.id) : null],
                   ...(produto ? [["Equipamento", `${produto.nome}${produto.marca ? " · " + produto.marca : ""} ${produto.modelo || ""}`, null]] : []),
                   ...(g.serie ? [["Número de série", g.serie, null]] : []),
@@ -4429,7 +6277,8 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
 
   return (
     <>
-      <PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`} />
+      <PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`}
+        action={papel === "proprietario" && typeof abrirV2 === "function" ? <div className="flex flex-wrap gap-2"><RecursosV2 aba="garantias" papel={papel} abrirV2={abrirV2} /></div> : undefined} />
       {revisoes.filter((r)=>r.status === "pending").length > 0 && (
         <section className="mb-7">
           <Rotulo>Pós-venda programado · {revisoes.filter((r)=>r.status === "pending").length}</Rotulo>
@@ -4441,10 +6290,10 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
                     <p className="font-medium text-slate-900 truncate">{r.descricao}</p>
                     <p className="text-[13px] text-slate-500 truncate">{nomeCliente(r.clienteId)} · retorno em {dataBR(r.data)}</p>
                   </button>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Pill tone={r.data < HOJE ? "erro" : r.data === HOJE ? "atencao" : "neutro"}>{r.data < HOJE ? "Atrasado" : r.data === HOJE ? "Hoje" : dataBR(r.data)}</Pill>
-                    <Btn size="sm" variant="soft" icon={Check} onClick={()=>mudarRevisao(r,"done")}>Concluir</Btn>
-                    <Btn size="sm" variant="ghost" onClick={()=>mudarRevisao(r,"dismissed")}>Dispensar</Btn>
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
+                    <Pill tone={r.data < hojeISO() ? "erro" : r.data === hojeISO() ? "atencao" : "neutro"}>{r.data < hojeISO() ? "Atrasado" : r.data === hojeISO() ? "Hoje" : dataBR(r.data)}</Pill>
+                    <Btn size="sm" variant="soft" icon={Check} className="min-h-11 flex-1 sm:flex-none" onClick={()=>mudarRevisao(r,"done")}>Concluir</Btn>
+                    <Btn size="sm" variant="ghost" className="min-h-11 flex-1 sm:flex-none" onClick={()=>mudarRevisao(r,"dismissed")}>Dispensar</Btn>
                   </div>
                 </div>
               </Linha>
@@ -4693,37 +6542,40 @@ function Autenticacao({ usuarios, membresias, empresas, onEntrar, onCriarConta, 
   );
 }
 
-function AssinaturaBloqueada({ assinatura, empresa, sair, reativar }) {
-  const st = ST_ASSINATURA[assinatura.status];
+/* BETA ACCESS · sem checkout: o proprietário não reativa por aqui (nada de pagamento simulado).
+   Trial encerrado e demais bloqueios mostram o status real; os dados continuam no servidor. */
+function AssinaturaBloqueada({ assinatura, empresa, papel, sair }) {
+  const resumo = resumoAssinatura(assinatura);
+  const proprietario = papel === "proprietario";
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased">
+    <div className="min-h-[100dvh] bg-slate-50 flex items-center justify-center px-4 py-10 font-sans antialiased overflow-x-hidden">
       <div className="w-full max-w-md text-center">
         <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center mx-auto mb-5">
           <Lock className="w-5 h-5 text-teal-400" aria-hidden="true" />
         </div>
-        <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
-          {assinatura.status === "cancelada" ? "Sua assinatura foi cancelada" : "Sua assinatura está pausada"}
-        </h1>
-        <p className="text-[15px] text-slate-500 mt-2 leading-relaxed">
-          Os dados da {empresa.nome} continuam armazenados: clientes, orçamentos, ordens, financeiro, garantias e histórico.
-          Nada foi apagado.
+        <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">{resumo.titulo}</h1>
+        <p className="text-[15px] text-slate-600 mt-2 leading-relaxed">{resumo.mensagem}</p>
+        <p className="text-[14px] text-slate-500 mt-1 leading-relaxed">
+          Clientes, orçamentos, ordens, financeiro, garantias e histórico da {empresa.nome} não foram apagados.
         </p>
-        <Panel className="p-5 mt-7 text-left space-y-3">
-          <div className="flex justify-between text-[14px]"><span className="text-slate-500">Plano</span><span className="font-medium">{assinatura.plano}</span></div>
-          <div className="flex justify-between text-[14px]"><span className="text-slate-500">Valor</span><span className="font-medium tabular-nums">{brl(assinatura.valor)}/mês</span></div>
-          <div className="flex justify-between items-center text-[14px]"><span className="text-slate-500">Situação</span><Pill tone={st.tone}>{st.label}</Pill></div>
-        </Panel>
-        <Btn className="w-full mt-5" icon={CreditCard} onClick={reativar}>Reativar assinatura</Btn>
-        <p className="text-[12px] text-slate-400 mt-3 leading-relaxed">
-          Se o período atual ainda estiver válido, a reativação restaura o acesso sem apagar nada. Depois do vencimento, uma nova cobrança será necessária quando o provedor de pagamento estiver integrado.
+        {proprietario && (
+          <Panel className="p-5 mt-7 text-left space-y-3">
+            <div className="flex justify-between text-[14px]"><span className="text-slate-500">Plano</span><span className="font-medium">{resumo.plano}</span></div>
+            <div className="flex justify-between text-[14px]"><span className="text-slate-500">Valor</span><span className="font-medium tabular-nums">{resumo.preco}</span></div>
+            <div className="flex justify-between text-[14px]"><span className="text-slate-500">Fim do período</span><span className="font-medium tabular-nums">{resumo.fim}</span></div>
+          </Panel>
+        )}
+        <p className="mt-5 rounded-xl bg-white ring-1 ring-slate-200/70 px-4 py-3 text-[14px] font-medium text-slate-800">
+          {proprietario ? resumo.contato : "Fale com o responsável pela empresa para retomar o acesso."}
         </p>
-        <button onClick={sair} className={cx("text-[13px] text-slate-500 mt-6 hover:text-slate-800", ring)}>Sair da conta</button>
+        <Btn className="w-full mt-5" variant="soft" icon={LogOut} onClick={sair}>Sair da conta</Btn>
       </div>
     </div>
   );
 }
 
-function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarColaborador, reenviarAcesso, alternarColaborador, ordens, pedirConfirmacao, aviso }) {
+function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarColaborador, reenviarAcesso, alternarColaborador, ordens, pedirConfirmacao, aviso, produtos, salvarProduto }) {
+  const [aba, setAba] = useState("tecnicos");
   const [form, setForm] = useState(null);
   const [editando, setEditando] = useState(null);
   const [credencial, setCredencial] = useState(null);
@@ -4732,15 +6584,42 @@ function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarCol
     const r = await salvarColaborador(form);
     if (!r) return;
     setForm(null);
-    setCredencial({ nome: form.nome, email: form.email.trim().toLowerCase(), senha: r.senhaTemporaria || null, convite: Boolean(r.convite) });
+    setCredencial({ nome: form.nome, email: form.email.trim().toLowerCase(), senha: r.senhaTemporaria || null, convite: Boolean(r.convite), emailEnviado: Boolean(r.emailEnviado) });
   };
 
   return (
     <>
-      <PageHead title="Equipe" sub="Quem tem acesso à sua empresa e o que cada um enxerga."
-        action={<Btn icon={Plus} onClick={() => setForm({ nome: "", email: "", telefone: "", funcao: "", papel: "tecnico" })}>Adicionar colaborador</Btn>} />
+      <PageHead title="Equipe" sub="Acessos da equipe e produtos liberados para venda em campo."
+        action={aba === "tecnicos" ? <Btn icon={Plus} onClick={() => setForm({ nome: "", email: "", telefone: "", funcao: "", papel: "tecnico" })}>Adicionar colaborador</Btn> : null} />
 
-      <Panel className="divide-y divide-slate-100 overflow-hidden">
+      <Tabs valor={aba} onChange={setAba} className="mb-5" opcoes={[
+        { id: "tecnicos", label: `Técnicos · ${equipe.filter((m) => m.papel !== "proprietario").length}` },
+        { id: "produtos", label: `Produtos para venda · ${(produtos || []).filter((p) => p.ativo && p.vendaHabilitada).length}` },
+      ]} />
+
+      {aba === "produtos" && (
+        <Panel className="divide-y divide-slate-100 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
+            <div><p className="font-medium text-slate-900">Vendas, recebimentos e histórico</p><p className="text-[13px] text-slate-500 mt-1">Veja o que cada técnico vendeu, configure Pix/dinheiro/cartão e consulte o histórico por cliente ou condomínio.</p></div>
+            <Btn icon={ShoppingCart} onClick={() => { const url = new URL(window.location.href); url.searchParams.set("v2", "venda-os"); window.location.assign(`${url.pathname}${url.search}${url.hash}`); }}>Abrir gestão</Btn>
+          </div>
+          {(produtos || []).filter((p) => p.ativo).length === 0 ? <Empty icon={Package} title="Nenhum produto ativo" sub="Cadastre produtos no catálogo antes de liberá-los para a equipe." /> : (produtos || []).filter((p) => p.ativo).map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-900 truncate">{p.nome}</p>
+                <p className="text-[13px] text-slate-500 truncate">{[p.marca, p.modelo].filter(Boolean).join(" · ") || "Produto"}</p>
+                <p className="text-[15px] font-semibold text-teal-800 mt-1 tabular-nums">{brl(p.preco)}</p>
+              </div>
+              <button type="button" onClick={async () => { await salvarProduto({ ...p, vendaHabilitada: !p.vendaHabilitada }); }} aria-pressed={!!p.vendaHabilitada}
+                className={cx("rounded-xl px-3.5 py-2.5 text-[13px] font-medium ring-1 transition-colors", ring, p.vendaHabilitada ? "bg-teal-50 text-teal-800 ring-teal-200" : "bg-white text-slate-500 ring-slate-200")}>
+                {p.vendaHabilitada ? "Liberado para técnico" : "Não liberado"}
+              </button>
+            </div>
+          ))}
+        </Panel>
+      )}
+
+      {aba === "tecnicos" && <Panel className="divide-y divide-slate-100 overflow-hidden">
         {equipe.map((m) => {
           const minhas = ordens.filter((o) => o.responsavelId === m.usuarioId && o.status !== "concluida" && o.status !== "cancelada");
           const pendente = m.convite === "pendente" || m.usuario?.precisaTrocarSenha;
@@ -4788,13 +6667,13 @@ function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarCol
             </Linha>
           );
         })}
-      </Panel>
+      </Panel>}
 
       <Panel className="p-5 mt-6">
         <p className="text-[13px] text-slate-600 leading-relaxed">
-          <span className="font-medium text-slate-800">O que o técnico enxerga:</span> início, agenda e as ordens atribuídas a ele —
-          com cliente, endereço, rota, o que precisa ser feito, relato por voz, fotos, materiais e pendências.
-          A carteira de clientes, orçamentos, garantias, financeiro, compras, equipe e configurações ficam fora do acesso dele.
+          <span className="font-medium text-slate-800">O que o técnico enxerga:</span> início com a lista dos serviços do dia, suas ordens atribuídas e os produtos que você liberou para venda.
+          Ele não cria agendamento nem OS. Dentro do atendimento continua com rota, relato por voz, fotos, materiais e pendências.
+          Custos, margem, carteira de clientes, orçamentos, garantias administrativas, financeiro, compras, equipe e configurações ficam fora do acesso dele.
         </p>
       </Panel>
 
@@ -4859,7 +6738,7 @@ function Equipe({ equipe, usuarioAtual, empresa, salvarColaborador, atualizarCol
               <div className="flex items-center gap-2"><span className="text-[16px] font-semibold text-slate-900 tracking-wider tabular-nums">{credencial.senha}</span><Btn size="sm" variant="soft" icon={Copy} title="Copiar" ariaLabel="Copiar senha" onClick={() => { navigator.clipboard?.writeText(credencial.senha); aviso("Senha copiada"); }} /></div>
             </div>}
           </div>
-          {credencial.convite ? <><p className="text-[13px] text-slate-600 leading-relaxed">Peça para {credencial.nome?.split(" ")[0]} criar ou entrar na conta com este mesmo e-mail. O ZiisTec vincula o acesso à sua empresa automaticamente.</p><div className="rounded-xl bg-teal-50 ring-1 ring-teal-200/70 px-4 py-3 flex gap-2.5"><Lock className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" aria-hidden="true" /><p className="text-[12.5px] text-teal-900 leading-relaxed">Nenhuma senha é criada ou guardada pelo proprietário. Se a pessoa já possui conta, basta entrar. Se esquecer a senha, usa a recuperação na tela de login.</p></div></> : <><p className="text-[13px] text-slate-600 leading-relaxed">Entregue esta senha a {credencial.nome?.split(" ")[0]}. No primeiro acesso o ZiisTec vai pedir que ela crie uma senha pessoal.</p><div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3 flex gap-2.5"><Lock className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" aria-hidden="true" /><p className="text-[12.5px] text-amber-900 leading-relaxed">Esta senha aparece uma única vez e não fica guardada no sistema.</p></div></>}
+          {credencial.convite ? <><p className="text-[13px] text-slate-600 leading-relaxed">{credencial.emailEnviado ? `Enviamos um e-mail oficial da ZiisTec para ${credencial.email}. A pessoa deve confirmar o próprio e-mail antes de entrar na equipe.` : `O convite ficou pendente para ${credencial.email}. Se a pessoa já possui conta, basta entrar com esse mesmo e-mail confirmado.`}</p><div className="rounded-xl bg-teal-50 ring-1 ring-teal-200/70 px-4 py-3 flex gap-2.5"><Lock className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" aria-hidden="true" /><p className="text-[12.5px] text-teal-900 leading-relaxed">Nenhuma senha é criada ou guardada pelo proprietário. Se a pessoa já possui conta, basta entrar. Se esquecer a senha, usa a recuperação na tela de login.</p></div></> : <><p className="text-[13px] text-slate-600 leading-relaxed">Entregue esta senha a {credencial.nome?.split(" ")[0]}. No primeiro acesso o ZiisTec vai pedir que ela crie uma senha pessoal.</p><div className="rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3 flex gap-2.5"><Lock className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" aria-hidden="true" /><p className="text-[12.5px] text-amber-900 leading-relaxed">Esta senha aparece uma única vez e não fica guardada no sistema.</p></div></>}
         </Modal>
       )}
     </>
@@ -4882,7 +6761,7 @@ function AdminPlataforma({ empresas, usuarios, membresias, assinaturas, mudarAss
     <div className="min-h-screen bg-slate-50 font-sans antialiased">
       <header className="bg-slate-900 px-4 sm:px-8 h-14 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-teal-500 flex items-center justify-center"><span className="text-slate-900 font-bold text-sm">Z</span></div>
+          <img src="/brand/ziistec-icon.png" alt="" aria-hidden="true" className="w-7 h-7 rounded-lg object-contain" />
           <span className="text-white font-semibold tracking-tight">ZiisTec · plataforma</span>
         </div>
         <button onClick={sair} className="text-slate-300 text-[13px] flex items-center gap-2 px-2 py-1.5"><LogOut className="w-4 h-4" />Sair</button>
@@ -5041,7 +6920,7 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
       <Panel className="divide-y divide-slate-100 overflow-hidden">
         {assinaturas.map((a) => {
           const st = ST_ASSINATURA[a.status];
-          const atrasada = a.status === "pendente" && a.proximaCobranca < HOJE;
+          const atrasada = a.status === "pendente" && a.proximaCobranca < hojeISO();
           return (
             <Linha key={a.id}>
               <div className="flex flex-wrap items-center justify-between gap-4">
@@ -5085,3 +6964,22 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
     </>
   );
 }
+
+/* ROUND 3.8B · modo técnico de campo */
+
+/* ROUND 3.9 · vendas, recebimentos e histórico */
+
+/* ROUND 4.0 · identidade ZiisTec e convite por e-mail */
+
+/* MOBILE HOMOLOGATION · shell/nav/dashboard · wave 1 */
+
+/* MOBILE HOMOLOGATION · team/finance · wave 5 */
+
+/* MOBILE HOMOLOGATION · history/warranty · wave 6 */
+
+/* FIELD WORKFLOW V1 · wave 3b · checklist templates and return flow */
+
+/* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
+
+export { OSDetalhe, NovaOS, OrdensServico, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado, mesclarOSRelida,
+  Inicio, CartaoMeuDia, TimerAtendimento, AvisoAtendimentoLongo, BaseTecnicaPainel, FinalizarAtendimento, CampoVoz };
