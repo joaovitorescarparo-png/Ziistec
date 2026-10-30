@@ -31,9 +31,9 @@ Contrato frontend ↔ banco (verificação manual, não está no CI): 64 RPCs di
 
 ## 3. Bloqueadores que não são de código
 
-1. **Migrations 0100–0112 não estão aplicadas em nenhum ambiente.** Comprovante, histórico do cliente, Base Técnica e os endurecimentos V1/V1.1/V1.2 só existem no banco descartável. Staging/Beta Live está congelado em 0099 e tem dados reais: aplicar exige autorização explícita e o roteiro de `H0_HOMOLOGATION_PLAN.md`.
+1. **Migrations 0100–0112 estão aplicadas só no H0** (`ziistec-h0`, descartável; `H0_ENVIRONMENT.md`). Em Staging/Beta e Production não. Staging/Beta Live está congelado em 0099 e tem dados reais: aplicar exige autorização explícita e o roteiro de `H0_HOMOLOGATION_PLAN.md`.
 2. **Production está na baseline 0049, vazia.** O go-live exige levar 0050–0112, depois do H0, com aprovação de release.
-3. **H0 em aparelhos reais não foi executado** (scroll/formulários em celular e tablet, câmera/fotos, PDF no celular, comprovante por WhatsApp). Depende de pessoa, aparelhos e conta de teste.
+3. **H0 em aparelhos reais não foi executado** (roteiro em `H0_HUMAN_SCRIPT.md`; falta o Auth do H0 e a pessoa testar; cobre scroll/formulários em celular e tablet, câmera/fotos, PDF no celular e comprovante por WhatsApp). Depende de pessoa, aparelhos e conta de teste.
 4. **Sem E2E de navegador com sessão autenticada**: não há credenciais de teste neste ambiente; a jornada foi provada no banco e nos testes unitários/contratuais.
 
 Regra para os próximos passos: nada disso se resolve improvisando; cada item pede decisão ou credencial humana.

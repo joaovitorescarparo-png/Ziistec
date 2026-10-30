@@ -3,7 +3,7 @@
 > **Este documento é só um plano.** O H0 não foi criado nem executado. Nada aqui autoriza tocar o Beta Live
 > (`xadoktssibuuebzzjrhv`, `beta.ziistec.com`), a Production, a `main`, Auth, domínio ou dados do cliente real.
 > Criar o projeto H0 pode gerar custo e precisa de decisão explícita do proprietário do produto.
-> Estado em 2026-10-29: o H0 ainda não existe; evidências, pedido de ambiente e ensaio local em `H0_ENVIRONMENT_REQUIRED.md`.
+> Estado em 2026-10-30: o H0 existe (projeto `ziistec-h0`, banco em 0112, Preview READY); identidade, passos aplicados, desvios e pendências em `H0_ENVIRONMENT.md`; roteiro humano em `H0_HUMAN_SCRIPT.md`. A contagem de definers (134 → 149) é de `public` + `zt_private`.
 
 ## 1. Objetivo
 
