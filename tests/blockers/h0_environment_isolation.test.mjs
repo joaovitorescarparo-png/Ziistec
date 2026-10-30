@@ -74,7 +74,7 @@ test('H0: três projetos distintos e listas de host/branch disjuntas, sem curing
   }
   assert.equal(STAGING_BRANCHES.includes(H0_BRANCH), false, 'a branch do H0 nunca resolve para o Beta');
   assert.equal([...H0_SUPABASE_HOSTS, ...H0_BRANCHES].some((v) => v.includes('*')), false, 'sem curinga');
-  assert.equal(H0_SUPABASE_HOSTS.includes(BETA_HOST), false, 'o domínio do Beta Live nunca aponta para o H0');
+  assert.equal(H0_SUPABASE_HOSTS.some((host) => host === BETA_HOST), false, 'o domínio do Beta Live nunca aponta para o H0');
 });
 
 test('H0 cliente: o host de Preview do H0 só alcança o H0', () => {
