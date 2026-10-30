@@ -1,4 +1,4 @@
-import { supabase, mensagemErro } from './supabase';
+import { supabase } from './supabase';
 
 const check = (r) => { if (r?.error) throw r.error; return r?.data; };
 const n = (v) => Number(v || 0);
@@ -82,18 +82,16 @@ export async function carregarOSVendaDB(companyId) {
   }));
 }
 
-export async function ajustarEstoqueDB(companyId, productId, delta, notes='') {
-  return n(check(await supabase.rpc('zt_adjust_product_stock',{p_company:companyId,p_product:productId,p_delta:n(delta),p_notes:notes||null})));
-}
-
-export async function venderProdutoNaOSDB(workOrderId, productId, quantidade=1, notes='', requestId=null) {
-  return check(await supabase.rpc('zt_sell_product_on_work_order',{
-    p_wo:workOrderId,
-    p_product:productId,
-    p_quantity:n(quantidade),
-    p_notes:notes||null,
-    p_request:requestId||crypto.randomUUID(),
-  }));
+// requestId (obrigatório) identifica o pedido lógico: o banco aplica o ajuste uma vez e repete o saldo em retry
+// (src/lib/stockAdjustment.js). Num banco ainda sem a 0109 o frontend novo cai para o ajuste antigo, sem idempotência.
+export async function ajustarEstoqueDB(companyId, productId, delta, notes='', requestId) {
+  if (!requestId) throw new Error('Identificador do ajuste de estoque ausente.');
+  const args = {p_company:companyId,p_product:productId,p_delta:n(delta),p_notes:notes||null};
+  const result = await supabase.rpc('zt_adjust_product_stock',{...args,p_request:requestId});
+  if (result?.error && ['PGRST202','42883'].includes(String(result.error.code || ''))) {
+    return n(check(await supabase.rpc('zt_adjust_product_stock',args)));
+  }
+  return n(check(result));
 }
 
 export async function carregarOpcoesGarantiaManualDB(companyId) {
@@ -165,11 +163,6 @@ export async function salvarContratoDB(x, companyId, userId) {
   return fromMaintenanceContract(data);
 }
 
-export async function excluirContratoDB(id) {
-  const r = await supabase.from('maintenance_contracts').delete().eq('id',id);
-  check(r); return true;
-}
-
 export async function gerarCicloContratoDB(contractId, cycleDate, { serviceOn=null, dueOn=null }={}) {
   return check(await supabase.rpc('zt_generate_maintenance_contract_cycle',{
     p_contract:contractId,p_cycle:cycleDate,p_service_on:serviceOn,p_due_on:dueOn,
@@ -181,11 +174,6 @@ export async function carregarMovimentosEstoqueDB(companyId, productId=null) {
   if (productId) q = q.eq('product_id',productId);
   const data = check(await q);
   return (data || []).map((x)=>({ id:x.id,empresaId:x.company_id,produtoId:x.product_id,tipo:x.kind,quantidade:n(x.quantity_delta),custoUnitario:x.unit_cost==null?null:n(x.unit_cost),osId:x.work_order_id||null,compraId:x.purchase_id||null,obs:x.notes||'',criadoEm:x.created_at }));
-}
-
-export async function v2Seguro(fn) {
-  try { return { data:await fn(), error:null }; }
-  catch (e) { return { data:null, error:mensagemErro(e) }; }
 }
 
 /* FIELD WORKFLOW V1 · wave 1 · owner product metadata */

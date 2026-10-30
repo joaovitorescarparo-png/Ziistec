@@ -1,10 +1,13 @@
 import { supabase } from './supabase';
+import { idempotentWrite } from './reliability';
 import { EVIDENCE_STAGE_LABEL, inferEvidenceStage, persistWorkOrderEvidence } from './workOrderEvidence';
 
 const STAGE_LABEL=EVIDENCE_STAGE_LABEL;
 const STATUS_LABEL={unscheduled:'Aguardando',scheduled:'Agendada',in_progress:'Em andamento',done:'Concluída',canceled:'Cancelada'};
 
 const check=(r)=>{if(r?.error) throw r.error;return r?.data;};
+// RPC ainda não publicada no ambiente (migration pendente): mantém o caminho anterior.
+const rpcMissing=(e,name)=>String(e?.code||'')==='PGRST202'||(String(e?.message||'').includes(name)&&/(schema cache|does not exist|could not find)/i.test(String(e?.message||'')));
 const migrationPending=(e)=>['42703','PGRST204','PGRST205'].includes(String(e?.code||''))||/(content_sha256|media_kind|media_stage|caption|include_in_service_report|snapshot|report_version|zt_register_work_order_evidence).*(does not exist|schema cache|not find|could not find)/i.test(String(e?.message||''));
 const signed=async(bucket,path)=>{
   const r=await supabase.storage.from(bucket).createSignedUrl(path,3600);
@@ -57,26 +60,40 @@ async function carregarAttachments(woId,companyId){
 }
 
 export async function carregarDetalheMemoriaOSV2DB(companyId,woId){
-  const [woR,itemsR,materialsR,reportsR,attachments]=await Promise.all([
+  const [woR,itemsR,materialsR,reportsR,attachments,serviceR,fieldItemsR]=await Promise.all([
     supabase.from('work_orders').select('id,company_id,number,client_id,assigned_to,status,scheduled_date,scheduled_time,address,service_place,request,pre_notes,pending_note,needs_return,is_warranty_visit,problem_report,completed_at,created_at,updated_at').eq('company_id',companyId).eq('id',woId).single(),
     supabase.from('work_order_items').select('id,work_order_id,kind,service_id,product_id,name,unit,quantity,unit_price,notes,is_extra,price_pending').eq('company_id',companyId).eq('work_order_id',woId),
     supabase.from('work_order_materials').select('id,work_order_id,product_id,name,quantity,serial_number,created_at').eq('company_id',companyId).eq('work_order_id',woId).order('created_at',{ascending:true}),
     supabase.from('work_order_reports').select(REPORT_SELECT).eq('company_id',companyId).eq('work_order_id',woId).order('created_at',{ascending:true}),
     carregarAttachments(woId,companyId),
+    // 0105: o banco decide a projeção. Proprietário recebe o snapshot completo; técnico, sem pagamento/preços.
+    supabase.rpc('zt_get_service_report',{p_wo:woId}),
+    // Técnico não lê work_order_items direto: itens da própria OS sem preço (proprietário recebe lista vazia).
+    supabase.rpc('zt_field_work_order_items',{p_company:companyId,p_wo:woId}),
   ]);
   const wo=check(woR);
   const client=check(await supabase.from('clients').select('id,name,address,phone,whatsapp').eq('company_id',companyId).eq('id',wo.client_id).maybeSingle())||null;
   const reports=check(reportsR)||[];
-  const serviceReport=reports.find(r=>r.entry_type==='service_report'&&r.is_active)||null;
-  return {workOrder:{...wo,client,status_label:STATUS_LABEL[wo.status]||wo.status},items:check(itemsR)||[],materials:check(materialsR)||[],reports,serviceReport,media:attachments.media,mediaMigrationReady:attachments.migrated};
+  const serviceReport=serviceR?.error&&rpcMissing(serviceR.error,'zt_get_service_report')
+    ?reports.find(r=>r.entry_type==='service_report'&&r.is_active)||null
+    :check(serviceR)||null;
+  const ownerItems=check(itemsR)||[];
+  const fieldItems=fieldItemsR?.error&&rpcMissing(fieldItemsR.error,'zt_field_work_order_items')?[]:check(fieldItemsR)||[];
+  return {workOrder:{...wo,client,status_label:STATUS_LABEL[wo.status]||wo.status},items:ownerItems.length?ownerItems:fieldItems,materials:check(materialsR)||[],reports,serviceReport,media:attachments.media,mediaMigrationReady:attachments.migrated};
 }
 
-export async function salvarRelatoTecnicoV2DB({workOrder,body,userId}){
+// BLOCO 4 · requestId estável por texto: retry/duplo toque devolve a mesma linha em vez de duplicar o relato.
+export async function salvarRelatoTecnicoV2DB({workOrder,body,userId,requestId}){
   const text=String(body||'').trim();
   if(!workOrder?.id||!workOrder?.company_id) throw new Error('OS inválida.');
   if(!text) throw new Error('Escreva ou dite o relato técnico.');
   if(text.length>10000) throw new Error('O relato técnico deve ter no máximo 10.000 caracteres.');
-  return check(await supabase.from('work_order_reports').insert({work_order_id:workOrder.id,company_id:workOrder.company_id,entry_type:'report',body:text,author_id:userId||null}).select(REPORT_SELECT).single());
+  if(!requestId) throw new Error('Identificador do envio ausente. Atualize a página e tente novamente.');
+  const r=await idempotentWrite(()=>supabase.rpc('zt_save_work_order_report',{p_wo:workOrder.id,p_body:text,p_request:requestId}));
+  if(r?.error&&rpcMissing(r.error,'zt_save_work_order_report')){
+    return check(await supabase.from('work_order_reports').insert({work_order_id:workOrder.id,company_id:workOrder.company_id,entry_type:'report',body:text,author_id:userId||null}).select(REPORT_SELECT).single());
+  }
+  return check(r);
 }
 
 export async function definirEvidenciaRelatorioV2DB(attachmentId,include){
@@ -88,7 +105,7 @@ export async function enviarEvidenciaOSV2DB({workOrder,file,companyId,userId,sta
   if(!workOrder?.id||workOrder.company_id!==companyId) throw new Error('OS inválida para esta empresa.');
   const probe=await supabase.from('attachments').select('content_sha256,media_kind,include_in_service_report').eq('company_id',companyId).limit(1);
   if(probe.error&&migrationPending(probe.error)){
-    const e=new Error('A memória técnica desta branch depende da migration RC-1B de evidências homologada no Staging.');
+    const e=new Error('O envio de evidências ainda não está disponível na sua conta.');
     e.code='V2_MIGRATION_PENDING';
     throw e;
   }

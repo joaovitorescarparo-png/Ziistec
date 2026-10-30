@@ -26,7 +26,8 @@ test('manual NovaOS can link client quotes and opens an existing linked OS inste
   assert.match(legacy,/return abrirOSVinculada\(existente, orcamentoId\)/);
   assert.match(data,/quote_id:x\.orcamentoId\|\|null/);
   assert.match(data,/export async function carregarOSPorOrcamentoDB/);
-  assert.match(data,/const \{ itemCosts, materialCosts, workOrderCosts \} = await carregarCustosPrivados\(companyId,response\.data\.id\)/);
+  // Custos privados (e, desde a 0105, itens de campo do técnico) carregados só para a OS vinculada.
+  assert.match(data,/const \[\{ itemCosts, materialCosts, workOrderCosts \}, itensCampo\] = await Promise\.all\(\[carregarCustosPrivados\(companyId,response\.data\.id\),carregarItensCampo\(companyId,response\.data\.id\)\]\)/);
   assert.match(legacy,/const pronto = f\.clienteId && \(orcamentoSelecionado\?\.osId \|\| f\.descricaoLivre\.trim\(\) \|\| f\.itens\.length > 0\)/);
 });
 

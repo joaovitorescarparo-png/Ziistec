@@ -16,6 +16,10 @@ const PROD_PUBLISHABLE_KEY = "sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw";
 const STAGING_URL = "https://xadoktssibuuebzzjrhv.supabase.co";
 const STAGING_PUBLISHABLE_KEY = "sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e";
 
+// H0: projeto Supabase próprio e descartável, só para o Preview de homologação desta branch. Chave publishable (pública por design).
+const H0_URL = "https://auojcljfahhpkfqqbygd.supabase.co";
+const H0_PUBLISHABLE_KEY = "sb_publishable_SzojrPawC9GAEBHoN9caSw_aTr_3o2a";
+
 const runtimeConfig = resolverConfigSupabase({
   deploymentEnv: import.meta.env.VITE_VERCEL_ENV,
   host: typeof window !== "undefined" ? window.location.hostname : "",
@@ -25,6 +29,8 @@ const runtimeConfig = resolverConfigSupabase({
   prodKey: PROD_PUBLISHABLE_KEY,
   stagingUrl: STAGING_URL,
   stagingKey: STAGING_PUBLISHABLE_KEY,
+  h0Url: H0_URL,
+  h0Key: H0_PUBLISHABLE_KEY,
 });
 
 export const ambienteSupabase = runtimeConfig.origem;
@@ -78,7 +84,7 @@ export function mensagemErro(erro) {
   if (codigo === "57014" || /timeout/i.test(texto)) return "A operação demorou demais. Tente novamente.";
   if (codigo === "42P01" || codigo === "42703" || /relation .* does not exist|column .* does not exist/i.test(texto)) {
     registrarTecnico(erro);
-    return "Esta função ainda não está disponível neste ambiente.";
+    return "Este recurso ainda não está disponível na sua conta.";
   }
   if (/^PGRST/.test(codigo) || /^[0-9A-Z]{5}$/.test(codigo)) {
     registrarTecnico(erro);

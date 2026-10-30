@@ -1,6 +1,6 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {AlertTriangle,ArrowLeft,Crosshair,ExternalLink,MapPin,RefreshCw,Save,Search,Trash2,X} from 'lucide-react';
-import {buildGoogleMapsUrl,carregarClientesLocaisV2DB,limparLocalClienteV2DB,salvarLocalClienteV2DB} from '../../lib/clientLocationsV2Api';
+import {buildGoogleMapsUrl,carregarClientesLocaisV2DB,limparLocalClienteV2DB,normalizeGoogleMapsUrl,salvarLocalClienteV2DB} from '../../lib/clientLocationsV2Api';
 
 const coord=(v)=>v==null||v===''?'':String(Number(v));
 
@@ -31,7 +31,10 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
   const selected=rows.find(c=>c.id===selectedId)||null;
   const withLocation=rows.filter(c=>c.maps_url||c.address||(c.latitude!=null&&c.longitude!=null)).length;
 
+  // Bloco 6: leitura de GPS pertence ao cliente em que foi pedida; trocar de cliente descarta a leitura pendente.
+  const gpsRequest=useRef(null);
   const select=(client)=>{
+    gpsRequest.current=null;setLocating(false);
     setSelectedId(client.id);
     setForm({address:client.address||'',mapsUrl:client.maps_url||'',latitude:coord(client.latitude),longitude:coord(client.longitude),googlePlaceId:client.google_place_id||''});
     setError('');
@@ -44,10 +47,12 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
   const useGps=()=>{
     setError('');
     if(!navigator?.geolocation){setError('Este navegador não disponibiliza localização GPS.');return;}
+    const request={clientId:selectedId};
+    gpsRequest.current=request;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
-      ({coords})=>{setForm(f=>({...f,latitude:String(coords.latitude),longitude:String(coords.longitude),mapsUrl:''}));setLocating(false);},
-      (e)=>{setLocating(false);setError(e?.code===1?'Permita o acesso à localização para usar o GPS.':'Não consegui obter a localização atual.');},
+      ({coords})=>{if(gpsRequest.current!==request)return;gpsRequest.current=null;setForm(f=>({...f,latitude:String(coords.latitude),longitude:String(coords.longitude),mapsUrl:''}));setLocating(false);},
+      (e)=>{if(gpsRequest.current!==request)return;gpsRequest.current=null;setLocating(false);setError(e?.code===1?'Permita o acesso à localização para usar o GPS.':'Não consegui obter a localização atual.');},
       {enableHighAccuracy:true,timeout:12000,maximumAge:30000},
     );
   };
@@ -75,7 +80,8 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
   };
 
   const openMap=()=>{
-    const url=form.mapsUrl||currentMap;
+    // maps_url vem do banco e a coluna só limita o tamanho: só abre link HTTPS do Google (nunca javascript:, data: ou outro host).
+    const url=normalizeGoogleMapsUrl(form.mapsUrl)||currentMap;
     if(url)window.open(url,'_blank','noopener,noreferrer');
   };
 
@@ -102,12 +108,12 @@ export default function ClientLocationsV2({companyId,companyName='Sua empresa',o
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2"><div><label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Latitude</label><input inputMode="decimal" value={form.latitude} onChange={e=>setForm(f=>({...f,latitude:e.target.value,mapsUrl:''}))} placeholder="-27.123456" className="mt-2 w-full rounded-xl border border-white/10 bg-black/15 px-3.5 py-3 text-sm outline-none focus:border-sky-400/30"/></div><div><label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Longitude</label><input inputMode="decimal" value={form.longitude} onChange={e=>setForm(f=>({...f,longitude:e.target.value,mapsUrl:''}))} placeholder="-48.123456" className="mt-2 w-full rounded-xl border border-white/10 bg-black/15 px-3.5 py-3 text-sm outline-none focus:border-sky-400/30"/></div></div>
 
-          <details className="mt-5 rounded-2xl border border-white/10 bg-black/10"><summary className="flex min-h-11 cursor-pointer items-center px-4 py-3 text-xs font-bold text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-300">Dados avançados do Google Maps</summary><div className="space-y-4 border-t border-white/10 p-4"><div><label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Link do Google Maps</label><input value={form.mapsUrl} onChange={e=>setForm(f=>({...f,mapsUrl:e.target.value.slice(0,2000)}))} placeholder="https://www.google.com/maps/..." className="mt-2 w-full rounded-xl border border-white/10 bg-black/15 px-3.5 py-3 text-sm outline-none focus:border-sky-400/30"/></div><div><label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Google Place ID</label><input value={form.googlePlaceId} onChange={e=>setForm(f=>({...f,googlePlaceId:e.target.value.slice(0,500),mapsUrl:''}))} placeholder="Opcional — preparado para autocomplete Places" className="mt-2 w-full rounded-xl border border-white/10 bg-black/15 px-3.5 py-3 text-sm outline-none focus:border-sky-400/30"/></div><p className="text-[11px] leading-relaxed text-slate-600">A estrutura já está pronta para Google Places. O autocomplete visual depende de uma chave Google Maps/Places configurada no ambiente; até lá, endereço, GPS e link Maps funcionam sem inventar uma integração.</p></div></details>
+          <details className="mt-5 rounded-2xl border border-white/10 bg-black/10"><summary className="flex min-h-11 cursor-pointer items-center px-4 py-3 text-xs font-bold text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-300">Dados avançados do Google Maps</summary><div className="space-y-4 border-t border-white/10 p-4"><div><label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Link do Google Maps</label><input value={form.mapsUrl} onChange={e=>setForm(f=>({...f,mapsUrl:e.target.value.slice(0,2000)}))} placeholder="https://www.google.com/maps/..." className="mt-2 w-full rounded-xl border border-white/10 bg-black/15 px-3.5 py-3 text-sm outline-none focus:border-sky-400/30"/></div><div><label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Google Place ID</label><input value={form.googlePlaceId} onChange={e=>setForm(f=>({...f,googlePlaceId:e.target.value.slice(0,500),mapsUrl:''}))} placeholder="Opcional" className="mt-2 w-full rounded-xl border border-white/10 bg-black/15 px-3.5 py-3 text-sm outline-none focus:border-sky-400/30"/></div><p className="text-[11px] leading-relaxed text-slate-600">Endereço, GPS e link do Maps já bastam para abrir a rota. Estes campos são opcionais e servem para guardar a referência exata do Google.</p></div></details>
 
           <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"><button onClick={clear} disabled={saving} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose-400/15 bg-rose-400/5 px-4 py-3 text-xs font-bold text-rose-300 disabled:opacity-50"><Trash2 size={15}/>Limpar local</button><button onClick={save} disabled={saving} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-sky-400 px-5 py-3 text-xs font-bold text-slate-950 disabled:opacity-50"><Save size={15}/>{saving?'Salvando...':'Salvar local'}</button></div>
         </section>
 
-        <section className="rounded-3xl border border-emerald-400/15 bg-emerald-400/[0.05] p-5 text-xs leading-relaxed text-emerald-100/65"><strong className="text-emerald-200">Segurança:</strong> esta área é exclusiva do proprietário. O técnico não recebe uma lista geral de clientes; na memória/OS, o RLS libera apenas o cliente vinculado ao atendimento atribuído.</section>
+        <section className="rounded-3xl border border-emerald-400/15 bg-emerald-400/[0.05] p-5 text-xs leading-relaxed text-emerald-100/65"><strong className="text-emerald-200">Privacidade:</strong> esta área é exclusiva do proprietário. O técnico não recebe a lista de clientes; ele só vê o cliente do atendimento que lhe foi atribuído.</section>
       </div>}
     </main>
   </div>;

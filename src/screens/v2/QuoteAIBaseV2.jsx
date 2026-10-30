@@ -11,7 +11,7 @@ import {
 import { mensagemErro } from '../../lib/supabase';
 import { resolverImagemProdutoDB } from '../../lib/storageExtras';
 
-const brl = (v) => Number(v || 0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import { brl } from '../../lib/money';
 const num = (v) => Number(String(v ?? '').replace(',','.')) || 0;
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const emptyItem = () => ({ id:uid(), tipo:'livre', catalogoId:null, nome:'', unidade:'unidade', qtd:1, preco:0, custo:0, precoFoiInformado:true, obs:'' });

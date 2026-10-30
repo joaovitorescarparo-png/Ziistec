@@ -167,7 +167,7 @@ Regressão: `supabase/tests/v2_beta_invites_rollback.sql` e `scripts/test-beta-i
 - O link de confirmação abre outro endereço: Site URL ou Redirect URLs.
 - "Assinatura inativa": renove pelo §4.
 
-**Somente proprietário:** não convide técnicos no beta. O convite por e-mail não está liberado para o domínio, e a projeção de preços para o técnico ainda é pendência P1.
+**Somente proprietário:** não convide técnicos no beta. O convite por e-mail não está liberado para o domínio, e a projeção de preços para o técnico ainda é pendência P1 neste ambiente (resolvida na próxima versão pela 0105, que não está aplicada no Beta Live).
 
 ## 6. Reverter
 

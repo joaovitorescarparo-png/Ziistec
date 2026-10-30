@@ -6,6 +6,9 @@ import React from 'react';
 import { transformSync } from 'esbuild';
 import * as display from '../../src/lib/subscriptionDisplay.js';
 import { googleAuthHabilitado, seloBetaAtivo } from '../../src/lib/betaFlags.js';
+import * as formDrafts from '../../src/lib/formDrafts.js';
+import * as recursosV2 from '../../src/lib/recursosV2.js';
+import * as unsavedChanges from '../../src/lib/unsavedChanges.js';
 
 const read = path => fs.readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -63,7 +66,7 @@ function authStore(session) {
   return { supabase, signOutCalls, get stored() { return stored; } };
 }
 function sessao(store, env) {
-  const h = harness('src/lib/useSessao.js', { './supabase': { supabase: store.supabase, mensagemErro: e => String(e?.message || e) } }, env);
+  const h = harness('src/lib/useSessao.js', { './supabase': { supabase: store.supabase, mensagemErro: e => String(e?.message || e) }, './formDrafts': formDrafts }, env);
   return () => h.render(h.exports.useSessao);
 }
 
@@ -94,6 +97,7 @@ test('sem sessão o App mostra o Login e nenhum Assistente (contexto descartado)
     './lib/useSessao': { useSessao: () => ({ sessaoAuth: null, carregando: false, membresias: [], recarregar() {}, sair() {} }) },
     './lib/supabase': { configurado: true }, './screens/Login': { __esModule: true, default: LoginMock },
     './components/AssistantPanel': { __esModule: true, default: AssistantMock },
+    './lib/formDrafts': formDrafts, './lib/recursosV2': recursosV2, './lib/unsavedChanges': unsavedChanges,
   }, { window: { location: { search: '', href: 'https://beta.ziistec.com/' }, addEventListener() {}, removeEventListener() {} } });
   const tree = h.render(h.exports.default);
   assert.ok(find(tree, LoginMock));
@@ -357,7 +361,8 @@ test('0099: defaults Profissional 79.90, beta_invites fechada, RPCs admin com MF
   const ci = read('scripts/run-sql-rls-ci.sh');
   assert.match(ci, /supabase\/tests\/v2_beta_invites_rollback\.sql/);
   assert.match(ci, /bash scripts\/test-beta-invite-concurrency\.sh/);
-  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /if v_total<>134 then/);
+  // O total vigente fica no próprio RC1B; aqui só se exige que a 0099 tenha sido contabilizada.
+  assert.match(read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql'), /-- 0099 adds four public definers/);
   const smoke = read('supabase/tests/v2_beta_invites_rollback.sql');
   assert.match(smoke, /^begin;$/m); assert.match(smoke, /^rollback;$/m);
   assert.match(smoke, /20_convite_de_equipe_intacto/);

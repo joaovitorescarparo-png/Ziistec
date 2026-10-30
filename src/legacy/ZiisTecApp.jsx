@@ -8,7 +8,7 @@ import {
   Phone, MapPin, Trash2, Send, Share2, Pencil, ChevronRight, Clock,
   CircleCheck, Building2, User, CheckCircle2, Circle, AlertTriangle,
   Printer, MoreHorizontal, CalendarClock, Receipt, Banknote, Mic, MicOff,
-  Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles, Navigation,
+  Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles,
   TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building, ChevronDown,
 } from "lucide-react";
 import GlobalSearchModal from "../components/GlobalSearchModal";
@@ -25,9 +25,19 @@ import {
 } from "../lib/dataApiExtras";
 import { atualizarColaboradorDB } from "../lib/teamApi";
 import {
-  hidratarComplementosDB, persistirEdicaoOSDB, prepararFinalizacaoOSDB,
+  hidratarComplementosDB, persistirEdicaoOSDB, prepararFinalizacaoOSDB, lerInicioAtendimentoDB,
   uploadDocumentosCompraDB, uploadLogoEmpresaDB,
 } from "../lib/runtimeApi";
+import {
+  attendanceTimerLabel, buildStandardReportText, createContentRequestIds, createReportRequestIds, difficultyLabel, DIFFICULTY_OPTIONS,
+  emptyTechnicalBase, evidenceCountLabel, isStaleAttendance, mergeDictation, normalizeConfirmation, normalizeTechnicalBase,
+  REPORT_PROVENANCE_LABEL, reportFallbackMessage, reportProvenance, reportUsageLabel, sortTechnicianDay, STALE_ATTENDANCE_MESSAGE,
+  technicalBaseChanged, technicalBaseHasContent, technicalBaseTooLong, TECHNICAL_BASE_MAX, technicianCardModel,
+} from "../lib/fieldExecution";
+import {
+  carregarFechamentoTecnico, carregarUsoRelatorioIADB, marcarRelatorioIAUsadoDB, salvarBaseTecnicaDB, salvarConfirmacaoDB,
+} from "../lib/technicalBaseApi";
+import { gerarRelatorioIA } from "../lib/workOrderReportApi";
 import { cancelarAssinaturaDB, reativarAssinaturaDB } from "../lib/subscriptionApi";
 import MinhaConta from "../components/MinhaConta";
 import { seloBetaAtivo } from "../lib/betaFlags";
@@ -36,11 +46,28 @@ import { chamarIAReal } from "../lib/aiApi";
 import { resolverLogoEmpresaDB, persistirFotosOSDB, resolverImagemProdutoDB, salvarImagemProdutoDB, removerImagemProdutoDB, prepararPreviewImagemProdutoDB } from "../lib/storageExtras";
 import { createProductImagePreview } from "../lib/productImagePreview";
 import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
+import ServiceReceiptPanel from "../components/ServiceReceiptPanel";
+import QuoteClientLocationField from "../components/QuoteClientLocationField";
+import LocationHistoryPanel from "../components/LocationHistoryPanel";
+import { listarLocaisClienteOrcamentoV2DB } from "../lib/quoteReuseV2Api";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
 import useModalViewport from "../hooks/useModalViewport";
+import { useDiscardGuard, useFormDirty } from "../hooks/useUnsavedChanges";
+import { confirmDiscardNavigation } from "../lib/unsavedChanges";
+import DiscardChangesPrompt from "../components/DiscardChangesPrompt";
+import { useModalDismiss } from "../hooks/useModalDismiss";
+import { useFormDraft } from "../hooks/useFormDraft";
+import DraftRestoredNotice from "../components/DraftRestoredNotice";
 import { beginEdgeSwipe, classifyHorizontalSwipe, isKeyboardViewportOpen } from "../lib/mobileNavigation";
+import { abaDeOrigemV2, recursosV2DaAba, semOrigemV2 } from "../lib/recursosV2";
+import { concluidasRecentemente, produtosComEstoqueBaixo } from "../lib/dashboardInicio";
+import RouteButton from "../components/RouteButton";
+import useRoutePreference from "../hooks/useRoutePreference";
+import { linkDeRota, resolverDestinoRota } from "../lib/routeApps";
 import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
+import { hojeISO, addMesesISO } from "../lib/dates";
+import useDiaLocal from "../hooks/useDiaLocal";
 
 /* ================================================================ helpers */
 const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -50,9 +77,8 @@ const iso = (d) => {
   const x = new Date(d);
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 };
-const HOJE = iso(new Date());
+const HOJE_SEED = hojeISO(); // só para os dados de demonstração, montados uma vez; as regras leem hojeISO() na hora
 const addDays = (base, n) => { const d = new Date(base + "T12:00:00"); d.setDate(d.getDate() + n); return iso(d); };
-const addMeses = (base, n) => { const d = new Date(base + "T12:00:00"); d.setMonth(d.getMonth() + n); return iso(d); };
 const dataBR = (s) => (s ? s.split("-").reverse().join("/") : "—");
 const dataCurta = (s) => (s ? s.slice(8) + "/" + s.slice(5, 7) : "—");
 const DIAS = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
@@ -86,7 +112,6 @@ const acrescimoSobreCusto = (custo, preco) => {
 };
 const soDigitos = (s) => (s || "").replace(/\D/g, "");
 const iniciais = (s = "") => s.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-const mapsUrl = (end) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(end || "")}`;
 const semAcento = (s = "") => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 const UNIDADES = [
@@ -106,7 +131,7 @@ const PRAZOS_GARANTIA = [
 ];
 const diasEntre = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 86400000);
 const statusGarantia = (g) => {
-  const d = diasEntre(HOJE, g.ate);
+  const d = diasEntre(hojeISO(), g.ate);
   return d >= 0
     ? { ativa: true, label: "Ativa", tone: "sucesso", detalhe: d === 0 ? "vence hoje" : `${d} dia${d > 1 ? "s" : ""} restante${d > 1 ? "s" : ""}` }
     : { ativa: false, label: "Expirada", tone: "neutro", detalhe: `expirada há ${Math.abs(d)} dia${Math.abs(d) > 1 ? "s" : ""}` };
@@ -159,10 +184,10 @@ const S = (id) => SERVICOS_SEED.find((s) => s.id === id);
 const P = (id) => PRODUTOS_SEED.find((p) => p.id === id);
 
 const ORCAMENTOS_SEED = [
-  { id: "o1", numero: "ORC-0007", clienteId: "c1", status: "enviado", data: addDays(HOJE, -3), validade: addDays(HOJE, 12), itens: [itemServico(S("s1"), 4), itemProduto(P("p1"), 4), itemServico(S("s3"), 1)], desconto: 150, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Instalação nas portarias social e de serviço.", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portarias social e de serviço", osId: null },
-  { id: "o2", numero: "ORC-0006", clienteId: "c2", status: "aprovado", data: addDays(HOJE, -6), validade: addDays(HOJE, 9), itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], desconto: 0, acrescimo: 0, condicao: "Pagamento à vista via Pix na conclusão.", obs: "Porta de madeira maciça.", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", osId: "os3" },
-  { id: "o3", numero: "ORC-0005", clienteId: "c4", status: "rascunho", data: addDays(HOJE, -1), validade: addDays(HOJE, 14), itens: [itemServico(S("s4"), 4), itemProduto(P("p2"), 4)], desconto: 0, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Prioridade nas câmeras do estoque.", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Estoque e área de produção", osId: null },
-  { id: "o4", numero: "ORC-0004", clienteId: "c3", status: "aprovado", data: addDays(HOJE, -14), validade: addDays(HOJE, 1), itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], desconto: 0, acrescimo: 0, condicao: "Boleto em 15 dias.", obs: "", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", osId: "os2" },
+  { id: "o1", numero: "ORC-0007", clienteId: "c1", status: "enviado", data: addDays(HOJE_SEED, -3), validade: addDays(HOJE_SEED, 12), itens: [itemServico(S("s1"), 4), itemProduto(P("p1"), 4), itemServico(S("s3"), 1)], desconto: 150, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Instalação nas portarias social e de serviço.", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portarias social e de serviço", osId: null },
+  { id: "o2", numero: "ORC-0006", clienteId: "c2", status: "aprovado", data: addDays(HOJE_SEED, -6), validade: addDays(HOJE_SEED, 9), itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], desconto: 0, acrescimo: 0, condicao: "Pagamento à vista via Pix na conclusão.", obs: "Porta de madeira maciça.", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", osId: "os3" },
+  { id: "o3", numero: "ORC-0005", clienteId: "c4", status: "rascunho", data: addDays(HOJE_SEED, -1), validade: addDays(HOJE_SEED, 14), itens: [itemServico(S("s4"), 4), itemProduto(P("p2"), 4)], desconto: 0, acrescimo: 0, condicao: "50% na aprovação e 50% na entrega do serviço.", obs: "Prioridade nas câmeras do estoque.", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Estoque e área de produção", osId: null },
+  { id: "o4", numero: "ORC-0004", clienteId: "c3", status: "aprovado", data: addDays(HOJE_SEED, -14), validade: addDays(HOJE_SEED, 1), itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], desconto: 0, acrescimo: 0, condicao: "Boleto em 15 dias.", obs: "", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", osId: "os2" },
 ];
 
 const osBase = {
@@ -172,33 +197,33 @@ const osBase = {
 };
 
 const ORDENS_SEED = [
-  { ...osBase, id: "os1", numero: "OS-0001", clienteId: "c1", orcamentoId: null, status: "andamento", data: HOJE, hora: "14:00", responsavel: "Jonas Ribeiro", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Garagem — subsolo 1", itens: [itemServico(S("s4"), 3), itemProduto(P("p2"), 3)], obs: "Substituir 3 câmeras da garagem. Elevador de serviço até 17h.", checklist: [{ id: "k1", texto: "Conferir cabeamento existente", feito: true }, { id: "k2", texto: "Instalar câmeras", feito: false }, { id: "k3", texto: "Ajustar ângulo e gravação", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE, -1), texto: "Ordem de serviço criada" }] },
-  { ...osBase, id: "os2", numero: "OS-0002", clienteId: "c3", orcamentoId: "o4", status: "concluida", data: addDays(HOJE, -4), hora: "09:00", responsavel: "Diego Farias", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], obs: "", relato: "Diagnóstico\nTrês interfones do bloco B sem áudio de retorno.\n\nServiço executado\nLimpeza de contatos, troca de dois cabos e recadastramento de tags.\n\nResultado\nTestado em todos os apartamentos e funcionando.", checklist: [{ id: "k4", texto: "Testar interfones", feito: true }, { id: "k5", texto: "Cadastrar tags novas", feito: true }], custosExtras: 40, cobrancaId: "l1", historico: [{ id: uid(), quando: addDays(HOJE, -8), texto: "Gerada a partir do ORC-0004" }, { id: uid(), quando: addDays(HOJE, -4), texto: "Serviço concluído" }] },
-  { ...osBase, id: "os3", numero: "OS-0003", clienteId: "c2", orcamentoId: "o2", status: "agendada", data: HOJE, hora: "09:00", responsavel: "Jonas Ribeiro", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], obs: "Porta de madeira maciça. Cliente prefere manhã.", checklist: [{ id: "k6", texto: "Levar furadeira e brocas", feito: false }, { id: "k7", texto: "Cadastrar digitais da família", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE, -5), texto: "Gerada a partir do ORC-0006" }] },
-  { ...osBase, id: "os4", numero: "OS-0004", clienteId: "c1", orcamentoId: null, status: "agendada", data: addDays(HOJE, 1), hora: "10:30", responsavel: "Diego Farias", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portaria social", itens: [itemServico(S("s6"), 1)], obs: "Vistoria mensal do contrato.", checklist: [], historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] },
-  { ...osBase, id: "os5", numero: "OS-0005", clienteId: "c4", orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: "Jonas Ribeiro", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Entrada de serviço", itens: [itemServico(S("s5"), 1)], obs: "Interfone com ruído.", checklist: [], historico: [{ id: uid(), quando: addDays(HOJE, -2), texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os1", numero: "OS-0001", clienteId: "c1", orcamentoId: null, status: "andamento", data: HOJE_SEED, hora: "14:00", responsavel: "Jonas Ribeiro", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Garagem — subsolo 1", itens: [itemServico(S("s4"), 3), itemProduto(P("p2"), 3)], obs: "Substituir 3 câmeras da garagem. Elevador de serviço até 17h.", checklist: [{ id: "k1", texto: "Conferir cabeamento existente", feito: true }, { id: "k2", texto: "Instalar câmeras", feito: false }, { id: "k3", texto: "Ajustar ângulo e gravação", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -1), texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os2", numero: "OS-0002", clienteId: "c3", orcamentoId: "o4", status: "concluida", data: addDays(HOJE_SEED, -4), hora: "09:00", responsavel: "Diego Farias", local: "Rua Pamplona, 1004 — Jardins, São Paulo/SP", localServico: "Bloco B", itens: [itemServico(S("s5"), 3), itemServico(S("s2"), 2)], obs: "", relato: "Diagnóstico\nTrês interfones do bloco B sem áudio de retorno.\n\nServiço executado\nLimpeza de contatos, troca de dois cabos e recadastramento de tags.\n\nResultado\nTestado em todos os apartamentos e funcionando.", checklist: [{ id: "k4", texto: "Testar interfones", feito: true }, { id: "k5", texto: "Cadastrar tags novas", feito: true }], custosExtras: 40, cobrancaId: "l1", historico: [{ id: uid(), quando: addDays(HOJE_SEED, -8), texto: "Gerada a partir do ORC-0004" }, { id: uid(), quando: addDays(HOJE_SEED, -4), texto: "Serviço concluído" }] },
+  { ...osBase, id: "os3", numero: "OS-0003", clienteId: "c2", orcamentoId: "o2", status: "agendada", data: HOJE_SEED, hora: "09:00", responsavel: "Jonas Ribeiro", local: "Rua Groenlândia, 92 — Jardim Paulista, São Paulo/SP", localServico: "Apto 71", itens: [itemServico(S("s1"), 1), itemServico(S("s3"), 1)], obs: "Porta de madeira maciça. Cliente prefere manhã.", checklist: [{ id: "k6", texto: "Levar furadeira e brocas", feito: false }, { id: "k7", texto: "Cadastrar digitais da família", feito: false }], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -5), texto: "Gerada a partir do ORC-0006" }] },
+  { ...osBase, id: "os4", numero: "OS-0004", clienteId: "c1", orcamentoId: null, status: "agendada", data: addDays(HOJE_SEED, 1), hora: "10:30", responsavel: "Diego Farias", local: "Av. Bandeirantes, 1250 — Moema, São Paulo/SP", localServico: "Portaria social", itens: [itemServico(S("s6"), 1)], obs: "Vistoria mensal do contrato.", checklist: [], historico: [{ id: uid(), quando: HOJE_SEED, texto: "Ordem de serviço criada" }] },
+  { ...osBase, id: "os5", numero: "OS-0005", clienteId: "c4", orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: "Jonas Ribeiro", local: "Rua Vergueiro, 3320 — Vila Mariana, São Paulo/SP", localServico: "Entrada de serviço", itens: [itemServico(S("s5"), 1)], obs: "Interfone com ruído.", checklist: [], historico: [{ id: uid(), quando: addDays(HOJE_SEED, -2), texto: "Ordem de serviço criada" }] },
 ];
 
 const LANCAMENTOS_SEED = [
-  { id: "l1", tipo: "receita", descricao: "OS-0002 · Prime Imóveis", clienteId: "c3", valor: 1180, vencimento: addDays(HOJE, 11), pago: false, origemTipo: "os", origemId: "os2", categoria: "Serviços" },
-  { id: "l2", tipo: "receita", descricao: "Manutenção interfone · Cond. Jardins", clienteId: "c1", valor: 540, vencimento: addDays(HOJE, -9), pago: true, pagoEm: addDays(HOJE, -9), forma: "Pix", origemTipo: "manual", categoria: "Serviços" },
-  { id: "l3", tipo: "receita", descricao: "Instalação CFTV · Padaria Pão Nosso", clienteId: "c4", valor: 750, vencimento: addDays(HOJE, -2), pago: true, pagoEm: addDays(HOJE, -2), forma: "Transferência", origemTipo: "manual", categoria: "Serviços" },
-  { id: "l7", tipo: "receita", descricao: "Configuração de tags · Cond. Jardins", clienteId: "c1", valor: 640, vencimento: addDays(HOJE, -6), pago: false, origemTipo: "manual", categoria: "Serviços" },
-  { id: "l4", tipo: "despesa", descricao: "Compra CMP-0002 · Casa das Fontes", valor: 760, vencimento: addDays(HOJE, -7), pago: true, pagoEm: addDays(HOJE, -7), forma: "Pix", origemTipo: "compra", origemId: "cp2", categoria: "Materiais" },
-  { id: "l5", tipo: "despesa", descricao: "Combustível", valor: 320, vencimento: addDays(HOJE, -5), pago: true, pagoEm: addDays(HOJE, -5), forma: "Dinheiro", origemTipo: "manual", categoria: "Deslocamento" },
-  { id: "l6", tipo: "despesa", descricao: "Plano de celular e internet", valor: 189, vencimento: addDays(HOJE, 4), pago: false, origemTipo: "manual", categoria: "Fixas" },
-  { id: "l8", tipo: "despesa", descricao: "Compra CMP-0001 · Distribuidora Eletro Sul", valor: 1842.5, vencimento: addDays(HOJE, 9), pago: false, origemTipo: "compra", origemId: "cp1", categoria: "Materiais" },
+  { id: "l1", tipo: "receita", descricao: "OS-0002 · Prime Imóveis", clienteId: "c3", valor: 1180, vencimento: addDays(HOJE_SEED, 11), pago: false, origemTipo: "os", origemId: "os2", categoria: "Serviços" },
+  { id: "l2", tipo: "receita", descricao: "Manutenção interfone · Cond. Jardins", clienteId: "c1", valor: 540, vencimento: addDays(HOJE_SEED, -9), pago: true, pagoEm: addDays(HOJE_SEED, -9), forma: "Pix", origemTipo: "manual", categoria: "Serviços" },
+  { id: "l3", tipo: "receita", descricao: "Instalação CFTV · Padaria Pão Nosso", clienteId: "c4", valor: 750, vencimento: addDays(HOJE_SEED, -2), pago: true, pagoEm: addDays(HOJE_SEED, -2), forma: "Transferência", origemTipo: "manual", categoria: "Serviços" },
+  { id: "l7", tipo: "receita", descricao: "Configuração de tags · Cond. Jardins", clienteId: "c1", valor: 640, vencimento: addDays(HOJE_SEED, -6), pago: false, origemTipo: "manual", categoria: "Serviços" },
+  { id: "l4", tipo: "despesa", descricao: "Compra CMP-0002 · Casa das Fontes", valor: 760, vencimento: addDays(HOJE_SEED, -7), pago: true, pagoEm: addDays(HOJE_SEED, -7), forma: "Pix", origemTipo: "compra", origemId: "cp2", categoria: "Materiais" },
+  { id: "l5", tipo: "despesa", descricao: "Combustível", valor: 320, vencimento: addDays(HOJE_SEED, -5), pago: true, pagoEm: addDays(HOJE_SEED, -5), forma: "Dinheiro", origemTipo: "manual", categoria: "Deslocamento" },
+  { id: "l6", tipo: "despesa", descricao: "Plano de celular e internet", valor: 189, vencimento: addDays(HOJE_SEED, 4), pago: false, origemTipo: "manual", categoria: "Fixas" },
+  { id: "l8", tipo: "despesa", descricao: "Compra CMP-0001 · Distribuidora Eletro Sul", valor: 1842.5, vencimento: addDays(HOJE_SEED, 9), pago: false, origemTipo: "compra", origemId: "cp1", categoria: "Materiais" },
 ];
 
 const COMPRAS_SEED = [
-  { id: "cp1", numero: "CMP-0001", fornecedor: "Distribuidora Eletro Sul", data: addDays(HOJE, -6), itens: [{ id: uid(), nome: "Fechadura digital biométrica · Intelbras FR 320", qtd: 2, custo: 620 }, { id: uid(), nome: "Câmera bullet Full HD · Intelbras VHD 1220 B", qtd: 2, custo: 210 }, { id: uid(), nome: "Tag de proximidade RFID · Intelbras TH 2000", qtd: 40, custo: 4.5 }], forma: "Boleto", vencimento: addDays(HOJE, 9), anexos: [{ id: uid(), nome: "boleto-eletro-sul-08.pdf" }], lancamentoId: "l8", obs: "Pedido 88412." },
-  { id: "cp2", numero: "CMP-0002", fornecedor: "Casa das Fontes", data: addDays(HOJE, -7), itens: [{ id: uid(), nome: "Fonte colmeia 12V 10A · Vetti VT-1210", qtd: 8, custo: 95 }], forma: "Pix", vencimento: addDays(HOJE, -7), anexos: [], lancamentoId: "l4", obs: "" },
+  { id: "cp1", numero: "CMP-0001", fornecedor: "Distribuidora Eletro Sul", data: addDays(HOJE_SEED, -6), itens: [{ id: uid(), nome: "Fechadura digital biométrica · Intelbras FR 320", qtd: 2, custo: 620 }, { id: uid(), nome: "Câmera bullet Full HD · Intelbras VHD 1220 B", qtd: 2, custo: 210 }, { id: uid(), nome: "Tag de proximidade RFID · Intelbras TH 2000", qtd: 40, custo: 4.5 }], forma: "Boleto", vencimento: addDays(HOJE_SEED, 9), anexos: [{ id: uid(), nome: "boleto-eletro-sul-08.pdf" }], lancamentoId: "l8", obs: "Pedido 88412." },
+  { id: "cp2", numero: "CMP-0002", fornecedor: "Casa das Fontes", data: addDays(HOJE_SEED, -7), itens: [{ id: uid(), nome: "Fonte colmeia 12V 10A · Vetti VT-1210", qtd: 8, custo: 95 }], forma: "Pix", vencimento: addDays(HOJE_SEED, -7), anexos: [], lancamentoId: "l4", obs: "" },
 ];
 
 const GARANTIAS_SEED = [
-  { id: "g1", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s5", descricao: "Manutenção de interfone", local: "Bloco B", inicio: addDays(HOJE, -4), dias: 30, ate: addDays(HOJE, 26), serie: "" },
-  { id: "g2", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s2", descricao: "Configuração de controle de acesso", local: "Bloco B", inicio: addDays(HOJE, -4), dias: 90, ate: addDays(HOJE, 86), serie: "" },
-  { id: "g3", clienteId: "c4", osId: null, tipo: "servico", servicoId: "s4", descricao: "Instalação de câmera CFTV", local: "Área de produção", inicio: addDays(HOJE, -120), dias: 90, ate: addDays(HOJE, -30), serie: "" },
+  { id: "g1", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s5", descricao: "Manutenção de interfone", local: "Bloco B", inicio: addDays(HOJE_SEED, -4), dias: 30, ate: addDays(HOJE_SEED, 26), serie: "" },
+  { id: "g2", clienteId: "c3", osId: "os2", tipo: "servico", servicoId: "s2", descricao: "Configuração de controle de acesso", local: "Bloco B", inicio: addDays(HOJE_SEED, -4), dias: 90, ate: addDays(HOJE_SEED, 86), serie: "" },
+  { id: "g3", clienteId: "c4", osId: null, tipo: "servico", servicoId: "s4", descricao: "Instalação de câmera CFTV", local: "Área de produção", inicio: addDays(HOJE_SEED, -120), dias: 90, ate: addDays(HOJE_SEED, -30), serie: "" },
 ];
 
 /* ============================================ empresa · usuários · acesso
@@ -212,35 +237,35 @@ const PLATFORM_ADMIN = "platform_admin";
 const ehPlataforma = (u) => u?.papelPlataforma === PLATFORM_ADMIN;
 
 const EMPRESAS_SEED = [
-  { ...EMPRESA_SEED, id: "e1", criadaEm: addDays(HOJE, -240) },
+  { ...EMPRESA_SEED, id: "e1", criadaEm: addDays(HOJE_SEED, -240) },
   {
     id: "e2", nome: "Carlos Elétrica", documento: "29.110.884/0001-30",
     atividade: "Instalações elétricas prediais", telefone: "(11) 3411-9080",
     whatsapp: "(11) 98330-1177", email: "contato@carloseletrica.com.br",
     endereco: "Rua Tuiuti, 210 — Tatuapé, São Paulo/SP", responsavel: "Carlos Prado",
-    temEquipe: false, validadePadrao: 10, criadaEm: addDays(HOJE, -35),
+    temEquipe: false, validadePadrao: 10, criadaEm: addDays(HOJE_SEED, -35),
     condicaoPadrao: "Pagamento à vista na conclusão.", observacaoPadrao: "",
   },
 ];
 
 const USUARIOS_SEED = [
-  { id: "u1", nome: "Jonas Ribeiro", email: "jonas@jrservicostecnicos.com.br", ultimoAcesso: HOJE },
-  { id: "u2", nome: "Diego Farias", email: "diego@jrservicostecnicos.com.br", telefone: "(11) 97744-2019", funcao: "Técnico instalador", ultimoAcesso: addDays(HOJE, -1) },
-  { id: "u3", nome: "Carlos Prado", email: "carlos@carloseletrica.com.br", ultimoAcesso: addDays(HOJE, -4) },
-  { id: "u0", nome: "João — ZiisTec", email: "joao@ziistec.com.br", papelPlataforma: PLATFORM_ADMIN, ultimoAcesso: HOJE },
+  { id: "u1", nome: "Jonas Ribeiro", email: "jonas@jrservicostecnicos.com.br", ultimoAcesso: HOJE_SEED },
+  { id: "u2", nome: "Diego Farias", email: "diego@jrservicostecnicos.com.br", telefone: "(11) 97744-2019", funcao: "Técnico instalador", ultimoAcesso: addDays(HOJE_SEED, -1) },
+  { id: "u3", nome: "Carlos Prado", email: "carlos@carloseletrica.com.br", ultimoAcesso: addDays(HOJE_SEED, -4) },
+  { id: "u0", nome: "João — ZiisTec", email: "joao@ziistec.com.br", papelPlataforma: PLATFORM_ADMIN, ultimoAcesso: HOJE_SEED },
 ];
 
 /* vínculo usuário ⇄ empresa: é aqui que mora o papel */
 const MEMBRESIAS_SEED = [
-  { id: "m1", usuarioId: "u1", empresaId: "e1", papel: "proprietario", ativo: true, desde: addDays(HOJE, -240) },
-  { id: "m2", usuarioId: "u2", empresaId: "e1", papel: "tecnico", ativo: true, desde: addDays(HOJE, -90) },
-  { id: "m3", usuarioId: "u3", empresaId: "e2", papel: "proprietario", ativo: true, desde: addDays(HOJE, -35) },
+  { id: "m1", usuarioId: "u1", empresaId: "e1", papel: "proprietario", ativo: true, desde: addDays(HOJE_SEED, -240) },
+  { id: "m2", usuarioId: "u2", empresaId: "e1", papel: "tecnico", ativo: true, desde: addDays(HOJE_SEED, -90) },
+  { id: "m3", usuarioId: "u3", empresaId: "e2", papel: "proprietario", ativo: true, desde: addDays(HOJE_SEED, -35) },
 ];
 
 const PLANO = { nome: "Profissional", valor: 79.9 };
 const ASSINATURAS_SEED = [
-  { id: "a1", empresaId: "e1", plano: PLANO.nome, valor: PLANO.valor, status: "ativa", inicio: addDays(HOJE, -240), proximaCobranca: addDays(HOJE, 12) },
-  { id: "a2", empresaId: "e2", plano: PLANO.nome, valor: PLANO.valor, status: "pendente", inicio: addDays(HOJE, -35), proximaCobranca: addDays(HOJE, -3) },
+  { id: "a1", empresaId: "e1", plano: PLANO.nome, valor: PLANO.valor, status: "ativa", inicio: addDays(HOJE_SEED, -240), proximaCobranca: addDays(HOJE_SEED, 12) },
+  { id: "a2", empresaId: "e2", plano: PLANO.nome, valor: PLANO.valor, status: "pendente", inicio: addDays(HOJE_SEED, -35), proximaCobranca: addDays(HOJE_SEED, -3) },
 ];
 const ST_ASSINATURA = {
   trial: { label: "Avaliação", tone: "marca", libera: true },
@@ -268,7 +293,7 @@ const senhaTemporaria = () => {
 const DADOS_E2 = {
   clientes: [{ id: "c9", empresaId: "e2", tipo: "PF", nome: "Ricardo Menezes", documento: "512.900.331-07", telefone: "(11) 4002-8922", whatsapp: "(11) 99120-4455", endereco: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", obs: "" }],
   servicos: [{ id: "s9", empresaId: "e2", nome: "Troca de disjuntor", categoria: "Elétrica", unidade: "unidade", preco: 150, custo: 45, descricao: "Substituição com teste de carga.", ativo: true, garantiaDias: 90, retornoDias: 0 }],
-  ordens: [{ ...osBase, id: "os9", empresaId: "e2", numero: "OS-0001", clienteId: "c9", orcamentoId: null, status: "agendada", data: HOJE, hora: "15:00", responsavelId: "u3", responsavel: "Carlos Prado", local: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", localServico: "Quadro geral", itens: [], descricaoLivre: "Quadro desarmando ao ligar o chuveiro. Verificar disjuntor e fiação.", obs: "", checklist: [], historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] }],
+  ordens: [{ ...osBase, id: "os9", empresaId: "e2", numero: "OS-0001", clienteId: "c9", orcamentoId: null, status: "agendada", data: HOJE_SEED, hora: "15:00", responsavelId: "u3", responsavel: "Carlos Prado", local: "Rua Serra de Bragança, 88 — Tatuapé, São Paulo/SP", localServico: "Quadro geral", itens: [], descricaoLivre: "Quadro desarmando ao ligar o chuveiro. Verificar disjuntor e fiação.", obs: "", checklist: [], historico: [{ id: uid(), quando: HOJE_SEED, texto: "Ordem de serviço criada" }] }],
 };
 
 /* toda entidade empresarial carrega empresaId desde a origem */
@@ -279,9 +304,29 @@ const RESPONSAVEIS = { "Jonas Ribeiro": "u1", "Diego Farias": "u2" };
 const cx = (...c) => c.filter(Boolean).join(" ");
 const ring = "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50";
 
+/* A OS relida do banco (fromWorkOrder) vem sem relato, histórico, checklist, fotos, retornos e
+   materiais registrados: esses complementos chegam pela hidratação (runtimeApi). Ao trocar status,
+   agenda ou salvar, a OS da lista mantém os complementos em vez de aparecer vazia até recarregar. */
+function mesclarOSRelida(anterior, salvo) {
+  if (!anterior || !salvo) return salvo;
+  const itensSalvos = salvo.itens || [];
+  const materiais = (anterior.itens || []).filter((i) => i.materialRegistrado && !itensSalvos.some((s) => s.id === i.id));
+  return {
+    ...salvo,
+    relato: salvo.relato || anterior.relato || "",
+    historico: salvo.historico?.length ? salvo.historico : anterior.historico || [],
+    retornos: salvo.retornos?.length ? salvo.retornos : anterior.retornos,
+    checklist: salvo.checklist?.length ? salvo.checklist : anterior.checklist || [],
+    fotos: salvo.fotos?.length ? salvo.fotos : anterior.fotos || [],
+    itens: [...itensSalvos, ...materiais],
+    /* início do atendimento (0101): o select da OS não traz a coluna; vale enquanto a OS segue em andamento */
+    iniciadaEm: salvo.iniciadaEm ?? (salvo.status === "andamento" ? anterior.iniciadaEm || null : null),
+  };
+}
+
 function aplicarOSSalvaNoEstado(salvo, { setOrdens, setOrcamentos, setOsAberta }) {
   setOrdens((lista) => lista.some((x) => x.id === salvo.id)
-    ? lista.map((x) => x.id === salvo.id ? salvo : x)
+    ? lista.map((x) => x.id === salvo.id ? mesclarOSRelida(x, salvo) : x)
     : [salvo, ...lista]);
   if (salvo.orcamentoId) {
     setOrcamentos((lista) => lista.map((o) => o.id === salvo.orcamentoId ? { ...o, osId: salvo.id } : o));
@@ -340,7 +385,7 @@ const ST_OS = {
   concluida: { label: "Concluída", tone: "sucesso" },
   cancelada: { label: "Cancelada", tone: "erro" },
 };
-const statusLanc = (l) => (l.pago ? { label: l.tipo === "receita" ? "Recebido" : "Pago", tone: "sucesso" } : l.vencimento < HOJE ? { label: "Vencido", tone: "erro" } : { label: l.tipo === "receita" ? "A receber" : "A pagar", tone: "atencao" });
+const statusLanc = (l) => (l.pago ? { label: l.tipo === "receita" ? "Recebido" : "Pago", tone: "sucesso" } : l.vencimento < hojeISO() ? { label: "Vencido", tone: "erro" } : { label: l.tipo === "receita" ? "A receber" : "A pagar", tone: "atencao" });
 
 const Panel = ({ children, className }) => <div className={cx("bg-white rounded-2xl ring-1 ring-slate-200/70", className)}>{children}</div>;
 
@@ -434,23 +479,25 @@ const Input = (p) => <input {...p} className={cx(inputCls, p.className)} />;
 const Textarea = (p) => <textarea {...p} className={cx(inputCls, "resize-none leading-relaxed", p.className)} />;
 const Select = ({ children, ...p }) => <select {...p} className={cx(inputCls, "appearance-none", p.className)}>{children}</select>;
 
-function Modal({ open, onClose, title, sub, children, footer, wide }) {
+function Modal({ open, onClose, title, sub, children, footer, wide, dirty = false, busy = false }) {
   const { overlay, scroller } = useModalViewport(open);
+  const guard = useModalDismiss({ open, dirty, busy, onClose, overlayRef: overlay });
   if (!open) return null;
   return (
     <div ref={overlay} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6 pt-[env(safe-area-inset-top)]" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-900/40" onClick={guard.requestClose} />
       <div className={cx("ziistec-modal-panel relative bg-white w-full rounded-t-3xl sm:rounded-3xl shadow-xl flex flex-col max-h-[calc(100dvh-env(safe-area-inset-top))] sm:max-h-[88dvh]", wide ? "sm:max-w-2xl" : "sm:max-w-lg")}>
         <div className="shrink-0 flex items-start justify-between gap-4 px-5 sm:px-7 pt-6 pb-4">
           <div>
             <h3 className="text-lg font-semibold text-slate-900 tracking-tight">{title}</h3>
             {sub && <p className="text-sm text-slate-500 mt-0.5">{sub}</p>}
           </div>
-          <button onClick={onClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
+          <button onClick={guard.requestClose} aria-label="Fechar" className={cx("p-2 -mr-1 rounded-lg text-slate-400 hover:bg-slate-100", ring)}><X className="w-5 h-5" /></button>
         </div>
         <div ref={scroller} className="min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-7 pb-6 space-y-5">{children}</div>
-        {footer && <div className="shrink-0 sticky bottom-0 bg-white px-5 sm:px-7 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 flex flex-wrap gap-3 justify-end">{footer}</div>}
+        {footer && <div className="shrink-0 sticky bottom-0 bg-white px-5 sm:px-7 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 flex flex-wrap gap-3 justify-end">{typeof footer === "function" ? footer(guard.requestClose) : footer}</div>}
       </div>
+      <DiscardChangesPrompt open={guard.confirming} onKeepEditing={guard.keepEditing} onDiscard={guard.discard} />
     </div>
   );
 }
@@ -475,6 +522,11 @@ const PageHead = ({ title, sub, action }) => (
     {action && <div className="shrink-0">{action}</div>}
   </div>
 );
+
+/* Entradas das telas V2 dentro da aba do app principal. Só o proprietário recebe; o acesso real segue no App e no banco. */
+const RecursosV2 = ({ aba, papel, abrirV2 }) => (typeof abrirV2 === "function"
+  ? recursosV2DaAba(aba, papel).map((r) => <Btn key={r.chave} variant="soft" onClick={() => abrirV2(r.chave)}>{r.rotulo}</Btn>)
+  : null);
 
 const Empty = ({ icon: Icon, title, sub, action }) => (
   <div className="text-center py-12 px-6">
@@ -536,14 +588,21 @@ const Linha = ({ children, onClick, className }) => {
 
 /* endereço que abre rota no mapa */
 const Endereco = ({ valor, local, className, compacto }) => {
+  /* O link segue o app de rota que o usuário escolheu (Google Maps é o padrão). */
+  const { app } = useRoutePreference();
   if (!valor) return null;
-  const destino = [local, valor].filter(Boolean).join(", ");
-  return (
-    <a href={mapsUrl(destino)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-      className={cx("inline-flex items-start gap-1.5 text-teal-800 hover:underline", ring, className)}>
+  const href = linkDeRota(app, resolverDestinoRota({ endereco: valor, localServico: local }));
+  const conteudo = (
+    <>
       <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />
       <span className={compacto ? "truncate" : ""}>{local ? `${local} · ${valor}` : valor}</span>
-    </a>
+    </>
+  );
+  return href ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+      className={cx("inline-flex items-start gap-1.5 text-teal-800 hover:underline", ring, className)}>{conteudo}</a>
+  ) : (
+    <span className={cx("inline-flex items-start gap-1.5 text-slate-600", className)}>{conteudo}</span>
   );
 };
 
@@ -562,12 +621,13 @@ function usarReconhecimento() {
 /* Componente único de ditado. Usado em TODO campo de texto livre do ZiisTec.
    A voz complementa o campo: o texto ditado é acrescentado ao que já existe,
    nunca substitui, e continua editável à mão. */
-function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica }) {
+function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica, rotuloVoz, maxLength }) {
   const { suportado, ouvindo, processando, sucesso, erro, iniciar, parar, cancelar } = usarReconhecimento();
   const baseRef = useRef("");
   const comecar = () => {
     baseRef.current = valor.trim() ? valor.trimEnd() + " " : "";
-    iniciar((t) => onChange((baseRef.current + t).trimEnd()));
+    /* ditado só acrescenta: transcrição vazia ou falha nunca troca nem apaga o que já está escrito */
+    iniciar((t) => onChange(mergeDictation(baseRef.current, t)));
   };
   const ativo = ouvindo || processando;
   const alternar = () => (ouvindo ? parar() : processando ? cancelar() : comecar());
@@ -575,9 +635,9 @@ function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica 
   return (
     <div>
       <div className="relative">
-        <Textarea rows={rows} value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
-          className={cx(suportado && !destaque && "pr-14", ativo && "ring-2 ring-teal-600")} />
-        {suportado && !destaque && (
+        <Textarea rows={rows} value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} maxLength={maxLength}
+          className={cx(suportado && !destaque && !rotuloVoz && "pr-14", ativo && "ring-2 ring-teal-600")} />
+        {suportado && !destaque && !rotuloVoz && (
           <button type="button" onClick={alternar} aria-label={ouvindo ? "Parar ditado" : processando ? "Cancelar transcrição" : "Ditar por voz"}
             title={ouvindo ? "Parar ditado" : processando ? "Cancelar transcrição" : "Ditar por voz"}
             className={cx("absolute right-2.5 bottom-2.5 min-h-11 min-w-11 p-2.5 rounded-lg transition-colors", ring,
@@ -586,6 +646,12 @@ function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica 
           </button>
         )}
       </div>
+
+      {suportado && !destaque && rotuloVoz && (
+        <Btn size="sm" variant={ativo ? "dark" : "soft"} icon={ativo ? MicOff : Mic} className="mt-2" onClick={alternar}>
+          {ouvindo ? "Parar" : processando ? "Transcrevendo…" : rotuloVoz}
+        </Btn>
+      )}
 
       {suportado && destaque && (
         <div className="mt-3 grid gap-2 min-[390px]:grid-cols-[1fr_auto]">
@@ -644,10 +710,17 @@ Formato: {"texto":"DIAGNÓSTICO\\n...\\n\\nSERVIÇO EXECUTADO\\n...\\n\\nTESTES\
 
 /* ================================================================== App */
 export default function ZiisTec({ contexto }) {
+  useDiaLocal();
   /* contexto vem do Supabase (Fase 1). Quando presente, substitui a
      autenticação simulada e os dados de demonstração de empresa/usuário. */
   const real = Boolean(contexto);
-  const [tela, setTela] = useState("inicio");
+  const [tela, setTela] = useState(() => (typeof window !== "undefined" ? abaDeOrigemV2(window.history.state) : null) || "inicio");
+  useEffect(() => {
+    // A origem vale uma vez: consumida, sai do histórico para um recarregamento comum voltar ao Início.
+    if (typeof window === "undefined") return;
+    const limpo = semOrigemV2(window.history.state);
+    if (limpo) window.history.replaceState(limpo, "", window.location.href);
+  }, []);
   const [drawer, setDrawer] = useState(false);
   const [menuExpandido, setMenuExpandido] = useState(false);
   const menuTouchX = useRef(null);
@@ -814,6 +887,7 @@ export default function ZiisTec({ contexto }) {
   const nomeCliente = (id) => { const c = cliente(id); return c?.fantasia || c?.nome || "Cliente"; };
 
   const irPara = (t) => {
+    if (!confirmDiscardNavigation()) return;
     setTela(t); setClienteAberto(null); setOrcamentoAberto(null); setOsAberta(null); setCompraAberta(null);
     setGarantiaAberta(null); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
   };
@@ -871,7 +945,7 @@ export default function ZiisTec({ contexto }) {
      guardar senha exige hash no servidor, que ainda não existe. */
   const salvarColaborador = async ({ nome, email, telefone, funcao, papel: pp }) => {
     if (real) {
-      try { const eq = await convidarColaboradorDB({ nome, email, telefone, funcao, papel: pp }, empresaId, usuarioAtual?.id); setUsuarios(eq.usuarios); setMembresias(eq.membresias); const emailEnviado = Boolean(eq.emailDelivery?.sent); aviso(emailEnviado ? `Convite ZiisTec enviado para ${email.trim().toLowerCase()}.` : `${nome} foi adicionado como convite pendente. Se já tiver conta, pode entrar com o mesmo e-mail; o acesso só será ativado após a confirmação do e-mail.`); return { convite: true, emailEnviado }; }
+      try { const eq = await convidarColaboradorDB({ nome, email, telefone, funcao, papel: pp }, empresaId, usuarioAtual?.id); setUsuarios(eq.usuarios); setMembresias(eq.membresias); const emailEnviado = Boolean(eq.emailDelivery?.sent); aviso(emailEnviado ? `Convite ZiisTec enviado para ${email.trim().toLowerCase()}.` : eq.emailDelivery?.reason === "rate_limited" ? `O convite para ${email.trim().toLowerCase()} já foi enviado há instantes. Aguarde ${eq.emailDelivery.retryAfterSeconds || 60} segundos para reenviar.` : `${nome} foi adicionado como convite pendente. Se já tiver conta, pode entrar com o mesmo e-mail; o acesso só será ativado após a confirmação do e-mail.`); return { convite: true, emailEnviado }; }
       catch (e) { aviso(mensagemErro(e)); return null; }
     }
     const limpo = email.trim().toLowerCase();
@@ -879,7 +953,7 @@ export default function ZiisTec({ contexto }) {
     if (existente && membresias.some((m) => m.usuarioId === existente.id && m.empresaId === empresaId)) { aviso("Esta pessoa já faz parte da sua equipe."); return null; }
     const usuarioId = existente?.id || uid();
     if (!existente) setUsuarios((l) => [...l, { id: usuarioId, nome, email: limpo, telefone: telefone || "", funcao: funcao || "", ultimoAcesso: null, precisaTrocarSenha: true }]);
-    setMembresias((l) => [...l, { id: uid(), usuarioId, empresaId, papel: pp, ativo: true, desde: HOJE, convite: "pendente" }]);
+    setMembresias((l) => [...l, { id: uid(), usuarioId, empresaId, papel: pp, ativo: true, desde: hojeISO(), convite: "pendente" }]);
     aviso(`${nome} foi convidado para a equipe.`); return { usuarioId, senhaTemporaria: senhaTemporaria() };
   };
   const atualizarColaborador = async (usuarioId, dados) => {
@@ -897,7 +971,7 @@ export default function ZiisTec({ contexto }) {
     return senhaTemporaria();
   };
   const concluirPrimeiroAcesso = (usuarioId) => {
-    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, precisaTrocarSenha: false, ultimoAcesso: HOJE } : u)));
+    setUsuarios((l) => l.map((u) => (u.id === usuarioId ? { ...u, precisaTrocarSenha: false, ultimoAcesso: hojeISO() } : u)));
     setMembresias((l) => l.map((m) => (m.usuarioId === usuarioId ? { ...m, convite: "aceito" } : m)));
   };
   const alternarColaborador = async (m) => {
@@ -980,11 +1054,11 @@ export default function ZiisTec({ contexto }) {
   /* duplicar: copia cliente, itens e condições; não leva aprovação, OS nem número */
   const duplicarOrcamento = async (o) => {
     if (real) {
-      try { const novo=await duplicarOrcamentoDB(o,empresaId,usuarioAtual?.id,addDays(HOJE,empresa.validadePadrao)); setOrcamentos((l)=>[novo,...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id); }
+      try { const novo=await duplicarOrcamentoDB(o,empresaId,usuarioAtual?.id,addDays(hojeISO(),empresa.validadePadrao)); setOrcamentos((l)=>[novo,...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id); }
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, status: "rascunho", data: HOJE, validade: addDays(HOJE, empresa.validadePadrao), osId: null, itens: o.itens.map((i) => ({ ...i, id: uid() })) };
+    const novo = { ...o, id: uid(), numero: proxNumero(orcamentosEmp, "ORC"), empresaId, status: "rascunho", data: hojeISO(), validade: addDays(hojeISO(), empresa.validadePadrao), osId: null, itens: o.itens.map((i) => ({ ...i, id: uid() })) };
     setOrcamentos((l) => [novo, ...l]); aviso(`${novo.numero} criado como cópia do ${o.numero}`); setOrcamentoAberto(novo.id);
   };
   const mudarStatusOrc = async (id, status) => {
@@ -1003,7 +1077,7 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: orc.clienteId, orcamentoId: orc.id, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: orc.local || c?.endereco || "", localServico: orc.localServico || "", itens: orc.itens.map((i) => ({ ...i, id: uid() })), obs: orc.obs, checklist: [], historico: [{ id: uid(), quando: HOJE, texto: `Gerada a partir do ${orc.numero}` }] };
+    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: orc.clienteId, orcamentoId: orc.id, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: orc.local || c?.endereco || "", localServico: orc.localServico || "", itens: orc.itens.map((i) => ({ ...i, id: uid() })), obs: orc.obs, checklist: [], historico: [{ id: uid(), quando: hojeISO(), texto: `Gerada a partir do ${orc.numero}` }] };
     setOrdens((l) => [nova, ...l]); setOrcamentos((l) => l.map((o) => (o.id === orc.id ? { ...o, osId: nova.id } : o))); aviso(`${nova.numero} criada. Falta definir a data.`); setTela("ordens"); setOrcamentoAberto(null); setOsAberta(nova.id);
   };
 
@@ -1054,7 +1128,7 @@ export default function ZiisTec({ contexto }) {
     let salvoId = os.id || null;
     if (os.id) setOrdens((l) => l.map((x) => (x.id === os.id ? os : x)));
     else {
-      const nova = { ...osBase, ...os, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: os.responsavelId || usuarioAtual?.id, historico: [{ id: uid(), quando: HOJE, texto: "Ordem de serviço criada" }] };
+      const nova = { ...osBase, ...os, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: os.responsavelId || usuarioAtual?.id, historico: [{ id: uid(), quando: hojeISO(), texto: "Ordem de serviço criada" }] };
       salvoId = nova.id;
       setOrdens((l) => [nova, ...l]);
       if (nova.orcamentoId) setOrcamentos((l) => l.map((o) => o.id === nova.orcamentoId ? { ...o, osId: nova.id } : o));
@@ -1066,27 +1140,31 @@ export default function ZiisTec({ contexto }) {
   const agendarOS = async (osId, { data, hora, responsavel, responsavelId }) => {
     if (!data) return false;
     if (real) {
-      try { const salvo=await atualizarOSDB(osId,{scheduled_date:data,scheduled_time:hora||null,assigned_to:responsavelId||null,status:'scheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?{...salvo,responsavel}:x)); }
+      try { const salvo=await atualizarOSDB(osId,{scheduled_date:data,scheduled_time:hora||null,assigned_to:responsavelId||null,status:'scheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?{...mesclarOSRelida(x,salvo),responsavel}:x)); }
       catch(e){ aviso(mensagemErro(e)); return false; }
-    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data, hora, responsavel, responsavelId: responsavelId || x.responsavelId, status: x.status === "aguardando" || x.status === "agendada" ? "agendada" : x.status, historico: [...x.historico, { id: uid(), quando: HOJE, texto: `Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""} · ${responsavel}` }] } : x));
+    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data, hora, responsavel, responsavelId: responsavelId || x.responsavelId, status: x.status === "aguardando" || x.status === "agendada" ? "agendada" : x.status, historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: `Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""} · ${responsavel}` }] } : x));
     aviso(`Agendada para ${dataBR(data)}${hora ? ` às ${hora}` : ""}`);
     return true;
   };
   const desagendarOS = async (osId) => {
     if (real) {
-      try { const salvo=await atualizarOSDB(osId,{scheduled_date:null,scheduled_time:null,status:'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?salvo:x)); }
+      try { const salvo=await atualizarOSDB(osId,{scheduled_date:null,scheduled_time:null,status:'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===osId?mesclarOSRelida(x,salvo):x)); }
       catch(e){ aviso(mensagemErro(e)); return; }
-    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data: "", hora: "", status: "aguardando", historico: [...x.historico, { id: uid(), quando: HOJE, texto: "Agendamento removido" }] } : x));
+    } else setOrdens((l) => l.map((x) => x.id === osId ? { ...x, data: "", hora: "", status: "aguardando", historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: "Agendamento removido" }] } : x));
     aviso("Agendamento removido");
   };
   const mudarStatusOS = async (os, status) => {
     if (real) {
       const mapa={aguardando:'unscheduled',agendada:'scheduled',andamento:'in_progress',concluida:'done',cancelada:'canceled'};
-      try { const salvo=await atualizarOSDB(os.id,{status:mapa[status]||'unscheduled'}); setOrdens((l)=>l.map((x)=>x.id===os.id?salvo:x)); }
+      try {
+        const salvo=await atualizarOSDB(os.id,{status:mapa[status]||'unscheduled'});
+        const inicio=status==='andamento'?await lerInicioAtendimentoDB(os.id):null;
+        setOrdens((l)=>l.map((x)=>x.id===os.id?mesclarOSRelida(x,inicio?{...salvo,iniciadaEm:inicio}:salvo):x));
+      }
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, status, historico: [...x.historico, { id: uid(), quando: HOJE, texto: `Status alterado para ${ST_OS[status].label}` }] } : x));
+    setOrdens((l) => l.map((x) => x.id === os.id ? { ...x, status, historico: [...x.historico, { id: uid(), quando: hojeISO(), texto: `Status alterado para ${ST_OS[status].label}` }] } : x));
   };
 
   /* finalizar atendimento — protegido contra duplicação de cobrança/garantia */
@@ -1103,21 +1181,21 @@ export default function ZiisTec({ contexto }) {
         await finalizarOSDB(osId,extras);
         await recarregarDados();
         aviso("Atendimento finalizado e sincronizado com financeiro/garantias.");
-      } catch(e){ aviso(mensagemErro(e)); }
-      return;
+        return true;
+      } catch(e){ aviso(mensagemErro(e)); return false; }
     }
     const atual = ordens.find((o) => o.id === osId);
     if (!atual || atual.status === "concluida" || atual.cobrancaId) { aviso("Esta ordem já foi finalizada."); return; }
     const os = { ...atual, ...extras };
     const total = totalOS(os);
-    const execucao = os.data || HOJE;
+    const execucao = os.data || hojeISO();
     const cobrancaId = total > 0 ? uid() : null;
 
     /* uma OS gera no máximo uma conta a receber; atendimento em garantia sem valor não gera nenhuma */
     if (cobrancaId) {
       setLancamentos((l) => l.some((x) => x.origemTipo === "os" && x.origemId === osId) ? l : [{
         id: cobrancaId, empresaId, tipo: "receita", descricao: `${os.numero} · ${nomeCliente(os.clienteId)}`, clienteId: os.clienteId,
-        valor: total, vencimento: addDays(HOJE, 7), pago: false, origemTipo: "os", origemId: osId, categoria: "Serviços",
+        valor: total, vencimento: addDays(hojeISO(), 7), pago: false, origemTipo: "os", origemId: osId, categoria: "Serviços",
       }, ...l]);
     }
 
@@ -1138,7 +1216,7 @@ export default function ZiisTec({ contexto }) {
           const meses = politica === "disabled" ? 0 : politica === "custom" ? Number(i.garantiaMesesOverride || 0) : Number(pr?.garantiaMeses || 0);
           if (meses > 0) novasGarantias.push({
             id: uid(), empresaId, clienteId: os.clienteId, osId, tipo: "produto", descricao: i.nome, produtoId: pr?.id || i.catalogoId,
-            local: os.localServico, inicio: execucao, meses, ate: addMeses(execucao, meses), serie: extras.series?.[i.id] || "",
+            local: os.localServico, inicio: execucao, meses, ate: addMesesISO(execucao, meses), serie: extras.series?.[i.id] || "",
           });
         }
       });
@@ -1149,16 +1227,16 @@ export default function ZiisTec({ contexto }) {
     let retorno = null;
     os.itens.forEach((i) => {
       const s = servicos.find((x) => x.id === i.catalogoId);
-      if (s?.retornoDias > 0) { const d = addDays(HOJE, s.retornoDias); if (!retorno || d < retorno.data) retorno = { data: d, servico: s.nome }; }
+      if (s?.retornoDias > 0) { const d = addDays(hojeISO(), s.retornoDias); if (!retorno || d < retorno.data) retorno = { data: d, servico: s.nome }; }
     });
 
     setOrdens((l) => l.map((x) => x.id === osId ? {
       ...x, ...extras, status: "concluida", cobrancaId, retorno,
       historico: [...x.historico,
-        { id: uid(), quando: HOJE, texto: "Serviço concluído" },
-        ...(cobrancaId ? [{ id: uid(), quando: HOJE, texto: `Cobrança de ${brl(total)} gerada em contas a receber` }]
-          : [{ id: uid(), quando: HOJE, texto: "Atendimento sem cobrança" }]),
-        ...(novasGarantias.length ? [{ id: uid(), quando: HOJE, texto: `${novasGarantias.length} garantia(s) registrada(s) a partir dos serviços executados` }] : []),
+        { id: uid(), quando: hojeISO(), texto: "Serviço concluído" },
+        ...(cobrancaId ? [{ id: uid(), quando: hojeISO(), texto: `Cobrança de ${brl(total)} gerada em contas a receber` }]
+          : [{ id: uid(), quando: hojeISO(), texto: "Atendimento sem cobrança" }]),
+        ...(novasGarantias.length ? [{ id: uid(), quando: hojeISO(), texto: `${novasGarantias.length} garantia(s) registrada(s) a partir dos serviços executados` }] : []),
       ],
     } : x));
     aviso(cobrancaId
@@ -1187,7 +1265,7 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: g.clienteId, orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: origem?.local || cliente(g.clienteId)?.endereco || "", localServico: g.local || origem?.localServico || "", itens: [], obs: `Atendimento em garantia de "${g.descricao}", executado em ${dataBR(g.inicio)}.`, checklist: [], emGarantia: true, garantiaId: g.id, osOrigemId: g.osId, relatoProblema: relatoProblema || "", historico: [{ id: uid(), quando: HOJE, texto: `Aberta em garantia de ${g.descricao}${origem ? ` (${origem.numero})` : ""}` }] };
+    const nova = { ...osBase, id: uid(), empresaId, numero: proxNumero(doTenant(ordens), "OS"), responsavelId: usuarioAtual?.id, clienteId: g.clienteId, orcamentoId: null, status: "aguardando", data: "", hora: "", responsavel: empresa.responsavel, local: origem?.local || cliente(g.clienteId)?.endereco || "", localServico: g.local || origem?.localServico || "", itens: [], obs: `Atendimento em garantia de "${g.descricao}", executado em ${dataBR(g.inicio)}.`, checklist: [], emGarantia: true, garantiaId: g.id, osOrigemId: g.osId, relatoProblema: relatoProblema || "", historico: [{ id: uid(), quando: hojeISO(), texto: `Aberta em garantia de ${g.descricao}${origem ? ` (${origem.numero})` : ""}` }] };
     setOrdens((l) => [nova, ...l]); aviso(`${nova.numero} aberta em garantia. Falta definir a data.`); setTela("ordens"); setOsAberta(nova.id);
   };
 
@@ -1198,10 +1276,10 @@ export default function ZiisTec({ contexto }) {
       catch(e){ aviso(mensagemErro(e)); }
       return;
     }
-    setLancamentos((ls) => ls.map((x) => (x.id === l.id ? { ...x, pago: !x.pago, pagoEm: x.pago ? null : HOJE, forma: x.pago ? null : forma } : x)));
+    setLancamentos((ls) => ls.map((x) => (x.id === l.id ? { ...x, pago: !x.pago, pagoEm: x.pago ? null : hojeISO(), forma: x.pago ? null : forma } : x)));
     if (!l.pago) {
       if (l.origemTipo === "os" && l.origemId)
-        setOrdens((os) => os.map((o) => o.id === l.origemId ? { ...o, historico: [...o.historico, { id: uid(), quando: HOJE, texto: `Pagamento de ${brl(l.valor)} recebido via ${forma}` }] } : o));
+        setOrdens((os) => os.map((o) => o.id === l.origemId ? { ...o, historico: [...o.historico, { id: uid(), quando: hojeISO(), texto: `Pagamento de ${brl(l.valor)} recebido via ${forma}` }] } : o));
       aviso(`${brl(l.valor)} ${l.tipo === "receita" ? "recebido" : "pago"} via ${forma}`);
     } else aviso("Baixa desfeita");
   };
@@ -1209,15 +1287,15 @@ export default function ZiisTec({ contexto }) {
   /* --------- compras → conta a pagar --------- */
   const salvarCompra = async (c) => {
     if (real) {
-      try { const salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await uploadDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id); await recarregarDados(); aviso(c.id ? "Compra atualizada" : `${salva.numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(salva.id); }
-      catch(e){ aviso(mensagemErro(e)); }
-      return;
+      let salva;
+      try { salva=await salvarCompraDB(c,empresaId,usuarioAtual?.id); await uploadDocumentosCompraDB(salva.id,c.anexos||[],empresaId,usuarioAtual?.id); await recarregarDados(); aviso(c.id ? "Compra atualizada" : `${salva.numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(salva.id); return true; }
+      catch(e){ aviso(mensagemErro(e)); return salva ? { ok: false, id: salva.id, requestId: salva.requestId } : false; }
     }
     const total = c.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
-    if (c.id) { setCompras((l) => l.map((x) => (x.id === c.id ? c : x))); setLancamentos((l) => l.map((x) => x.id === c.lancamentoId ? { ...x, valor: total, vencimento: c.vencimento, descricao: `Compra ${c.numero} · ${c.fornecedor}` } : x)); aviso("Compra atualizada"); return; }
+    if (c.id) { setCompras((l) => l.map((x) => (x.id === c.id ? c : x))); setLancamentos((l) => l.map((x) => x.id === c.lancamentoId ? { ...x, valor: total, vencimento: c.vencimento, descricao: `Compra ${c.numero} · ${c.fornecedor}` } : x)); aviso("Compra atualizada"); return true; }
     const id = uid(); const numero = proxNumero(comprasEmp, "CMP"); const lancamentoId = uid();
-    setLancamentos((l) => [{ id: lancamentoId, empresaId, tipo: "despesa", descricao: `Compra ${numero} · ${c.fornecedor}`, valor: total, vencimento: c.vencimento || HOJE, pago: !!c.jaPago, pagoEm: c.jaPago ? HOJE : null, forma: c.jaPago ? c.forma : null, origemTipo: "compra", origemId: id, categoria: "Materiais" }, ...l]);
-    setCompras((l) => [{ ...c, id, numero, lancamentoId, empresaId }, ...l]); aviso(`${numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(id);
+    setLancamentos((l) => [{ id: lancamentoId, empresaId, tipo: "despesa", descricao: `Compra ${numero} · ${c.fornecedor}`, valor: total, vencimento: c.vencimento || hojeISO(), pago: !!c.jaPago, pagoEm: c.jaPago ? hojeISO() : null, forma: c.jaPago ? c.forma : null, origemTipo: "compra", origemId: id, categoria: "Materiais" }, ...l]);
+    setCompras((l) => [{ ...c, id, numero, lancamentoId, empresaId }, ...l]); aviso(`${numero} registrada. Conta a pagar criada no financeiro.`); setCompraAberta(id); return true;
   };
 
   const props = {
@@ -1233,6 +1311,7 @@ export default function ZiisTec({ contexto }) {
     compraAberta, setCompraAberta, setTela, abrirOS, abrirOrc, abrirCliente, abrirCompra,
     garantiaAberta, setGarantiaAberta, abrirGarantia, real,
     pedirConfirmacao: setConfirmar, excluirRegistro, contexto,
+    abrirV2: contexto?.abrirRecursoV2 ? (chave, params) => contexto.abrirRecursoV2(chave, { origem: tela, params }) : undefined,
   };
 
   const NAV = [
@@ -1324,12 +1403,12 @@ export default function ZiisTec({ contexto }) {
         const eId = uid(), uId = uid(), mId = uid();
         setEmpresas((l) => [...l, { id: eId, nome: dados.empresa, documento: "", atividade: dados.atividade,
           telefone: "", whatsapp: "", email: dados.email, endereco: "", responsavel: dados.nome,
-          temEquipe: dados.temEquipe, validadePadrao: 15, criadaEm: HOJE,
+          temEquipe: dados.temEquipe, validadePadrao: 15, criadaEm: hojeISO(),
           condicaoPadrao: "50% na aprovação e 50% na entrega do serviço.", observacaoPadrao: "" }]);
-        setUsuarios((l) => [...l, { id: uId, nome: dados.nome, email: dados.email, ultimoAcesso: HOJE }]);
-        setMembresias((l) => [...l, { id: mId, usuarioId: uId, empresaId: eId, papel: "proprietario", ativo: true, desde: HOJE }]);
+        setUsuarios((l) => [...l, { id: uId, nome: dados.nome, email: dados.email, ultimoAcesso: hojeISO() }]);
+        setMembresias((l) => [...l, { id: mId, usuarioId: uId, empresaId: eId, papel: "proprietario", ativo: true, desde: hojeISO() }]);
         setAssinaturas((l) => [...l, { id: uid(), empresaId: eId, plano: PLANO.nome, valor: PLANO.valor,
-          status: "trial", inicio: HOJE, proximaCobranca: addDays(HOJE, 14) }]);
+          status: "trial", inicio: hojeISO(), proximaCobranca: addDays(hojeISO(), 14) }]);
         setSessao({ usuarioId: uId, membresiaId: mId });
         setTela("inicio");
       }} /></>
@@ -1503,8 +1582,132 @@ function BuscaGlobal({ onClose, clientes, orcamentos, ordens, compras, nomeClien
   );
 }
 
+/* =============================================== Field Execution Intelligence V1 · Meu dia, tempo de atendimento e Base Técnica */
+/* Relógio só de tela: recalcula a cada minuto enquanto há atendimento em andamento. Nada é gravado e nada fecha por tempo. */
+function useAgora(ativo, passoMs = 60000) {
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ativo) return undefined;
+    setAgora(Date.now());
+    const id = setInterval(() => setAgora(Date.now()), passoMs);
+    return () => clearInterval(id);
+  }, [ativo, passoMs]);
+  return agora;
+}
+
+function TimerAtendimento({ os, agora, className }) {
+  if (os.status !== "andamento") return null;
+  return (
+    <span className={cx("inline-flex items-center gap-1.5 text-[12.5px] font-medium text-amber-800 tabular-nums", className)}>
+      <Clock className="w-3.5 h-3.5" aria-hidden="true" />{attendanceTimerLabel(os.iniciadaEm, agora)}
+    </span>
+  );
+}
+
+function AvisoAtendimentoLongo({ os, agora, className }) {
+  if (os.status !== "andamento" || !isStaleAttendance(os.iniciadaEm, agora)) return null;
+  return (
+    <p role="status" className={cx("text-[12.5px] leading-relaxed text-amber-900 bg-amber-50 ring-1 ring-amber-200/70 rounded-xl px-3 py-2", className)}>
+      {STALE_ATTENDANCE_MESSAGE}
+    </p>
+  );
+}
+
+/* Cartão do técnico em "Meu dia": cliente, local, horário, endereço, telefone, resumo e o próximo passo.
+   Nenhum valor financeiro. A prioridade da OS não existe no produto e não foi criada aqui. */
+function CartaoMeuDia({ os, nomeCliente, cliente, abrirOS, mudarStatusOS, agora }) {
+  const [abrindo, setAbrindo] = useState(false);
+  const c = cliente ? cliente(os.clienteId) : null;
+  const modelo = technicianCardModel(os, { clienteNome: nomeCliente(os.clienteId), telefone: c?.whatsapp || c?.telefone || "", resumo: resumoOS(os) });
+  const cta = modelo.cta;
+  const acionar = async () => {
+    if (abrindo) return;
+    setAbrindo(true);
+    try {
+      if (cta?.kind === "start") await mudarStatusOS(os, "andamento");
+      abrirOS(os.id);
+    } finally { setAbrindo(false); }
+  };
+  return (
+    <Linha>
+      <div className="flex items-start gap-4">
+        <button onClick={() => abrirOS(os.id)} className={cx("w-[52px] shrink-0 text-left", ring)}>
+          <p className="text-[17px] font-semibold text-slate-900 leading-none tabular-nums">{modelo.hora || "—"}</p>
+          <p className="text-[11px] text-slate-400 mt-1.5">{modelo.numero}</p>
+        </button>
+        <button onClick={() => abrirOS(os.id)} className={cx("min-w-0 flex-1 text-left", ring)}>
+          <p className="font-medium text-slate-900 truncate">{modelo.cliente}</p>
+          <p className="text-[13px] text-slate-500 line-clamp-2">{modelo.resumo}</p>
+        </button>
+        <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
+      </div>
+      <div className="pl-[68px] mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+        <Endereco valor={modelo.endereco} local={modelo.local} compacto />
+        {modelo.telefoneHref && (
+          <a href={modelo.telefoneHref} onClick={(e) => e.stopPropagation()}
+            className={cx("inline-flex items-center gap-1.5 min-h-11 sm:min-h-0 text-teal-800 hover:underline", ring)}>
+            <Phone className="w-3.5 h-3.5" aria-hidden="true" />{modelo.telefone}
+          </a>
+        )}
+      </div>
+      {modelo.emAndamento && <div className="pl-[68px] mt-2"><TimerAtendimento os={os} agora={agora} /></div>}
+      <AvisoAtendimentoLongo os={os} agora={agora} className="mt-2 ml-[68px]" />
+      {cta && (
+        <div className="pl-[68px] mt-3">
+          <Btn size="sm" variant={cta.kind === "start" ? "primary" : "dark"} icon={ArrowRight} disabled={abrindo} onClick={acionar} className="w-full sm:w-auto">
+            {abrindo ? "Abrindo…" : cta.label}
+          </Btn>
+        </div>
+      )}
+    </Linha>
+  );
+}
+
+/* Consulta da Base Técnica (interna) dentro da OS. Somente leitura: proprietário e técnico da OS; o banco decide quem lê. */
+function BaseTecnicaPainel({ os, real, recarregar }) {
+  const [dados, setDados] = useState(null);
+  const [uso, setUso] = useState(null);
+  useEffect(() => {
+    if (!real) return undefined;
+    let vivo = true;
+    Promise.all([carregarFechamentoTecnico(os.id).catch(() => null), carregarUsoRelatorioIADB(os.id).catch(() => null)])
+      .then(([r, u]) => { if (vivo) { setDados(r); setUso(u); } });
+    return () => { vivo = false; };
+  }, [real, os.id, os.status, recarregar]);
+  if (!real || !dados?.available) return null;
+  const { base, confirmation } = dados;
+  const temConfirmacao = Boolean(confirmation.name || confirmation.absent);
+  if (!technicalBaseHasContent(base) && !temConfirmacao) return null;
+  const linhas = [
+    ["Causa encontrada", base.cause],
+    ["Solução aplicada", base.solution],
+    ["Nível de dificuldade", difficultyLabel(base.difficulty)],
+    ["Observação técnica final", base.learning],
+  ].filter(([, texto]) => texto);
+  return (
+    <section>
+      <Rotulo acao={<span className="text-[12px] text-slate-400">Uso interno</span>}>Base Técnica</Rotulo>
+      <Panel className="p-5 space-y-3">
+        {linhas.map(([titulo, texto]) => (
+          <div key={titulo}>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-0.5">{titulo}</p>
+            <p className="text-[14px] text-slate-700 whitespace-pre-line leading-relaxed">{texto}</p>
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-slate-600">
+          <span>Necessita retorno: <strong className="font-medium text-slate-800">{os.precisaRetorno ? "Sim" : "Não"}</strong></span>
+          <span>{evidenceCountLabel(os.fotos?.length)}</span>
+          {temConfirmacao && <span>Recebido por: <strong className="font-medium text-slate-800">{confirmation.absent ? "responsável ausente" : confirmation.name}</strong></span>}
+        </div>
+        {uso?.lastUsedAt && <p className="text-[12px] text-slate-400">Relatório do cliente: {REPORT_PROVENANCE_LABEL}{uso.lastUsedEdited ? " · editado depois" : ""}.</p>}
+        <p className="text-[12px] text-slate-400 leading-relaxed">Esta seção é interna: não aparece para o cliente nem nos documentos enviados.</p>
+      </Panel>
+    </section>
+  );
+}
+
 /* =============================================================== Dashboard */
-function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso }) {
+function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarStatusOS, irPara, abrirOS, abrirOrc, setTela, setOrcamentoAberto, empresa, permitido, usuarioAtual, papel, empresaId, real, aviso, produtos, abrirV2 }) {
   const verFinanceiro = permitido("financeiro");
   const [revisoesInicio, setRevisoesInicio] = useState([]);
   useEffect(() => {
@@ -1513,10 +1716,13 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
     carregarRevisoesDB(empresaId).then((r)=>{ if(ativo) setRevisoesInicio(r); }).catch((e)=>aviso?.(e?.message || "Não foi possível carregar o pós-venda."));
     return ()=>{ ativo=false; };
   }, [real, empresaId, papel]);
-  const hojeOS = ordens.filter((o) => o.data === HOJE && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const proximas = ordens.filter((o) => o.data > HOJE && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 3);
+  const hojeOS = ordens.filter((o) => o.data === hojeISO() && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const proximas = ordens.filter((o) => o.data > hojeISO() && o.status !== "cancelada" && o.status !== "concluida").sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 3);
+  /* Meu dia (técnico): 1 em andamento, 2 horário marcado, 3 demais atribuídas. O que já está em andamento aparece mesmo de outro dia. */
+  const meuDia = sortTechnicianDay(ordens.filter((o) => o.status === "andamento" || o.data === hojeISO()));
+  const agora = useAgora(meuDia.some((o) => o.status === "andamento"));
 
-  const mes = mesRef(HOJE);
+  const mes = mesRef(hojeISO());
   const noMes = (l) => mesRef(l.pago ? l.pagoEm : l.vencimento) === mes;
   const soma = (ls) => ls.reduce((t, l) => t + l.valor, 0);
   const recebido = soma(lancamentos.filter((l) => l.tipo === "receita" && l.pago && noMes(l)));
@@ -1524,16 +1730,20 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
   const aPagar = soma(lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && noMes(l)));
   const despesasPagas = soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago && noMes(l)));
 
+  const recentes = concluidasRecentemente(ordens, hojeISO());
+  const semEstoque = papel === "proprietario" ? produtosComEstoqueBaixo(produtos) : [];
+
   const pend = [];
   if (papel === "proprietario") {
-    const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= HOJE);
-    const atrasadas = revisoesPendentes.filter((r)=>r.data < HOJE);
-    const hoje = revisoesPendentes.filter((r)=>r.data === HOJE);
+    const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= hojeISO());
+    const atrasadas = revisoesPendentes.filter((r)=>r.data < hojeISO());
+    const hoje = revisoesPendentes.filter((r)=>r.data === hojeISO());
     if (atrasadas.length) pend.push({ id:"pos-venda-atrasado", tom:"erro", titulo: atrasadas.length + " retorno" + (atrasadas.length>1?"s":"") + " de pós-venda atrasado" + (atrasadas.length>1?"s":""), detalhe:"Mais antigo: " + dataBR(atrasadas[0].data), acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
     if (hoje.length) pend.push({ id:"pos-venda-hoje", tom:"atencao", titulo: hoje.length + " retorno" + (hoje.length>1?"s":"") + " de pós-venda para hoje", detalhe:"Revisar clientes e concluir ou dispensar", acao:"Abrir pós-venda", ir:()=>irPara("garantias") });
+    if (semEstoque.length) pend.push({ id:"estoque-baixo", tom:"atencao", titulo: semEstoque.length + " produto" + (semEstoque.length>1?"s":"") + " com estoque baixo", detalhe: semEstoque.slice(0, 3).map((p) => p.nome).join(" · ") + (semEstoque.length > 3 ? " · +" + (semEstoque.length - 3) : ""), acao:"Ver estoque", ir:()=>(abrirV2 ? abrirV2("produtos") : irPara("catalogo")) });
   }
   if (verFinanceiro) {
-  const vencidas = lancamentos.filter((l) => !l.pago && l.vencimento < HOJE);
+  const vencidas = lancamentos.filter((l) => !l.pago && l.vencimento < hojeISO());
   const vencR = vencidas.filter((l) => l.tipo === "receita");
   const vencD = vencidas.filter((l) => l.tipo === "despesa");
   if (vencR.length) pend.push({ id: "vr", tom: "erro", titulo: `${vencR.length} cobrança${vencR.length > 1 ? "s" : ""} vencida${vencR.length > 1 ? "s" : ""}`, detalhe: `${brl(soma(vencR))} em atraso`, acao: "Ver no financeiro", ir: () => irPara("financeiro") });
@@ -1577,7 +1787,7 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
       <div className="flex flex-wrap items-end justify-between gap-4 mb-7">
         <div>
           <p className="text-[15px] text-slate-500">{saudacao}, {(usuarioAtual?.nome || empresa.responsavel).split(" ")[0]}</p>
-          <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em] mt-0.5">{diaSemana(HOJE)}, {dataBR(HOJE)}</h1>
+          <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em] mt-0.5">{diaSemana(hojeISO())}, {dataBR(hojeISO())}</h1>
         </div>
         <div className="flex flex-wrap gap-2">
           {atalhos.map((a) => (
@@ -1596,7 +1806,10 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
               {verFinanceiro ? "O que tenho para hoje" : "Meus atendimentos de hoje"}
             </Rotulo>
             <Panel className="divide-y divide-slate-100 overflow-hidden">
-              {hojeOS.length === 0 ? <Empty icon={CalendarDays} title="Nenhum atendimento hoje" sub="Aproveite para colocar os orçamentos em dia." />
+              {(verFinanceiro ? hojeOS : meuDia).length === 0 ? <Empty icon={CalendarDays} title="Nenhum atendimento hoje" sub="Aproveite para colocar os orçamentos em dia." />
+                : !verFinanceiro ? meuDia.map((os) => (
+                  <CartaoMeuDia key={os.id} os={os} nomeCliente={nomeCliente} cliente={cliente} abrirOS={abrirOS} mudarStatusOS={mudarStatusOS} agora={agora} />
+                ))
                 : hojeOS.map((os) => (
                   <Linha key={os.id}>
                     <div className="flex items-start gap-4">
@@ -1649,6 +1862,27 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
               </Panel>
             )}
           </section>
+
+          <section>
+            <Rotulo acao={<button onClick={() => irPara("ordens")} className="text-[13px] font-medium text-teal-800 hover:underline">Ver serviços</button>}>
+              Serviços concluídos recentemente
+            </Rotulo>
+            <Panel className="divide-y divide-slate-100 overflow-hidden">
+              {recentes.length === 0 ? <Empty icon={CheckCircle2} title="Nenhum serviço concluído nos últimos 30 dias" />
+                : recentes.map((os) => (
+                  <Linha key={os.id} onClick={() => abrirOS(os.id)}>
+                    <div className="flex items-center gap-3.5">
+                      <span className="text-[12px] font-medium text-slate-500 tabular-nums w-[44px] shrink-0">{dataCurta(os.concluidaEm)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[14px] font-medium text-slate-800 truncate">{nomeCliente(os.clienteId)}</p>
+                        <p className="text-[12.5px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
+                      </div>
+                      <Pill tone={ST_OS.concluida.tone}>{ST_OS.concluida.label}</Pill>
+                    </div>
+                  </Linha>
+                ))}
+            </Panel>
+          </section>
         </div>
 
         {verFinanceiro && <section className="lg:sticky lg:top-6">
@@ -1675,9 +1909,9 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, irPara, abrirOS,
 }
 
 /* =================================================================== Agenda */
-function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, orcamentos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao }) {
+function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, orcamentos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao, real }) {
   const tecnico = papel === "tecnico";
-  const [dia, setDia] = useState(HOJE);
+  const [dia, setDia] = useState(hojeISO());
   const [visao, setVisao] = useState(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "lista" : "semana"));
   const [filtro, setFiltro] = useState("proximos");
   const [tecnicoId, setTecnicoId] = useState("");
@@ -1705,22 +1939,22 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
   const termo = semAcento(busca.trim());
   const bateBusca = (o) => !termo || semAcento([o.numero, nomeCliente(o.clienteId), o.local, o.localServico, resumoOS(o), o.responsavel].filter(Boolean).join(" ")).includes(termo);
   const baseBusca = ordens.filter(bateBusca);
-  const ownerLista = filterOwnerAgenda(baseBusca, { filter: filtro, today: HOJE, technicianId: tecnicoId });
+  const ownerLista = filterOwnerAgenda(baseBusca, { filter: filtro, today: hojeISO(), technicianId: tecnicoId });
   const ownerGrupos = groupAgendaOrders(ownerLista, filtro);
-  const meuDia = technicianDayAgenda(baseBusca, { userId: usuarioAtual?.id, day: dia, today: HOJE });
+  const meuDia = technicianDayAgenda(baseBusca, { userId: usuarioAtual?.id, day: dia, today: hojeISO() });
   const tecnicos = equipe.filter((m) => m.papel === "tecnico" && m.ativo !== false);
   const nomeTecnico = (os) => equipe.find((m) => m.usuarioId === os.responsavelId)?.usuario?.nome || os.responsavel || "Sem técnico";
-  const semAgenda = filterOwnerAgenda(baseBusca, { filter: "semdata", today: HOJE, technicianId: tecnicoId });
+  const semAgenda = filterOwnerAgenda(baseBusca, { filter: "semdata", today: hojeISO(), technicianId: tecnicoId });
 
   const rotuloGrupo = (data) => {
     if (data === "sem-data") return "Sem data";
-    if (data === HOJE) return "Hoje";
-    if (data === addDays(HOJE, 1)) return "Amanhã";
+    if (data === hojeISO()) return "Hoje";
+    if (data === addDays(hojeISO(), 1)) return "Amanhã";
     return `${diaSemana(data).replace("-feira", "")}, ${dataBR(data)}`;
   };
   const rotuloFiltro = { hoje: "Hoje", proximos: "Próximos", semdata: "Sem data", concluidos: "Concluídos" }[filtro] || "Agenda";
-  const abrirHoje = () => { setDia(HOJE); setVisao("lista"); if (!tecnico) setFiltro("hoje"); };
-  const selecionarFiltro = (id) => { setFiltro(id); setVisao("lista"); if (id === "hoje") setDia(HOJE); };
+  const abrirHoje = () => { setDia(hojeISO()); setVisao("lista"); if (!tecnico) setFiltro("hoje"); };
+  const selecionarFiltro = (id) => { setFiltro(id); setVisao("lista"); if (id === "hoje") setDia(hojeISO()); };
 
   const CardAgenda = ({ os, atraso = false }) => {
     const st = ST_OS[os.status] || { label: os.status || "Status", tone: "neutro" };
@@ -1756,8 +1990,8 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
         <div className="flex items-center justify-between gap-2">
           <button onClick={() => setDia(addDays(dia, -1))} aria-label="Dia anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-500 hover:bg-slate-50", ring)}><ArrowLeft className="w-4 h-4" /></button>
           <div className="text-center min-w-0">
-            <p className="font-semibold text-slate-900 truncate">{dia === HOJE ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`}</p>
-            {dia !== HOJE && <button onClick={() => setDia(HOJE)} className="min-h-11 text-[12px] text-teal-700 hover:underline">Voltar para hoje</button>}
+            <p className="font-semibold text-slate-900 truncate">{dia === hojeISO() ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`}</p>
+            {dia !== hojeISO() && <button onClick={() => setDia(hojeISO())} className="min-h-11 text-[12px] text-teal-700 hover:underline">Voltar para hoje</button>}
           </div>
           <button onClick={() => setDia(addDays(dia, 1))} aria-label="Próximo dia" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-500 hover:bg-slate-50", ring)}><ArrowRight className="w-4 h-4" /></button>
         </div>
@@ -1810,13 +2044,13 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
         </div>
         <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase font-semibold text-slate-400 mb-1">{["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((x) => <span key={x}>{x}</span>)}</div>
         <div className="grid grid-cols-7 gap-1">
-          {diasMes.map((d) => { const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length; const fora = !d.startsWith(mesAtual); return <button key={d} onClick={() => { setDia(d); setFiltro("hoje"); setVisao("lista"); }} className={cx("min-h-11 rounded-xl text-sm flex flex-col items-center justify-center", ring, d === HOJE ? "ring-1 ring-teal-300" : "", fora ? "text-slate-300" : "text-slate-700", qtd ? "bg-slate-50" : "hover:bg-slate-50")}><span>{Number(d.slice(8))}</span>{qtd > 0 && <span className="text-[9px] text-teal-700 font-semibold">{qtd}</span>}</button>; })}
+          {diasMes.map((d) => { const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length; const fora = !d.startsWith(mesAtual); return <button key={d} onClick={() => { setDia(d); setFiltro("hoje"); setVisao("lista"); }} className={cx("min-h-11 rounded-xl text-sm flex flex-col items-center justify-center", ring, d === hojeISO() ? "ring-1 ring-teal-300" : "", fora ? "text-slate-300" : "text-slate-700", qtd ? "bg-slate-50" : "hover:bg-slate-50")}><span>{Number(d.slice(8))}</span>{qtd > 0 && <span className="text-[9px] text-teal-700 font-semibold">{qtd}</span>}</button>; })}
         </div>
       </Panel>}
 
       {tecnico ? <>
         {meuDia.overdue.length > 0 && <section className="mb-6"><Rotulo>Atrasados · {meuDia.overdue.length}</Rotulo><Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.overdue.map((os) => <CardAgenda key={os.id} os={os} atraso />)}</Panel></section>}
-        <section><Rotulo>{dia === HOJE ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`} · {meuDia.scheduled.length}</Rotulo>{meuDia.scheduled.length ? <Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.scheduled.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel> : <Empty icon={CalendarClock} title="Nenhum atendimento atribuído" text="Não há OS autorizadas para você neste dia." />}</section>
+        <section><Rotulo>{dia === hojeISO() ? "Hoje" : `${diaSemana(dia)}, ${dataBR(dia)}`} · {meuDia.scheduled.length}</Rotulo>{meuDia.scheduled.length ? <Panel className="divide-y divide-slate-100 overflow-hidden">{meuDia.scheduled.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel> : <Empty icon={CalendarClock} title="Nenhum atendimento atribuído" text="Não há OS autorizadas para você neste dia." />}</section>
       </> : <>
         {ownerLista.length === 0 ? <Empty icon={CalendarClock} title={`Nenhum item em ${rotuloFiltro.toLowerCase()}`} text="Altere o filtro ou escolha outro período." />
         : <div className="space-y-5 mb-8">{ownerGrupos.map((grupo) => <section key={grupo.date}><Rotulo>{rotuloGrupo(grupo.date)} · {grupo.orders.length}</Rotulo><Panel className="divide-y divide-slate-100 overflow-hidden">{grupo.orders.map((os) => <CardAgenda key={os.id} os={os} />)}</Panel></section>)}</div>}
@@ -1828,7 +2062,7 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
       </>}
 
       {!tecnico && <AgendarModal os={agendando} onClose={() => setAgendando(null)} onSalvar={agendarOS} empresa={empresa} diaSugerido={dia} equipe={equipe} />}
-      {!tecnico && novaOS && <NovaOS onClose={() => setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} orcamentos={orcamentos} />}
+      {!tecnico && novaOS && <NovaOS onClose={() => setNovaOS(false)} clientes={clientes} servicos={servicos} produtos={produtos} empresa={empresa} salvarOS={salvarOS} salvarCliente={salvarCliente} equipe={equipe} usuarioAtual={usuarioAtual} dataInicial={dia} orcamentos={orcamentos} real={real} />}
     </>
   );
 }
@@ -1837,7 +2071,7 @@ function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = []
   const [f, setF] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const salvandoRef = useRef(false);
-  useEffect(() => { if (os) setF({ data: os.data || diaSugerido || HOJE, hora: os.hora || "09:00",
+  useEffect(() => { if (os) setF({ data: os.data || diaSugerido || hojeISO(), hora: os.hora || "09:00",
     responsavel: os.responsavel || empresa.responsavel, responsavelId: os.responsavelId || null }); }, [os]);
   const fechar = () => { if (!salvandoRef.current) onClose(); };
   const confirmar = async () => {
@@ -1854,7 +2088,7 @@ function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = []
   };
   if (!os || !f) return null;
   return (
-    <Modal open onClose={fechar} title="Agendar atendimento" sub={os.numero}
+    <Modal open onClose={fechar} busy={salvando} title="Agendar atendimento" sub={os.numero}
       footer={<><Btn variant="ghost" disabled={salvando} onClick={fechar}>Cancelar</Btn>
         <Btn disabled={!f.data || salvando} onClick={confirmar}>{salvando ? "Agendando..." : "Confirmar agendamento"}</Btn></>}>
       <div className="grid sm:grid-cols-2 gap-5">
@@ -1881,7 +2115,7 @@ function AgendarModal({ os, onClose, onSalvar, empresa, diaSugerido, equipe = []
 
 /* ================================================================ Clientes */
 function Clientes(p) {
-  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso, excluirRegistro, papel } = p;
+  const { clientes, orcamentos, ordens, lancamentos, garantias, salvarCliente, clienteAberto, setClienteAberto, abrirOrc, abrirOS, abrirGarantia, setTela, setOrcamentoAberto, empresaId, real, aviso, excluirRegistro, papel, abrirV2 } = p;
   const [revisoesCliente, setRevisoesCliente] = useState([]);
   useEffect(() => {
     if (!real || !empresaId) return;
@@ -1895,6 +2129,15 @@ function Clientes(p) {
 
   const [localCliente, setLocalCliente] = useState("");
   useEffect(() => setLocalCliente(""), [clienteAberto]);
+  // BLOCO 4 · locais cadastrados (client_locations) do cliente aberto: base relacional do histórico por local.
+  const [locaisCadastrados, setLocaisCadastrados] = useState([]);
+  useEffect(() => {
+    setLocaisCadastrados([]);
+    if (!real || !clienteAberto || papel !== "proprietario") return;
+    let ativo = true;
+    listarLocaisClienteOrcamentoV2DB(clienteAberto).then((r) => { if (ativo) setLocaisCadastrados(r || []); }).catch(() => {});
+    return () => { ativo = false; };
+  }, [real, clienteAberto, papel]);
 
   if (clienteAberto) {
     const c = clientes.find((x) => x.id === clienteAberto);
@@ -1905,8 +2148,13 @@ function Clientes(p) {
     const gar = garantias.filter((g) => g.clienteId === c.id);
     const recebido = pgs.filter((l) => l.pago).reduce((t, l) => t + l.valor, 0);
     const aberto = pgs.filter((l) => !l.pago).reduce((t, l) => t + l.valor, 0);
-    const locais = [...new Set(oss.map((o) => o.localServico).filter(Boolean))];
-    const ossVisiveis = localCliente ? oss.filter((o) => o.localServico === localCliente) : oss;
+    // OS vinculada a local cadastrado é agrupada pelo vínculo; OS antiga só tem o texto do local.
+    const locaisVinculados = locaisCadastrados.filter((l) => oss.some((o) => o.localId === l.id));
+    const vinculada = (o) => Boolean(o.localId && locaisVinculados.some((l) => l.id === o.localId));
+    const locais = [...new Set(oss.filter((o) => !vinculada(o)).map((o) => o.localServico).filter(Boolean))];
+    const localSelecionadoId = localCliente.startsWith("loc:") ? localCliente.slice(4) : "";
+    const ossVisiveis = localCliente ? oss.filter((o) => (localSelecionadoId ? o.localId === localSelecionadoId : !vinculada(o) && o.localServico === localCliente)) : oss;
+    const nomeLocalCliente = localSelecionadoId ? (locaisVinculados.find((l) => l.id === localSelecionadoId)?.name || "local cadastrado") : localCliente;
     const retornos = real ? revisoesCliente.filter((r)=>r.clienteId===c.id && r.status==="pending").map((r)=>({ data:r.data, servico:r.descricao })) : oss.filter((o) => o.retorno).map((o) => o.retorno);
 
     return (
@@ -1925,6 +2173,7 @@ function Clientes(p) {
           </div>
           <div className="flex gap-2 flex-wrap">
             <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setForm(c)}>Editar</Btn>
+            {papel === "proprietario" && abrirV2 && <Btn variant="soft" size="sm" icon={MapPin} onClick={() => abrirV2("clientes-locais", { client: c.id })}>Locais no mapa</Btn>}
             {papel === "proprietario" && <Btn variant="danger" size="sm" icon={Trash2} onClick={() => excluirRegistro("cliente", c.id, c.fantasia || c.nome, () => setClienteAberto(null))}>Excluir</Btn>}
             <Btn size="sm" icon={FileText} onClick={() => { setTela("orcamentos"); setOrcamentoAberto("novo:" + c.id); }}>Novo orçamento</Btn>
           </div>
@@ -1951,11 +2200,12 @@ function Clientes(p) {
                 {c.whatsapp && <Btn variant="soft" size="sm" icon={Share2} className="w-full" onClick={() => window.open(`https://wa.me/55${soDigitos(c.whatsapp)}`, "_blank")}>Falar no WhatsApp</Btn>}
               </Panel>
             </section>
-            {locais.length > 0 && (
+            {(locaisVinculados.length > 0 || locais.length > 0) && (
               <section>
                 <Rotulo>Locais atendidos</Rotulo>
                 <Panel className="p-4 sm:p-5 flex flex-wrap gap-2">
                   <button type="button" onClick={() => setLocalCliente("")} aria-pressed={!localCliente} className={cx("min-h-11 rounded-xl px-3 py-2 text-[13px] font-medium", !localCliente ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}>Todos os locais</button>
+                  {locaisVinculados.map((l) => <button type="button" key={l.id} onClick={() => setLocalCliente(`loc:${l.id}`)} aria-pressed={localCliente === `loc:${l.id}`} className={cx("min-h-11 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-medium text-left break-words", localCliente === `loc:${l.id}` ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}><MapPin className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />{l.name}</button>)}
                   {locais.map((l) => <button type="button" key={l} onClick={() => setLocalCliente(l)} aria-pressed={localCliente === l} className={cx("min-h-11 rounded-xl px-3 py-2 text-[13px] font-medium text-left break-words", localCliente === l ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-700", ring)}>{l}</button>)}
                 </Panel>
               </section>
@@ -2025,7 +2275,7 @@ function Clientes(p) {
             </section>
 
             <section>
-              <Rotulo>{localCliente ? `Histórico em ${localCliente}` : "Histórico de serviços"}</Rotulo>
+              <Rotulo>{localCliente ? `Histórico em ${nomeLocalCliente}` : "Histórico de serviços"}</Rotulo>
               <Panel className="divide-y divide-slate-100 overflow-hidden">
                 {ossVisiveis.length === 0 ? <Empty icon={ClipboardList} title={localCliente ? "Nenhuma OS neste local" : "Nenhuma OS ainda"} /> : ossVisiveis.map((o) => (
                   <Linha key={o.id} onClick={() => abrirOS(o.id)}>
@@ -2072,7 +2322,8 @@ function Clientes(p) {
 
   return (
     <>
-      <PageHead title="Clientes" sub={`${clientes.length} cadastrados`} action={<Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn>} />
+      <PageHead title="Clientes" sub={`${clientes.length} cadastrados`}
+        action={<div className="flex flex-wrap gap-2"><RecursosV2 aba="clientes" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn></div>} />
       <div className="mb-5 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder="Buscar por nome, documento ou telefone" /></div>
       {lista.length === 0 ? (
         <Panel><Empty icon={Users} title="Nenhum cliente encontrado" sub="Cadastre um cliente para começar a criar orçamentos." action={<Btn icon={Plus} onClick={() => setForm({ tipo: "PF" })}>Novo cliente</Btn>} /></Panel>
@@ -2101,7 +2352,10 @@ function Clientes(p) {
    Mínimo para continuar: nome + telefone. O resto pode vir depois. */
 function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
   const [f, setF] = useState(null);
-  useEffect(() => { if (aberto) setF({ tipo: "PF", nome: nomeInicial, telefone: "", whatsapp: "", endereco: "", documento: "", fantasia: "", responsavel: "", obs: "" }); }, [aberto]);
+  const [salvando, setSalvando] = useState(false);
+  const salvandoRef = useRef(false);
+  useEffect(() => { if (aberto) setF({ tipo: "PF", nome: nomeInicial, telefone: "", whatsapp: "", endereco: "", documento: "", fantasia: "", responsavel: "", obs: "" }); else setF(null); }, [aberto]);
+  const { dirty } = useFormDirty(f, Boolean(aberto && f));
   if (!aberto || !f) return null;
   const set = (k, v) => setF({ ...f, [k]: v });
   const pj = f.tipo === "PJ";
@@ -2109,9 +2363,14 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
   const faltaFiscal = pj && !f.documento.trim();
 
   return (
-    <Modal open onClose={onClose} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
-      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn disabled={!pronto} onClick={() => { onSave({ ...f, whatsapp: f.whatsapp || f.telefone }); onClose(); }}>Salvar e usar</Btn></>}>
+    <Modal open onClose={onClose} dirty={dirty} busy={salvando} wide title="Cadastrar cliente" sub="Só o essencial agora. Você completa depois se precisar."
+      footer={(requestClose) => <><Btn variant="ghost" disabled={salvando} onClick={requestClose}>Cancelar</Btn>
+        <Btn disabled={!pronto || salvando} onClick={async () => {
+          if (salvandoRef.current) return;
+          salvandoRef.current = true; setSalvando(true);
+          try { const id = await onSave({ ...f, whatsapp: f.whatsapp || f.telefone }); if (id) onClose(); }
+          finally { salvandoRef.current = false; setSalvando(false); }
+        }}>{salvando ? "Salvando…" : "Salvar e usar"}</Btn></>}>
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
         {["PF", "PJ"].map((t) => (
           <button key={t} role="tab" aria-selected={f.tipo === t} onClick={() => set("tipo", t)}
@@ -2148,15 +2407,19 @@ function ClienteRapido({ aberto, onClose, onSave, nomeInicial = "" }) {
 
 function ClienteForm({ form, setForm, onSave, onSaved }) {
   const [salvandoCliente, setSalvandoCliente] = useState(false);
+  const { dirty } = useFormDirty(form, Boolean(form));
+  const rascunho = useFormDraft({ formType: "cliente-novo", enabled: Boolean(form && !form.id), value: form, dirty,
+    onRestore: (dados) => setForm((atual) => (atual && !atual.id ? { ...atual, ...dados } : atual)) });
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const pj = form.tipo === "PJ";
   return (
-    <Modal open onClose={() => setForm(null)} title={form.id ? "Editar cliente" : "Novo cliente"} wide
-      footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
+    <Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCliente} title={form.id ? "Editar cliente" : "Novo cliente"} wide
+      footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoCliente} onClick={requestClose}>Cancelar</Btn>
         <Btn disabled={!form.nome || salvandoCliente}
-          onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
+          onClick={async () => { if (salvandoCliente) return; setSalvandoCliente(true); try { const id = await onSave(form); if (!id) return; setForm(null); onSaved?.(id); } finally { setSalvandoCliente(false); } }}>
           {salvandoCliente ? "Salvando…" : "Salvar cliente"}</Btn></>}>
+      <DraftRestoredNotice savedAt={rascunho.restoredAt} onDiscard={() => setForm(rascunho.discardDraft() || { tipo: "PF" })} />
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
         {["PF", "PJ"].map((t) => (
           <button key={t} role="tab" aria-selected={form.tipo === t} onClick={() => set("tipo", t)}
@@ -2186,7 +2449,7 @@ function ClienteForm({ form, setForm, onSave, onSaved }) {
 }
 
 /* ==================================================== Catálogo (serviços + produtos) */
-function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirRegistro, papel, contexto, real, empresaId, aviso }) {
+function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirRegistro, papel, contexto, real, empresaId, aviso, abrirV2 }) {
   const [aba, setAba] = useState("servicos");
   const [busca, setBusca] = useState("");
   const [formS, setFormS] = useState(null);
@@ -2303,7 +2566,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
       <PageHead title="Serviços e produtos" sub="O que você vende, quanto cobra e como cobra."
         action={aba === "servicos"
           ? <Btn icon={Plus} onClick={() => setFormS({ unidade: "unidade", ativo: true, preco: 0, custo: 0, categoria: "", garantiaDias: 0, retornoDias: 0 })}>Novo serviço</Btn>
-          : <Btn icon={Plus} onClick={() => abrirFormProduto(null)}>Novo produto</Btn>} />
+          : <div className="flex flex-wrap gap-2"><RecursosV2 aba="catalogo" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => abrirFormProduto(null)}>Novo produto</Btn></div>} />
 
       <Tabs valor={aba} onChange={setAba} opcoes={[{ id: "servicos", label: `Serviços · ${ativosS.length}` }, { id: "produtos", label: `Produtos e materiais · ${ativosP.length}` }]} className="mb-5" />
       <div className="mb-6 max-w-md"><SearchBox value={busca} onChange={setBusca} placeholder={aba === "servicos" ? "Buscar serviço" : "Buscar produto, marca, modelo, SKU ou código"} /></div>
@@ -2486,7 +2749,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
           <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <label className="flex items-center gap-3 min-h-11"><input type="checkbox" checked={Boolean(formP.controlaEstoque)} onChange={(e) => setFormP({ ...formP, controlaEstoque: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" /><span className="text-[14px] text-slate-700">Controlar estoque deste produto</span></label>
-              {formP.id && contexto?.abrirRecursoV2 && <Btn size="sm" variant="soft" onClick={() => contexto.abrirRecursoV2("produtos")}>Estoque e movimentações</Btn>}
+              {formP.id && contexto?.abrirRecursoV2 && <Btn size="sm" variant="soft" onClick={() => contexto.abrirRecursoV2("produtos", { origem: "catalogo", params: { product: formP.id } })}>Estoque e movimentações</Btn>}
             </div>
             {formP.controlaEstoque && <div className="grid min-[430px]:grid-cols-2 gap-4"><Field label="Estoque atual"><Input type="number" value={formP.estoque || 0} disabled className="bg-slate-50" /></Field><Field label="Estoque mínimo"><Input type="number" inputMode="numeric" min="0" value={formP.estoqueMinimo || 0} onChange={(e) => setFormP({ ...formP, estoqueMinimo: Math.max(0, Number(e.target.value)) })} /></Field></div>}
             <label className="flex items-center gap-3 min-h-11"><input type="checkbox" checked={formP.vendaHabilitada !== false} onChange={(e) => setFormP({ ...formP, vendaHabilitada: e.target.checked })} className="w-5 h-5 rounded accent-teal-700" /><span className="text-[14px] text-slate-700">Liberado para venda em campo</span></label>
@@ -2628,7 +2891,7 @@ function interpretarParaFormulario(bruto, { clientes, servicos, produtos, empres
       itens,
       desconto: Number(bruto.desconto) || 0,
       acrescimo: Number(bruto.acrescimo) || 0,
-      validade: bruto.validadeDias ? addDays(HOJE, Number(bruto.validadeDias)) : null,
+      validade: bruto.validadeDias ? addDays(hojeISO(), Number(bruto.validadeDias)) : null,
       condicao: bruto.condicao || null,
       obs: bruto.obs || null,
       localServico: bruto.localServico || null,
@@ -2847,8 +3110,8 @@ function OrcamentoEditor(p) {
   const [salvando, setSalvando] = useState(false);
   const [d, setD] = useState(() => ({
     id: inicial?.id, numero: inicial?.numero, clienteId: inicial?.clienteId || "",
-    status: inicial?.status || "rascunho", data: inicial?.data || HOJE,
-    validade: inicial?.validade || addDays(HOJE, empresa.validadePadrao),
+    status: inicial?.status || "rascunho", data: inicial?.data || hojeISO(),
+    validade: inicial?.validade || addDays(hojeISO(), empresa.validadePadrao),
     itens: inicial?.itens ? inicial.itens.map((i) => ({ ...i })) : [],
     desconto: inicial?.desconto || 0, acrescimo: inicial?.acrescimo || 0,
     condicao: inicial?.condicao || empresa.condicaoPadrao, obs: inicial?.obs ?? empresa.observacaoPadrao,
@@ -2918,6 +3181,9 @@ function OrcamentoEditor(p) {
 
   /* Salva e, quando é um orçamento novo, oferece os próximos passos em vez de
      sair da tela ou baixar PDF sem o usuário pedir. */
+  const { dirty: orcamentoAlterado, markClean: orcamentoSalvo } = useFormDirty(d);
+  const saidaOrcamento = useDiscardGuard({ dirty: orcamentoAlterado, onClose: onFechar });
+
   const salvarEDecidir = async () => {
     if (!d.clienteId || d.itens.length === 0 || salvando) return;
     setSalvando(true);
@@ -2925,6 +3191,7 @@ function OrcamentoEditor(p) {
       const edicao = Boolean(d.id);
       const id = await salvarOrcamento(d);
       if (!id) return;                   // erro já foi avisado por salvarOrcamento
+      orcamentoSalvo();
       if (edicao) { onFechar(); return; }
       /* pós-criação: o registro já está salvo e a tela de Orçamentos abre as
          próximas ações. Nada é baixado automaticamente. */
@@ -2953,7 +3220,8 @@ function OrcamentoEditor(p) {
 
   return (
     <>
-      <button onClick={onFechar} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
+      <DiscardChangesPrompt open={saidaOrcamento.confirming} onKeepEditing={saidaOrcamento.keepEditing} onDiscard={saidaOrcamento.discard} />
+      <button onClick={saidaOrcamento.requestClose} className={cx("flex items-center gap-2 text-[14px] text-slate-500 mb-5 hover:text-slate-900 py-1", ring)}>
         <ArrowLeft className="w-4 h-4" /> Voltar
       </button>
       <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche."
@@ -3169,7 +3437,7 @@ function OrcamentoEditor(p) {
       </div>
 
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); return id; }} />
 
       <CadastroRapidoCatalogo
         tipo={cadastroRapido}
@@ -3393,6 +3661,7 @@ function OrdensServico(p) {
   const soMinhas = !permitido("todasOS");
   const [filtro, setFiltro] = useState("dia");
   const [criando, setCriando] = useState(false);
+  const agora = useAgora(ordens.some((o) => o.status === "andamento"));
 
   if (osAberta) {
     const os = ordens.find((o) => o.id === osAberta);
@@ -3400,9 +3669,11 @@ function OrdensServico(p) {
   }
 
   const viva = (o) => o.status !== "concluida" && o.status !== "cancelada";
-  const hoje = ordens.filter((o) => viva(o) && o.data === HOJE).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const proximos = ordens.filter((o) => viva(o) && o.data > HOJE).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
-  const atrasadas = ordens.filter((o) => viva(o) && o.data && o.data < HOJE);
+  const hojeBase = ordens.filter((o) => viva(o) && o.data === hojeISO());
+  /* técnico: em andamento primeiro, depois horário marcado, depois as demais atribuídas */
+  const hoje = soMinhas ? sortTechnicianDay(hojeBase) : hojeBase.sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const proximos = ordens.filter((o) => viva(o) && o.data > hojeISO()).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
+  const atrasadas = ordens.filter((o) => viva(o) && o.data && o.data < hojeISO());
   const semData = ordens.filter((o) => viva(o) && !o.data);
   const concluidas = ordens.filter((o) => o.status === "concluida").sort((a, b) => (b.data || "").localeCompare(a.data || ""));
 
@@ -3419,6 +3690,8 @@ function OrdensServico(p) {
             </div>
             <p className="text-[13px] text-slate-500 truncate">{os.numero} · {resumoOS(os)}</p>
             <p className="text-[12px] text-slate-400 mt-1">{os.data ? `${dataBR(os.data)}${os.hora ? ` às ${os.hora}` : ""}` : "Sem agendamento"}{empresa.temEquipe ? ` · ${nomeResponsavelOS(os, equipe, usuarioAtual)}` : ""}</p>
+            <TimerAtendimento os={os} agora={agora} className="mt-1" />
+            <AvisoAtendimentoLongo os={os} agora={agora} className="mt-2" />
             <div className="mt-2.5">
               <Trilha etapas={[
                 { label: orc ? orc.numero : "OS direta", feito: true },
@@ -3449,7 +3722,7 @@ function OrdensServico(p) {
 
   return (
     <>
-      <PageHead title={soMinhas ? "Minhas ordens de serviço" : "Ordens de serviço"} sub={`${diaSemana(HOJE)}, ${dataBR(HOJE)}`}
+      <PageHead title={soMinhas ? "Minhas ordens de serviço" : "Ordens de serviço"} sub={`${diaSemana(hojeISO())}, ${dataBR(hojeISO())}`}
         action={permitido("todasOS") ? <Btn icon={Plus} onClick={() => setCriando(true)}>Nova OS</Btn> : null} />
       <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
         opcoes={[{ id: "dia", label: "Meu dia" }, { id: "abertas", label: "Todas em aberto" }, { id: "concluidas", label: "Concluídas" }]} />
@@ -3472,20 +3745,31 @@ function OrdensServico(p) {
 
 /* Abertura de OS pensada para o campo: descrever o problema já basta.
    O catálogo é atalho, não obrigação. */
-function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual, dataInicial = "" }) {
+function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empresa, salvarOS, salvarCliente, equipe = [], usuarioAtual, dataInicial = "", real = false }) {
   const [novoCliente, setNovoCliente] = useState(false);
   const [f, setF] = useState({
-    clienteId: "", orcamentoId: "", descricaoLivre: "", local: "", localServico: "",
+    clienteId: "", orcamentoId: "", descricaoLivre: "", local: "", localServico: "", localId: "",
     itens: [], data: dataInicial || "", hora: "09:00", responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null, obs: "",
   });
   const [catalogo, setCatalogo] = useState(false);
   const [abaCat, setAbaCat] = useState("servicos");
   const [erroCriacao, setErroCriacao] = useState("");
   const requestIdRef = useRef(null);
+  const { dirty } = useFormDirty(f);
+  const rascunho = useFormDraft({ formType: "os-nova", enabled: real, value: { ...f, requestId: requestIdRef.current }, dirty,
+    onRestore: ({ requestId, ...dados }) => { setF((s) => ({ ...s, ...dados })); if (requestId) requestIdRef.current = requestId; } });
+  const descartarRascunho = () => {
+    const inicial = rascunho.discardDraft();
+    if (!inicial) return;
+    const { requestId, ...vazio } = inicial;
+    setF(vazio);
+    requestIdRef.current = requestId || null;
+  };
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const escolherCliente = (id) => {
     const cl = clientes.find((x) => x.id === id);
-    setF((s) => ({ ...s, clienteId: id, orcamentoId: orcamentos.some((o) => o.id === s.orcamentoId && o.clienteId === id) ? s.orcamentoId : "", local: cl?.endereco || s.local }));
+    // Local cadastrado pertence ao cliente: trocar o cliente sempre limpa o vínculo.
+    setF((s) => ({ ...s, clienteId: id, localId: id === s.clienteId ? s.localId : "", orcamentoId: orcamentos.some((o) => o.id === s.orcamentoId && o.clienteId === id) ? s.orcamentoId : "", local: cl?.endereco || s.local }));
   };
   const orcamentosCliente = f.clienteId ? orcamentos.filter((o) => o.clienteId === f.clienteId) : [];
   const orcamentoSelecionado = orcamentosCliente.find((o) => o.id === f.orcamentoId);
@@ -3519,10 +3803,11 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
 
   return (
     <>
-      <Modal open onClose={onClose} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
-        footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+      <Modal open onClose={onClose} dirty={dirty} busy={criando} wide title="Nova ordem de serviço" sub="Descreva o que precisa ser feito. Escolher serviço do catálogo é opcional."
+        footer={(requestClose) => <><Btn variant="ghost" disabled={criando} onClick={requestClose}>Cancelar</Btn>
           <Btn disabled={!pronto || criando} onClick={criar}>{criando ? "Criando…" : "Abrir ordem de serviço"}</Btn></>}>
 
+        <DraftRestoredNotice savedAt={rascunho.restoredAt} onDiscard={descartarRascunho} detail="Itens do catálogo não ficam no rascunho; adicione-os de novo se precisar." />
         {erroCriacao && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">{erroCriacao}</div>}
         <Field label="Cliente">
           <div className="flex gap-2 flex-wrap sm:flex-nowrap">
@@ -3551,6 +3836,11 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
           <Field label="Endereço do atendimento"><Input value={f.local} onChange={(e) => set("local", e.target.value)} placeholder="Rua, número, bairro" /></Field>
           <Field label="Local do serviço" hint="Ex.: Portaria, Apto 304, Loja 4."><Input value={f.localServico} onChange={(e) => set("localServico", e.target.value)} /></Field>
         </div>
+
+        {real && f.clienteId && (
+          <QuoteClientLocationField clientId={f.clienteId} value={f.localId || ""}
+            onSelect={(loc) => setF((s) => ({ ...s, localId: loc?.id || "", localServico: loc ? (s.localServico || loc.name) : s.localServico, local: loc?.address || s.local }))} />
+        )}
 
         <div>
           <button onClick={() => setCatalogo((v) => !v)} className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
@@ -3617,7 +3907,7 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
       </Modal>
 
       <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
-        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); }} />
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); return id; }} />
     </>
   );
 }
@@ -3639,6 +3929,8 @@ function OSDetalhe(p) {
   const [txtCheck, setTxtCheck] = useState("");
   const [agendando, setAgendando] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
+  const [comprovanteAberto, setComprovanteAberto] = useState(false);
+  const agora = useAgora(os.status === "andamento");
   const orc = orcamentos.find((o) => o.id === os.orcamentoId);
   const cobranca = lancamentos.find((l) => l.origemTipo === "os" && l.origemId === os.id);
   const gar = garantias.filter((g) => g.osId === os.id);
@@ -3681,6 +3973,11 @@ function OSDetalhe(p) {
     if (podeAdministrarOS) acoes.push({ label: "Reagendar", icon: CalendarClock, fn: () => setAgendando(true) });
   }
   if (os.status === "andamento") acoes.push({ label: "Finalizar atendimento", icon: Check, fn: () => setFinalizando(true), principal: true });
+  // BLOCO 3 · Comprovante de Serviço (documento não fiscal): proprietário, OS concluída e banco real.
+  // A emissão também é recusada pelo backend para técnico.
+  if (verValores && real && os.status === "concluida") acoes.push({ label: "Comprovante de Serviço", icon: Receipt, fn: () => setComprovanteAberto(true), principal: true });
+  // BLOCO 4 · histórico do local cadastrado: somente proprietário (o banco também recusa técnico).
+  const historicoLocalVisivel = Boolean(real && os.localId && verValores);
   const acaoPrincipal = acoes.find((acao) => acao.principal);
   const acoesSecundarias = acoes.filter((acao) => !acao.principal);
 
@@ -3694,6 +3991,7 @@ function OSDetalhe(p) {
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em]">{os.numero}</h1>
           <Pill tone={ST_OS[os.status].tone}>{ST_OS[os.status].label}</Pill>
+          <TimerAtendimento os={os} agora={agora} />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {acaoPrincipal && <Btn icon={acaoPrincipal.icon} onClick={acaoPrincipal.fn}>{acaoPrincipal.label}</Btn>}
@@ -3709,6 +4007,8 @@ function OSDetalhe(p) {
           )}
         </div>
       </div>
+
+      <AvisoAtendimentoLongo os={os} agora={agora} className="mb-5" />
 
       <Panel className="p-4 sm:p-5 mb-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -3776,12 +4076,19 @@ function OSDetalhe(p) {
                 <Field label="Endereço"><Input value={os.local} onChange={(e) => up({ local: e.target.value })} /></Field>
                 <Field label="Local do serviço" hint="Ex.: Apto 304, Bloco B, Portaria, Loja 4."><Input value={os.localServico || ""} onChange={(e) => up({ localServico: e.target.value })} /></Field>
               </div>
-              <a href={mapsUrl([os.localServico, os.local].filter(Boolean).join(", "))} target="_blank" rel="noreferrer"
-                className={cx("flex items-center justify-center gap-2 w-full rounded-xl bg-slate-900 text-white py-3 text-[14px] font-medium hover:bg-slate-800", ring)}>
-                <Navigation className="w-[18px] h-[18px]" />Abrir rota até o cliente
-              </a>
+              <RouteButton destino={resolverDestinoRota({ endereco: os.local, localServico: os.localServico, cliente: c })} />
             </Panel>
           </section>
+
+          {historicoLocalVisivel && (
+            <section>
+              <Rotulo>Atendimentos anteriores neste local</Rotulo>
+              <Panel className="overflow-hidden">
+                <LocationHistoryPanel clientId={os.clienteId} locationId={os.localId} currentWorkOrderId={os.id}
+                  owner={verValores} onAbrirOS={abrirOS} />
+              </Panel>
+            </section>
+          )}
 
           <section>
             <Rotulo acao={permitido("catalogo")
@@ -3927,6 +4234,8 @@ function OSDetalhe(p) {
             </section>
           )}
 
+          <BaseTecnicaPainel os={os} real={real} recarregar={finalizando} />
+
           <section>
             <Rotulo acao={os.relato ? <span className="text-[12px] text-slate-400">salvo automaticamente</span> : null}>O que foi feito</Rotulo>
             <Panel className="p-5">
@@ -4059,7 +4368,13 @@ function OSDetalhe(p) {
         </div>
       </div>
 
-      <AgendarModal os={agendando ? os : null} onClose={() => setAgendando(false)} onSalvar={agendarOS} empresa={empresa} diaSugerido={HOJE} equipe={equipe} />
+      <AgendarModal os={agendando ? os : null} onClose={() => setAgendando(false)} onSalvar={agendarOS} empresa={empresa} diaSugerido={hojeISO()} equipe={equipe} />
+
+      {comprovanteAberto && (
+        <Modal open onClose={() => setComprovanteAberto(false)} title={`Comprovante de Serviço · ${os.numero}`} sub="Documento não fiscal emitido pelo proprietário">
+          <ServiceReceiptPanel workOrderId={os.id} telefoneCliente={c?.whatsapp || c?.telefone || ""} onAviso={aviso} />
+        </Modal>
+      )}
 
       {novoItem && (
         <Modal open onClose={() => setNovoItem(null)} title="Adicionar ao atendimento" sub="Do seu catálogo" wide>
@@ -4082,13 +4397,17 @@ function OSDetalhe(p) {
             try{
               up({relato:extras.relato,fotos:extras.fotos,pendencia:extras.pendencia});
               if(real) await marcarRetornoOSV2DB({workOrderId:os.id,reason:extras.retornoMotivo,materialNeeded:extras.retornoMaterial,notes:extras.retornoObs,priority:extras.retornoPrioridade,expectedReturnDate:extras.retornoPrevisao,requestId:extras.retornoRequestId});
-              setOrdens(l=>l.map(x=>x.id===os.id?{...x,precisaRetorno:true,pendencia:extras.pendencia||x.pendencia,historico:[...(x.historico||[]),{id:uid(),quando:HOJE,texto:`Precisa retornar · ${extras.retornoMotivo}` }]}:x));
+              setOrdens(l=>l.map(x=>x.id===os.id?{...x,precisaRetorno:true,pendencia:extras.pendencia||x.pendencia,historico:[...(x.historico||[]),{id:uid(),quando:hojeISO(),texto:`Precisa retornar · ${extras.retornoMotivo}` }]}:x));
               setFinalizando(false);
-            }catch(e){aviso(mensagemErro(e));}
-            return;
+              return true;
+            }catch(e){aviso(mensagemErro(e)); return false;}
           }
-          finalizarOS(os.id, extras); setFinalizando(false);
-        }} jaConcluida={os.status === "concluida"} verValores={verValores} />}
+          /* a conclusão só fecha o fechamento quando deu certo; se falhar, o texto continua na tela para tentar de novo */
+          const concluiu = await finalizarOS(os.id, extras);
+          if (concluiu === false) return false;
+          setFinalizando(false);
+          return true;
+        }} jaConcluida={os.status === "concluida"} verValores={verValores} real={real} />}
     </div>
   );
 }
@@ -4118,8 +4437,8 @@ function BlocoRelato({ valor, onChange, placeholder, destaque = true, rows = 5 }
 }
 
 /* --------------------------------------------------- finalizar atendimento */
-function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servicos = [], produtos, jaConcluida, verValores = true }) {
-  const [etapa, setEtapa] = useState(0);
+function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servicos = [], produtos, jaConcluida, verValores = true, real = false, fechamentoInicial, etapaInicial = 0 }) {
+  const [etapa, setEtapa] = useState(etapaInicial);
   const [relato, setRelato] = useState(os.relato || "");
   const [materiais, setMateriais] = useState([]);
   const [temAdicional, setTemAdicional] = useState((os.adicionais || []).length > 0 ? true : null);
@@ -4139,8 +4458,126 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
   const [fotos, setFotos] = useState(os.fotos || []);
   const [addProduto, setAddProduto] = useState(false);
   const [garantiaOverrides, setGarantiaOverrides] = useState({});
+  const { dirty: registroAlterado } = useFormDirty({ relato, materiais, temAdicional, adicionais, custosExtras, temPendencia, pendencia, resultado,
+    retornoMotivo, retornoMaterial, retornoObs, retornoPrioridade, retornoPrevisao, fotos, garantiaOverrides });
 
-  const anexarFotos = (ev, categoria) => {
+  /* ---- Field Execution Intelligence V1: Base Técnica (interna), relatório do cliente e confirmação de recebimento ----
+     O banco decide quem pode gravar. Sem a migration 0111 o fechamento segue exatamente como antes (fechamento = "indisponivel"). */
+  const [fechamento, setFechamento] = useState(fechamentoInicial ?? (real && !jaConcluida ? "carregando" : "indisponivel"));
+  const [base, setBase] = useState(emptyTechnicalBase);
+  const [noBanco, setNoBanco] = useState({ base: emptyTechnicalBase(), recebidoPor: "", ausente: false });
+  const [recebidoPor, setRecebidoPor] = useState("");
+  const [ausente, setAusente] = useState(false);
+  const [usoIA, setUsoIA] = useState(null);
+  const [idsBase] = useState(() => createContentRequestIds());
+  const [idsConfirmacao] = useState(() => createContentRequestIds());
+  const [idsRelatorio] = useState(() => createReportRequestIds());
+  const [iaGerada, setIaGerada] = useState(null);
+  const [relatoAntes, setRelatoAntes] = useState(null);
+  const [gerando, setGerando] = useState(false);
+  const [avisoIA, setAvisoIA] = useState("");
+  const [erroIA, setErroIA] = useState("");
+  const [erroFechamento, setErroFechamento] = useState("");
+  const confirmacao = normalizeConfirmation({ name: recebidoPor, absent: ausente });
+  const fechamentoAlterado = technicalBaseChanged(base, noBanco.base) || (recebidoPor.trim() !== noBanco.recebidoPor) || ausente !== noBanco.ausente;
+  const alterado = registroAlterado || fechamentoAlterado;
+  useFormDraft({ formType: "base-tecnica", enabled: real && !jaConcluida,
+    value: { workOrderId: os.id, cause: base.cause, solution: base.solution, difficulty: base.difficulty, learning: base.learning, relato }, dirty: alterado,
+    onRestore: (d) => {
+      if (d.workOrderId !== os.id) return;
+      setBase((atual) => normalizeTechnicalBase({ cause: d.cause ?? atual.cause, solution: d.solution ?? atual.solution, difficulty: d.difficulty ?? atual.difficulty, learning: d.learning ?? atual.learning }));
+      if (d.relato) setRelato(d.relato);
+    } });
+  useEffect(() => {
+    if (!real || jaConcluida) return undefined;
+    let vivo = true;
+    Promise.all([carregarFechamentoTecnico(os.id), carregarUsoRelatorioIADB(os.id).catch(() => null)])
+      .then(([r, uso]) => {
+        if (!vivo) return;
+        if (!r.available) { setFechamento("indisponivel"); return; }
+        const confirmada = r.confirmationSaved ? r.confirmation : { name: "", absent: false };
+        setNoBanco({ base: r.baseSaved ? r.base : emptyTechnicalBase(), recebidoPor: confirmada.name, ausente: confirmada.absent });
+        /* o que o técnico já digitou (ou o rascunho restaurado) vale mais que o que veio do banco */
+        setBase((atual) => (technicalBaseHasContent(atual) ? atual : r.base));
+        setRecebidoPor((atual) => atual || confirmada.name);
+        setAusente((atual) => atual || confirmada.absent);
+        setUsoIA(uso);
+        setFechamento("disponivel");
+      })
+      .catch(() => { if (vivo) setFechamento("disponivel"); });
+    return () => { vivo = false; };
+  }, [real, os.id, jaConcluida]);
+
+  const mudarBase = (campo, valor) => setBase((atual) => ({ ...atual, [campo]: campo === "difficulty" ? valor : String(valor).slice(0, TECHNICAL_BASE_MAX) }));
+
+  /* Grava Base Técnica e confirmação antes de qualquer passo que dependa delas (relatório com IA, conclusão, salvar sem concluir).
+     Mesmo conteúdo reaproveita o mesmo identificador (retry não duplica); falha devolve a mensagem e a tela continua como está. */
+  const salvarFechamento = async () => {
+    if (fechamento !== "disponivel") return "";
+    if (technicalBaseTooLong(base)) return `Cada campo da Base Técnica aceita até ${TECHNICAL_BASE_MAX} caracteres.`;
+    try {
+      const limpa = normalizeTechnicalBase(base);
+      let proximo = noBanco;
+      if (technicalBaseChanged(limpa, noBanco.base)) {
+        const r = await salvarBaseTecnicaDB({ workOrderId: os.id, base: limpa, requestId: idsBase.idFor(limpa) });
+        if (r.unavailable) { setFechamento("indisponivel"); return ""; }
+        proximo = { ...proximo, base: limpa };
+      }
+      if (confirmacao.ok && (confirmacao.absent !== proximo.ausente || confirmacao.name !== proximo.recebidoPor)) {
+        const r = await salvarConfirmacaoDB({ workOrderId: os.id, name: confirmacao.name, absent: confirmacao.absent, requestId: idsConfirmacao.idFor({ name: confirmacao.name, absent: confirmacao.absent }) });
+        if (r.unavailable) { setFechamento("indisponivel"); return ""; }
+        proximo = { ...proximo, recebidoPor: confirmacao.name, ausente: confirmacao.absent };
+      }
+      setNoBanco(proximo);
+      return "";
+    } catch (e) {
+      return mensagemErro(e) || "Não foi possível salvar agora. Seus dados continuam aqui; toque para tentar de novo.";
+    }
+  };
+
+  const aplicarRelatorio = (texto, origem, requestId = null) => {
+    setRelatoAntes((anterior) => (anterior === null ? relato : anterior));
+    setRelato(texto);
+    setIaGerada({ source: origem, text: texto, requestId });
+  };
+  const usarTextoPadrao = () => {
+    setAvisoIA(""); setErroIA("");
+    aplicarRelatorio(buildStandardReportText(os, { base, extraMaterials: materiais, returnNeeded: resultado === "retorno", returnReason: retornoMotivo }), "standard");
+  };
+  const descartarGerado = () => {
+    setRelato(relatoAntes ?? ""); setRelatoAntes(null); setIaGerada(null); setAvisoIA(""); setErroIA("");
+  };
+  const gerarRelatorio = async () => {
+    if (gerando) return;
+    setGerando(true); setAvisoIA(""); setErroIA("");
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroIA(falha); return; }
+      let resposta;
+      const requestId = idsRelatorio.current();
+      try {
+        resposta = await gerarRelatorioIA({ workOrderId: os.id, requestId, materiais });
+      } catch (e) {
+        /* sem resposta do servidor (rede) ou geração em andamento: mantém o identificador para o retry não gastar outra vaga */
+        if (e.kind === "network" || e.kind === "busy") { setErroIA(e.kind === "network" ? reportFallbackMessage("network") : e.message); return; }
+        idsRelatorio.settle();
+        if (e.kind === "unavailable") { aplicarRelatorio(buildStandardReportText(os, { base, extraMaterials: materiais }), "standard"); setAvisoIA("O relatório com IA ainda não está habilitado neste ambiente. Montamos um texto padrão com os fatos confirmados da OS."); return; }
+        setErroIA(e.message || "Não foi possível gerar o relatório agora.");
+        return;
+      }
+      idsRelatorio.settle();
+      if (resposta.usage) setUsoIA(resposta.usage);
+      aplicarRelatorio(resposta.text, resposta.source === "ai" ? "ai" : "standard", resposta.source === "ai" ? requestId : null);
+      if (resposta.source === "fallback") setAvisoIA(reportFallbackMessage(resposta.reason));
+    } finally { setGerando(false); }
+  };
+  /* auditoria: qual geração virou o relato salvo e se foi editada depois; nunca bloqueia a conclusão */
+  const registrarUsoIA = async () => {
+    if (iaGerada?.source !== "ai" || !iaGerada.requestId || !relato.trim()) return;
+    await marcarRelatorioIAUsadoDB({ workOrderId: os.id, requestId: iaGerada.requestId, finalText: relato });
+  };
+
+  const anexarFotos =(ev, categoria) => {
     const arquivos = Array.from(ev.target.files || []);
     setFotos((f) => [...f, ...arquivos.map((a) => ({ id: uid(), nome: a.name, categoria, url: URL.createObjectURL(a), arquivo: a }))]);
   };
@@ -4149,7 +4586,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
 
   /* Garantia efetiva por linha da OS. O proprietário pode mudar apenas este
      atendimento; o catálogo continua sendo o padrão dos próximos serviços. */
-  const execucaoPrevista = os.data || HOJE;
+  const execucaoPrevista = os.data || hojeISO();
   const itensGarantia = os.emGarantia ? [] : itensFinais.filter((i) =>
     (i.tipo === "servico" || i.tipo === "produto") && i.catalogoId
   );
@@ -4167,7 +4604,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
     const catalogo = Math.max(0, Number(cat?.garantiaMeses || 0));
     const meses = Math.max(1, Math.min(120, Number(local.months ?? i.garantiaMesesOverride ?? (catalogo || 12))));
     const efetivo = politica === "disabled" ? 0 : politica === "custom" ? meses : catalogo;
-    return { politica, dias: null, meses, efetivo, unidade: "meses", origem: "Fabricante", prazo: efetivo > 0 ? `${efetivo} meses` : "sem garantia", ate: efetivo > 0 ? addMeses(execucaoPrevista, efetivo) : null };
+    return { politica, dias: null, meses, efetivo, unidade: "meses", origem: "Fabricante", prazo: efetivo > 0 ? `${efetivo} meses` : "sem garantia", ate: efetivo > 0 ? addMesesISO(execucaoPrevista, efetivo) : null };
   };
   const ajustarGarantia = (i, patch) => {
     const atual = garantiaAtual(i);
@@ -4205,7 +4642,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
   /* edição do registro depois de concluído: sem etapas, só o que faz sentido rever */
   if (jaConcluida) {
     return (
-      <Modal open onClose={onClose} wide title="Editar registro do atendimento" sub={os.numero}
+      <Modal open onClose={onClose} dirty={registroAlterado} busy={concluindo} wide title="Editar registro do atendimento" sub={os.numero}
         footer={<><Btn variant="ghost" onClick={onClose}>Fechar</Btn>
           <Btn onClick={() => { onSalvarParcial({ relato, fotos, pendencia }); onClose(); }}>Salvar alterações</Btn></>}>
         <Field label="O que foi feito">
@@ -4222,6 +4659,16 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
     );
   }
 
+  /* consulta rápida ao banco antes de montar as etapas: evita trocar o número de etapas com o técnico no meio do fluxo */
+  if (fechamento === "carregando") {
+    return (
+      <Modal open onClose={onClose} wide title="Preparando o fechamento" sub={os.numero}
+        footer={<Btn variant="ghost" onClick={onClose}>Cancelar</Btn>}>
+        <p className="flex items-center gap-2 text-[14px] text-slate-500"><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />Carregando os dados do atendimento…</p>
+      </Modal>
+    );
+  }
+
   const SimNao = ({ valor, onChange, sim = "Sim", nao = "Não" }) => (
     <div className="flex gap-2">
       {[[false, nao], [true, sim]].map(([v, label]) => (
@@ -4234,7 +4681,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
     </div>
   );
 
-  const etapas = [
+  const etapasLegado = [
     {
       titulo: "O que foi feito?",
       sub: "Fale naturalmente. Você revisa antes de salvar.",
@@ -4443,7 +4890,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
                 <Field label="Motivo do retorno"><textarea value={retornoMotivo} onChange={e=>setRetornoMotivo(e.target.value.slice(0,3000))} rows={3} placeholder="Ex.: falta peça de acabamento" className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
                 <Field label="Material necessário"><textarea value={retornoMaterial} onChange={e=>setRetornoMaterial(e.target.value.slice(0,3000))} rows={2} placeholder="Peça, cabo, fonte, ferramenta..." className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
                 <Field label="Observação"><textarea value={retornoObs} onChange={e=>setRetornoObs(e.target.value.slice(0,5000))} rows={3} className="w-full min-w-0 resize-y rounded-xl border border-amber-200 bg-white px-3 py-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field>
-                <div className="grid gap-3 sm:grid-cols-2"><Field label="Prioridade"><select value={retornoPrioridade} onChange={e=>setRetornoPrioridade(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></Field><Field label="Previsão de retorno"><input type="date" min={HOJE} value={retornoPrevisao} onChange={e=>setRetornoPrevisao(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field></div>
+                <div className="grid gap-3 sm:grid-cols-2"><Field label="Prioridade"><select value={retornoPrioridade} onChange={e=>setRetornoPrioridade(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></Field><Field label="Previsão de retorno"><input type="date" min={hojeISO()} value={retornoPrevisao} onChange={e=>setRetornoPrevisao(e.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-amber-500" /></Field></div>
               </div>
             )}
             {resultado === "naoFinalizado" && (
@@ -4472,24 +4919,164 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
     },
   ];
 
+  /* ---- Fluxo com Base Técnica (0111 disponível): Diagnóstico → Materiais → Evidências → registros → Relatório → Confirmação ----
+     Sem a migration, `etapasLegado` segue como era. A conclusão continua sendo a mesma chamada atômica de sempre. */
+  const novoFluxo = fechamento === "disponivel";
+  const etapaBase = {
+    titulo: "Diagnóstico",
+    fase: "Diagnóstico",
+    sub: "Uso interno da empresa. Não aparece para o cliente.",
+    pular: null,
+    conteudo: (
+      <div className="space-y-5">
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Causa encontrada</p>
+          <CampoVoz rows={3} valor={base.cause} onChange={(v) => mudarBase("cause", v)} placeholder="Ex.: fonte da fechadura queimada" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Solução aplicada</p>
+          <CampoVoz rows={3} valor={base.solution} onChange={(v) => mudarBase("solution", v)} placeholder="Ex.: substituí a fonte e testei a abertura" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Nível de dificuldade</p>
+          <div className="grid grid-cols-3 gap-2" role="group" aria-label="Nível de dificuldade">
+            {DIFFICULTY_OPTIONS.map((opcao) => (
+              <button key={opcao.value} type="button" aria-pressed={base.difficulty === opcao.value}
+                onClick={() => mudarBase("difficulty", base.difficulty === opcao.value ? "" : opcao.value)}
+                className={cx("min-h-11 py-3 rounded-xl text-[14px] font-medium transition-colors", ring,
+                  base.difficulty === opcao.value ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+                {opcao.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Necessita retorno?</p>
+          <SimNao valor={resultado === "retorno"} onChange={(v) => setResultado(v ? "retorno" : (resultado === "retorno" ? "finalizado" : resultado))} />
+          {resultado === "retorno" && (
+            <p className="text-[12.5px] text-slate-500 mt-2 leading-relaxed">O motivo, o material necessário e a previsão do retorno você informa na última etapa.</p>
+          )}
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-slate-600 mb-1.5">Observação técnica final</p>
+          <CampoVoz rows={3} valor={base.learning} onChange={(v) => mudarBase("learning", v)} placeholder="Algo útil para a próxima vez neste local ou equipamento" rotuloVoz="Ditar" maxLength={TECHNICAL_BASE_MAX} />
+        </div>
+        {fechamentoAlterado && <p className="text-[12px] text-slate-400">Será salva ao gerar o relatório, concluir ou salvar o atendimento.</p>}
+      </div>
+    ),
+  };
+  const etapaEvidencias = {
+    titulo: "Evidências do atendimento",
+    fase: "Evidências",
+    sub: "Opcional. Ajuda em garantia e em qualquer dúvida futura do cliente.",
+    pular: "Sem fotos",
+    conteudo: (
+      <>
+        <p className="text-[13px] font-medium text-slate-600 mb-3">{evidenceCountLabel(fotos.length)}</p>
+        <FotosDoAtendimento fotos={fotos} anexar={anexarFotos} />
+      </>
+    ),
+  };
+  const proveniencia = reportProvenance({ source: iaGerada?.source === "ai" ? "ai" : null, generatedText: iaGerada?.text, finalText: relato });
+  const iaEsgotada = Boolean(usoIA) && Number(usoIA.remaining) <= 0;
+  const etapaRelatorio = {
+    titulo: "Relatório do atendimento",
+    fase: "Relatório",
+    sub: "Texto para o cliente. Revise e edite antes de seguir.",
+    pular: null,
+    conteudo: (
+      <div className="space-y-3">
+        <CampoVoz rows={8} valor={relato} onChange={setRelato} placeholder="Descreva o que foi feito no atendimento" rotuloVoz="Ditar" />
+        {proveniencia.label && (
+          <p className="inline-flex items-center gap-1.5 text-[12px] text-slate-500"><Sparkles className="w-3.5 h-3.5" aria-hidden="true" />{proveniencia.label}</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Btn icon={gerando ? Loader2 : Sparkles} disabled={gerando || resultado !== "finalizado" || iaEsgotada} onClick={gerarRelatorio}>
+            {gerando ? "Gerando…" : iaGerada ? "Gerar novamente com IA" : "Gerar relatório com IA"}
+          </Btn>
+          <Btn variant="soft" disabled={gerando} onClick={usarTextoPadrao}>Montar texto padrão</Btn>
+          {relatoAntes !== null && <Btn variant="ghost" disabled={gerando} onClick={descartarGerado}>Descartar texto gerado</Btn>}
+        </div>
+        {usoIA && <p className="text-[12px] text-slate-500">{reportUsageLabel(usoIA)}</p>}
+        {resultado !== "finalizado" && (
+          <p className="text-[12.5px] text-slate-500 leading-relaxed">Com retorno previsto ou sem concluir, o relatório final do cliente é feito quando o serviço for concluído. O texto padrão e o ditado continuam disponíveis.</p>
+        )}
+        {avisoIA && <p role="status" className="text-[12.5px] text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-xl px-3 py-2 leading-relaxed">{avisoIA}</p>}
+        {erroIA && <p role="alert" className="text-[12.5px] text-rose-700 leading-relaxed">{erroIA}</p>}
+        <p className="text-[12px] text-slate-400 leading-relaxed">
+          A IA só organiza o que está confirmado nesta OS: serviço, causa, solução, materiais e retorno. Ela não vê valores, custos nem as observações internas.
+          O relatório é opcional: a OS pode ser concluída sem ele.
+        </p>
+      </div>
+    ),
+  };
+  const blocoConfirmacao = (
+    <div className="rounded-2xl ring-1 ring-slate-200 p-4 space-y-3">
+      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em]">Confirmação do atendimento</p>
+      <div>
+        <label htmlFor="recebido-por" className="block text-[13px] font-medium text-slate-600 mb-1.5">Nome de quem recebeu o serviço</label>
+        <Input id="recebido-por" value={recebidoPor} disabled={ausente} autoComplete="off" maxLength={120} placeholder="Ex.: Maria Souza"
+          onChange={(e) => setRecebidoPor(e.target.value.slice(0, 120))} />
+      </div>
+      <button type="button" aria-pressed={ausente} onClick={() => { setAusente(!ausente); setRecebidoPor(""); }}
+        className={cx("w-full min-h-11 py-3 rounded-xl text-[14px] font-medium transition-colors", ring,
+          ausente ? "bg-slate-900 text-white" : "bg-white ring-1 ring-slate-200 text-slate-600 hover:bg-slate-50")}>
+        Responsável ausente
+      </button>
+      <p className="text-[12px] text-slate-400">{evidenceCountLabel(fotos.length)}.</p>
+    </div>
+  );
+  const etapaConfirmacao = { ...etapasLegado[5], fase: "Confirmação", conteudo: <div className="space-y-4">{blocoConfirmacao}{etapasLegado[5].conteudo}</div> };
+  const etapas = novoFluxo
+    ? [etapaBase, { ...etapasLegado[1], fase: "Diagnóstico" }, etapaEvidencias, { ...etapasLegado[3], fase: "Registro" }, { ...etapasLegado[4], fase: "Registro" }, etapaRelatorio, etapaConfirmacao]
+    : etapasLegado;
+
   const atual = etapas[etapa];
   const ultima = etapa === etapas.length - 1;
 
+  /* Concluir: grava Base Técnica e confirmação primeiro (o técnico não consegue gravar depois que a OS fecha) e só então chama a
+     mesma conclusão atômica de sempre. Falha de rede em qualquer ponto mantém tudo na tela e permite tentar de novo. */
+  const concluir = async () => {
+    if (concluindo) return;
+    setErroFechamento("");
+    if (resultado === "retorno" && !retornoMotivo.trim()) { setErroFechamento("Informe o motivo do retorno para salvar."); return; }
+    if (novoFluxo && resultado === "finalizado" && !confirmacao.ok) { setErroFechamento(confirmacao.error); return; }
+    setConcluindo(true);
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroFechamento(falha); return; }
+      await registrarUsoIA();
+      const ok = await onFinalizar(extras);
+      if (ok === false) setErroFechamento("Não foi possível concluir agora. Seus dados continuam aqui; toque para tentar de novo. Se já concluiu antes, feche e confira a OS.");
+    } finally { setConcluindo(false); }
+  };
+  const salvarSemConcluir = async () => {
+    if (concluindo) return;
+    setErroFechamento("");
+    setConcluindo(true);
+    try {
+      const falha = await salvarFechamento();
+      if (falha) { setErroFechamento(falha); return; }
+      await registrarUsoIA();
+      onSalvarParcial({ relato, fotos, pendencia: temPendencia ? pendencia : "" });
+      onClose();
+    } finally { setConcluindo(false); }
+  };
+
   return (
     <>
-      <Modal open onClose={onClose} wide title={atual.titulo} sub={atual.sub}
-        footer={
+      <Modal open onClose={onClose} dirty={alterado} busy={concluindo || gerando} wide title={atual.titulo} sub={atual.sub}
+        footer={(requestClose) =>
           <div className="flex items-center justify-between gap-3 w-full">
-            <Btn variant="ghost" onClick={() => (etapa === 0 ? onClose() : setEtapa(etapa - 1))}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
+            <Btn variant="ghost" disabled={concluindo} onClick={() => { if (!concluindo) etapa === 0 ? requestClose() : setEtapa(etapa - 1); }}>{etapa === 0 ? "Cancelar" : "Voltar"}</Btn>
             <div className="flex items-center gap-3">
               {atual.pular && <Btn variant="ghost" onClick={() => setEtapa(etapa + 1)}>{atual.pular}</Btn>}
               {ultima
                 ? (resultado === "naoFinalizado"
-                    ? <Btn variant="soft" icon={Check} onClick={() => { onSalvarParcial({ relato, fotos, pendencia: temPendencia ? pendencia : "" }); onClose(); }}>
-                        Salvar sem concluir
+                    ? <Btn variant="soft" icon={Check} disabled={concluindo} onClick={salvarSemConcluir}>
+                        {concluindo ? "Salvando…" : "Salvar sem concluir"}
                       </Btn>
-                    : <Btn icon={Check} disabled={concluindo}
-                        onClick={async () => { if (concluindo) return; setConcluindo(true); try { await onFinalizar(extras); } finally { setConcluindo(false); } }}>
+                    : <Btn icon={Check} disabled={concluindo} onClick={concluir}>
                         {concluindo ? "Concluindo…" : resultado === "retorno" ? "Salvar retorno sem concluir" : "Concluir atendimento"}
                       </Btn>)
                 : <Btn icon={ArrowRight} disabled={!!atual.bloqueio} onClick={() => setEtapa(etapa + 1)}>Continuar</Btn>}
@@ -4501,8 +5088,10 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
             <span key={i} className={cx("h-1 flex-1 rounded-full", i <= etapa ? "bg-teal-600" : "bg-slate-200")} aria-hidden="true" />
           ))}
         </div>
+        {novoFluxo && atual.fase && <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Etapa {etapa + 1} de {etapas.length} · {atual.fase}</p>}
         {atual.conteudo}
         {atual.bloqueio && <p className="text-[12.5px] text-slate-400">{atual.bloqueio}</p>}
+        {erroFechamento && <p role="alert" className="text-[13px] text-rose-700 bg-rose-50 ring-1 ring-rose-200/70 rounded-xl px-3.5 py-3 leading-relaxed">{erroFechamento}</p>}
       </Modal>
 
       {addProduto && (
@@ -4572,10 +5161,10 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
 
           {lanc && (
             <div className={cx("rounded-2xl px-5 py-4 mb-6 flex flex-wrap items-center justify-between gap-3 ring-1",
-              lanc.pago ? "bg-emerald-50 ring-emerald-200/70" : lanc.vencimento < HOJE ? "bg-rose-50 ring-rose-200/70" : "bg-amber-50 ring-amber-200/70")}>
-              <p className={cx("text-[14px]", lanc.pago ? "text-emerald-900" : lanc.vencimento < HOJE ? "text-rose-900" : "text-amber-900")}>
+              lanc.pago ? "bg-emerald-50 ring-emerald-200/70" : lanc.vencimento < hojeISO() ? "bg-rose-50 ring-rose-200/70" : "bg-amber-50 ring-amber-200/70")}>
+              <p className={cx("text-[14px]", lanc.pago ? "text-emerald-900" : lanc.vencimento < hojeISO() ? "text-rose-900" : "text-amber-900")}>
                 {lanc.pago ? `Pago em ${dataBR(lanc.pagoEm)}${lanc.forma ? ` via ${lanc.forma}` : ""}.`
-                  : `Conta a pagar de ${brl(lanc.valor)} · vence ${dataBR(lanc.vencimento)}${lanc.vencimento < HOJE ? " · vencida" : ""}`}
+                  : `Conta a pagar de ${brl(lanc.valor)} · vence ${dataBR(lanc.vencimento)}${lanc.vencimento < hojeISO() ? " · vencida" : ""}`}
               </p>
               <Btn size="sm" variant="soft" icon={Wallet} onClick={() => setTela("financeiro")}>Ver no financeiro</Btn>
             </div>
@@ -4631,7 +5220,7 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
   return (
     <>
       <PageHead title="Compras" sub="Materiais comprados de fornecedores. Cada compra vira uma conta a pagar."
-        action={<Btn icon={Plus} onClick={() => setForm({ fornecedor: "", data: HOJE, itens: [], forma: "Boleto", vencimento: addDays(HOJE, 15), anexos: [], obs: "", jaPago: false })}>Nova compra</Btn>} />
+        action={<Btn icon={Plus} onClick={() => setForm({ fornecedor: "", data: hojeISO(), itens: [], forma: "Boleto", vencimento: addDays(hojeISO(), 15), anexos: [], obs: "", jaPago: false })}>Nova compra</Btn>} />
       {compras.length === 0 ? (
         <Panel><Empty icon={ShoppingCart} title="Nenhuma compra registrada" sub="Registre a compra e o ZiisTec cria a conta a pagar automaticamente." /></Panel>
       ) : (
@@ -4680,6 +5269,7 @@ function Compras({ compras, produtos, lancamentos, salvarCompra, compraAberta, s
 function CompraForm({ form, setForm, onSave, produtos }) {
   const [novoItem, setNovoItem] = useState(false);
   const [salvandoCompra, setSalvandoCompra] = useState(false);
+  const { dirty } = useFormDirty(form, Boolean(form));
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
   const total = form.itens.reduce((t, i) => t + i.qtd * i.custo, 0);
@@ -4689,11 +5279,11 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 
   return (
     <>
-      <Modal open onClose={() => setForm(null)} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
+      <Modal open onClose={() => setForm(null)} dirty={dirty} busy={salvandoCompra} wide title={form.id ? `Editar ${form.numero}` : "Nova compra"}
         sub={form.id ? "" : "Ao salvar, a conta a pagar é criada no financeiro."}
-        footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
+        footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoCompra} onClick={requestClose}>Cancelar</Btn>
           <Btn disabled={!form.fornecedor || form.itens.length === 0 || salvandoCompra}
-            onClick={async () => { if (salvandoCompra) return; setSalvandoCompra(true); try { await onSave(form); setForm(null); } finally { setSalvandoCompra(false); } }}>
+            onClick={async () => { if (salvandoCompra) return; setSalvandoCompra(true); try { const salvo = await onSave(form); if (salvo === false) return; if (salvo?.ok === false) { setForm((atual) => atual ? { ...atual, id: salvo.id, requestId: salvo.requestId } : atual); return; } setForm(null); } finally { setSalvandoCompra(false); } }}>
             {salvandoCompra ? "Registrando…" : form.id ? "Salvar alterações" : `Registrar compra de ${brl(total)}`}
           </Btn></>}>
         <div className="grid sm:grid-cols-2 gap-5">
@@ -4775,10 +5365,12 @@ function CompraForm({ form, setForm, onSave, produtos }) {
 }
 
 /* ============================================================== Financeiro */
-function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId, empresa: empresaDados, excluirRegistro, papel }) {
-  const [mes, setMes] = useState(mesRef(HOJE));
+function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, aviso, pedirConfirmacao, abrirOS, abrirCompra, compras, real, empresaId, empresa: empresaDados, excluirRegistro, papel, abrirV2 }) {
+  const [mes, setMes] = useState(mesRef(hojeISO()));
   const [aba, setAba] = useState("visao");
   const [form, setForm] = useState(null);
+  const [salvandoLancamento, setSalvandoLancamento] = useState(false);
+  const { dirty: lancamentoAlterado } = useFormDirty(form, Boolean(form));
   const [baixando, setBaixando] = useState(null);
   const [recibo, setRecibo] = useState(null);
   const [janela, setJanela] = useState(30);
@@ -4792,8 +5384,8 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   const aReceberMes = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && noMes(l));
   const pagoMes = lancamentos.filter((l) => l.tipo === "despesa" && l.pago && noMes(l));
   const aPagarMes = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && noMes(l));
-  const vencidosReceber = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento < HOJE);
-  const vencidosPagar = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento < HOJE);
+  const vencidosReceber = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento < hojeISO());
+  const vencidosPagar = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento < hojeISO());
   const resultado = soma(recebidoMes) - soma(pagoMes);
 
   const futuroReceber = soma(lancamentos.filter((l) => l.tipo === "receita" && !l.pago)) - soma(aReceberMes);
@@ -4802,17 +5394,17 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   /* fluxo de caixa: janela escolhida pelo usuário. Atraso fica separado,
      porque previsão olha só para frente. */
   const saldoAtual = soma(lancamentos.filter((l) => l.tipo === "receita" && l.pago)) - soma(lancamentos.filter((l) => l.tipo === "despesa" && l.pago));
-  const limite = addDays(HOJE, janela);
-  const entradasJanela = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
-  const saidasJanela = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= HOJE && l.vencimento <= limite);
+  const limite = addDays(hojeISO(), janela);
+  const entradasJanela = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento >= hojeISO() && l.vencimento <= limite);
+  const saidasJanela = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento >= hojeISO() && l.vencimento <= limite);
   const projetado = saldoAtual + soma(entradasJanela) - soma(saidasJanela);
 
   /* o que exige ação hoje */
-  const receberHoje = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento === HOJE);
-  const pagarHoje = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento === HOJE);
+  const receberHoje = lancamentos.filter((l) => l.tipo === "receita" && !l.pago && l.vencimento === hojeISO());
+  const pagarHoje = lancamentos.filter((l) => l.tipo === "despesa" && !l.pago && l.vencimento === hojeISO());
 
   /* margem dos serviços: usa conclusão real e cobrança efetivamente gerada para a OS */
-  const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || HOJE) === mes);
+  const osConcluidasMes = ordens.filter((o) => o.status === "concluida" && mesRef(o.concluidaEm || o.data || hojeISO()) === mes);
   const cobrancaDaOS = (o) => lancamentos.find((l) => l.tipo === "receita" && l.origemTipo === "os" && l.origemId === o.id);
   const custoDiretoOS = (o) => {
     const materiaisJaNosItens = (o.itens || []).some((i) => i.materialRegistrado);
@@ -4835,8 +5427,8 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
 
   /* filtros de leitura: status, origem, cliente e busca livre */
   const aplicarFiltro = (itens) => itens.filter((l) => {
-    if (filtro.status === "vencido" && !(!l.pago && l.vencimento < HOJE)) return false;
-    if (filtro.status === "aberto" && (l.pago || l.vencimento < HOJE)) return false;
+    if (filtro.status === "vencido" && !(!l.pago && l.vencimento < hojeISO())) return false;
+    if (filtro.status === "aberto" && (l.pago || l.vencimento < hojeISO())) return false;
     if (filtro.status === "pago" && !l.pago) return false;
     if (filtro.origem !== "todas" && (l.origemTipo || "manual") !== filtro.origem) return false;
     if (filtro.clienteId && l.clienteId !== filtro.clienteId) return false;
@@ -4902,7 +5494,7 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
   return (
     <>
       <PageHead title="Financeiro" sub="Quanto entrou, quanto falta entrar e quanto sai."
-        action={<Btn icon={Plus} onClick={() => setForm({ tipo: "despesa", vencimento: HOJE, pago: false, valor: 0, categoria: "Materiais", origemTipo: "manual" })}>Novo lançamento</Btn>} />
+        action={<div className="flex flex-wrap gap-2"><RecursosV2 aba="financeiro" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => setForm({ tipo: "despesa", vencimento: hojeISO(), pago: false, valor: 0, categoria: "Materiais", origemTipo: "manual" })}>Novo lançamento</Btn></div>} />
 
       <div className="flex items-center justify-between gap-2 mb-6">
         <button onClick={() => mudarMes(-1)} aria-label="Mês anterior" className={cx("p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700", ring)}><ArrowLeft className="w-4 h-4" /></button>
@@ -5077,21 +5669,31 @@ function Financeiro({ lancamentos, setLancamentos, baixar, clientes, ordens, avi
               ))}
             </div>
           </Field>
-          <p className="text-[12.5px] text-slate-400">A data do {baixando.tipo === "receita" ? "recebimento" : "pagamento"} será hoje, {dataBR(HOJE)}.</p>
+          <p className="text-[12.5px] text-slate-400">A data do {baixando.tipo === "receita" ? "recebimento" : "pagamento"} será hoje, {dataBR(hojeISO())}.</p>
         </Modal>
       )}
 
       {form && (
-        <Modal open onClose={() => setForm(null)} title="Novo lançamento" wide
-          footer={<><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn>
-            <Btn disabled={!form.descricao || !form.valor} onClick={async () => {
+        <Modal open onClose={() => setForm(null)} dirty={lancamentoAlterado} busy={salvandoLancamento} title="Novo lançamento" wide
+          footer={(requestClose) => <><Btn variant="ghost" disabled={salvandoLancamento} onClick={requestClose}>Cancelar</Btn>
+            <Btn disabled={!form.descricao || !form.valor || salvandoLancamento} onClick={async () => {
               if (real) {
-                try { const salvo = await salvarLancamentoDB({ ...form, pagoEm: form.pago ? HOJE : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }
+                if (salvandoLancamento) return;
+                // Duplo toque/retry reaproveita o mesmo requestId: o banco devolve o mesmo lançamento.
+                let requestId = form.requestId;
+                if (!requestId) {
+                  if (!globalThis.crypto?.randomUUID) { aviso("Atualize o navegador para salvar o lançamento com segurança."); return; }
+                  requestId = globalThis.crypto.randomUUID();
+                  setForm((f) => (f ? { ...f, requestId } : f));
+                }
+                setSalvandoLancamento(true);
+                try { const salvo = await salvarLancamentoDB({ ...form, requestId, pagoEm: form.pago ? hojeISO() : null }, empresaId); setLancamentos((l) => [salvo, ...l]); setForm(null); aviso("Lançamento registrado"); }
                 catch (e) { aviso(mensagemErro(e)); }
+                finally { setSalvandoLancamento(false); }
                 return;
               }
-              setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? HOJE : null }, ...l]); setForm(null); aviso("Lançamento registrado");
-            }}>Salvar lançamento</Btn></>}>
+              setLancamentos((l) => [{ ...form, id: uid(), empresaId, pagoEm: form.pago ? hojeISO() : null }, ...l]); setForm(null); aviso("Lançamento registrado");
+            }}>{salvandoLancamento ? "Salvando…" : "Salvar lançamento"}</Btn></>}>
           <div className="flex gap-1 p-1 bg-slate-100 rounded-xl" role="tablist">
             {[["despesa", "Despesa"], ["receita", "Receita"]].map(([id, label]) => (
               <button key={id} role="tab" aria-selected={form.tipo === id} onClick={() => setForm({ ...form, tipo: id })}
@@ -5498,7 +6100,7 @@ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssina
 /* =============================================================== Garantias
    Consulta e acionamento. As garantias não são cadastradas aqui: elas nascem
    da OS concluída, a partir do prazo configurado em cada serviço.           */
-function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, excluirRegistro, papel }) {
+function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, excluirRegistro, papel, abrirV2 }) {
   const [filtro, setFiltro] = useState("ativas");
   const [busca, setBusca] = useState("");
   const [acionando, setAcionando] = useState(false);
@@ -5675,7 +6277,8 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
 
   return (
     <>
-      <PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`} />
+      <PageHead title="Garantias" sub={`${ativas} ativa${ativas === 1 ? "" : "s"} agora. Cada uma nasceu de uma ordem de serviço concluída.`}
+        action={papel === "proprietario" && typeof abrirV2 === "function" ? <div className="flex flex-wrap gap-2"><RecursosV2 aba="garantias" papel={papel} abrirV2={abrirV2} /></div> : undefined} />
       {revisoes.filter((r)=>r.status === "pending").length > 0 && (
         <section className="mb-7">
           <Rotulo>Pós-venda programado · {revisoes.filter((r)=>r.status === "pending").length}</Rotulo>
@@ -5688,7 +6291,7 @@ function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, s
                     <p className="text-[13px] text-slate-500 truncate">{nomeCliente(r.clienteId)} · retorno em {dataBR(r.data)}</p>
                   </button>
                   <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
-                    <Pill tone={r.data < HOJE ? "erro" : r.data === HOJE ? "atencao" : "neutro"}>{r.data < HOJE ? "Atrasado" : r.data === HOJE ? "Hoje" : dataBR(r.data)}</Pill>
+                    <Pill tone={r.data < hojeISO() ? "erro" : r.data === hojeISO() ? "atencao" : "neutro"}>{r.data < hojeISO() ? "Atrasado" : r.data === hojeISO() ? "Hoje" : dataBR(r.data)}</Pill>
                     <Btn size="sm" variant="soft" icon={Check} className="min-h-11 flex-1 sm:flex-none" onClick={()=>mudarRevisao(r,"done")}>Concluir</Btn>
                     <Btn size="sm" variant="ghost" className="min-h-11 flex-1 sm:flex-none" onClick={()=>mudarRevisao(r,"dismissed")}>Dispensar</Btn>
                   </div>
@@ -6317,7 +6920,7 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
       <Panel className="divide-y divide-slate-100 overflow-hidden">
         {assinaturas.map((a) => {
           const st = ST_ASSINATURA[a.status];
-          const atrasada = a.status === "pendente" && a.proximaCobranca < HOJE;
+          const atrasada = a.status === "pendente" && a.proximaCobranca < hojeISO();
           return (
             <Linha key={a.id}>
               <div className="flex flex-wrap items-center justify-between gap-4">
@@ -6378,4 +6981,5 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
 
 /* FIELD WORKFLOW V1 · wave 4b · global search + post sale */
 
-export { OSDetalhe, NovaOS, OrdensServico, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado };
+export { OSDetalhe, NovaOS, OrdensServico, OrcamentoDoc, OrcamentoEditor, TelaErrorBoundary, aplicarOSSalvaNoEstado, mesclarOSRelida,
+  Inicio, CartaoMeuDia, TimerAtendimento, AvisoAtendimentoLongo, BaseTecnicaPainel, FinalizarAtendimento, CampoVoz };

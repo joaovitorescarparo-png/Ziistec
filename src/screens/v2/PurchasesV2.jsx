@@ -11,10 +11,10 @@ import {
   verificarComprasV2DisponiveisDB,
 } from '../../lib/purchaseV2Api';
 import { mensagemErro } from '../../lib/supabase';
+import { hojeISO as today } from '../../lib/dates';
 
-const brl = (value) => Number(value || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+import { brl } from '../../lib/money';
 const number = (value) => Number(String(value ?? '').replace(',', '.')) || 0;
-const today = () => new Date().toISOString().slice(0,10);
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const newItem = () => ({ key:uid(), produtoId:'', nome:'', qtd:1, custo:'' });
 const emptyPurchase = () => ({ fornecedor:'', data:today(), vencimento:'', forma:'', pago:false, obs:'', itens:[newItem()] });
@@ -132,15 +132,15 @@ export default function PurchasesV2({ companyId, companyName='Sua empresa', user
   };
 
   return <div className="min-h-screen bg-slate-50 text-slate-900">
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6"><div className="flex min-w-0 items-center gap-3"><button onClick={onClose} className="rounded-xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50" aria-label="Voltar"><ArrowLeft size={19}/></button><div className="min-w-0"><div className="flex items-center gap-2"><h1 className="truncate text-base font-bold">Compras</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">V2</span></div><p className="truncate text-xs text-slate-500">{companyName}</p></div></div><div className="flex gap-2"><Button variant="secondary" onClick={load} disabled={loading}><RefreshCcw size={16}/><span className="hidden sm:inline">Atualizar</span></Button><Button onClick={openNew} disabled={!available}><Plus size={16}/>Compra</Button></div></div></header>
+    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6"><div className="flex min-w-0 items-center gap-3"><button onClick={onClose} className="rounded-xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50" aria-label="Voltar"><ArrowLeft size={19}/></button><div className="min-w-0"><div className="flex items-center gap-2"><h1 className="truncate text-base font-bold">Compras</h1></div><p className="truncate text-xs text-slate-500">{companyName}</p></div></div><div className="flex gap-2"><Button variant="secondary" onClick={load} disabled={loading}><RefreshCcw size={16}/><span className="hidden sm:inline">Atualizar</span></Button><Button onClick={openNew} disabled={!available}><Plus size={16}/>Compra</Button></div></div></header>
 
     <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-7">
-      <div className="mb-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4"><div className="flex items-start gap-3"><PackagePlus className="mt-0.5 shrink-0 text-emerald-700" size={20}/><div><p className="text-sm font-bold text-emerald-950">Compra e estoque na mesma operação</p><p className="mt-1 text-xs leading-relaxed text-emerald-800">Produto vinculado ao catálogo entra no estoque automaticamente. Se uma compra for editada, o banco aplica somente a diferença; retries não duplicam saldo.</p></div></div></div>
+      <div className="mb-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4"><div className="flex items-start gap-3"><PackagePlus className="mt-0.5 shrink-0 text-emerald-700" size={20}/><div><p className="text-sm font-bold text-emerald-950">Compra e estoque na mesma operação</p><p className="mt-1 text-xs leading-relaxed text-emerald-800">Produto vinculado ao catálogo entra no estoque automaticamente. Se uma compra for editada, só a diferença entra no estoque; salvar de novo não duplica o saldo.</p></div></div></div>
 
       {error && <div className="mb-5 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><TriangleAlert className="mt-0.5 shrink-0" size={18}/><div className="flex-1">{error}</div><button onClick={()=>setError('')}><X size={17}/></button></div>}
 
       {loading ? <div className="flex min-h-[45vh] items-center justify-center text-slate-500"><Loader2 className="mr-2 animate-spin" size={20}/>Carregando compras...</div>
-      : available === false ? <div className="mx-auto max-w-xl rounded-3xl border border-amber-200 bg-white p-7 text-center shadow-sm"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700"><ShoppingCart size={24}/></div><h2 className="mt-4 text-lg font-bold">Compras V2 pronta; banco ainda não migrado</h2><p className="mt-2 text-sm leading-relaxed text-slate-600">A tela depende das migrations de estoque e da reconciliação 0055. No preview de produção ela permanece bloqueada até a homologação completa.</p><p className="mt-3 text-xs text-slate-500">Nenhum dado de produção foi alterado.</p></div>
+      : available === false ? <div className="mx-auto max-w-xl rounded-3xl border border-amber-200 bg-white p-7 text-center shadow-sm"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700"><ShoppingCart size={24}/></div><h2 className="mt-4 text-lg font-bold">Compras com estoque ainda não disponíveis</h2><p className="mt-2 text-sm leading-relaxed text-slate-600">Este recurso está sendo liberado e ainda não está ativo na sua conta. O restante do ZiisTec continua funcionando normalmente.</p><p className="mt-3 text-xs text-slate-500">Suas compras continuam na aba Compras.</p></div>
       : <>
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Kpi icon={ReceiptText} label="Compras no mês" value={metrics.count} detail="registradas neste mês"/><Kpi icon={CircleDollarSign} label="Comprado no mês" value={brl(metrics.spend)} detail="custo total dos itens"/><Kpi icon={CalendarDays} label="A pagar" value={brl(metrics.payable)} detail="compras ainda não baixadas" tone="amber"/><Kpi icon={TriangleAlert} label="Atrasadas" value={metrics.overdue} detail="com vencimento passado" tone={metrics.overdue?'rose':'emerald'}/></section>
 

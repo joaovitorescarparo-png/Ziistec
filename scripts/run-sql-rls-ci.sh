@@ -101,36 +101,67 @@ regressions=(
   supabase/tests/v2_assistant_owner_writes_rollback.sql
   supabase/tests/v2_platform_subscription_renewal_rollback.sql
   supabase/tests/v2_beta_invites_rollback.sql
+  supabase/tests/v2_block3_service_receipts_rollback.sql
+  supabase/tests/v2_block4_work_order_lifecycle_rollback.sql
+  supabase/tests/v2_block4_client_service_history_rollback.sql
+  supabase/tests/v2_block5_technician_exposure_rollback.sql
+  supabase/tests/v2_wave2_route_preferences_rollback.sql
+  supabase/tests/v2_security_audit_v1_rollback.sql
+  supabase/tests/v2_security_v11_supplier_tenant_fk_rollback.sql
+  supabase/tests/v2_security_v11_stock_idempotency_rollback.sql
+  supabase/tests/v2_security_v11_invite_email_throttle_rollback.sql
+  supabase/tests/v2_field_execution_intelligence_rollback.sql
+  supabase/tests/v2_release_hardening_v12_rollback.sql
+  supabase/tests/v2_first_customers_golden_path_rollback.sql
 )
 
 # Falha de regressão também vira anotação do GitHub (legível sem baixar o log do job).
 annotate_failure() {
   local title="$1" text="$2"
-  echo "::error title=${title}::$(printf '%s' "$text" | grep -E 'ERROR|FAILED|FAIL:|DETAIL|CONTEXT' | head -6 | tr '
-' ' ' | cut -c1-1500)"
+  echo "::error title=${title}::$(printf '%s' "$text" | grep -E 'ERROR|FAILED|FAIL:|DETAIL|CONTEXT|CONCURRENCY' | head -6 | tr '\n' ' ' | cut -c1-1500)"
 }
 
 for sql in "${regressions[@]}"; do
   echo "CI_SQL_RLS regression: $sql"
   if ! out="$(psql -X -v ON_ERROR_STOP=1 "$DB_URL" -f "$sql" 2>&1)"; then
-    printf '%s
-' "$out"
+    printf '%s\n' "$out"
     annotate_failure "SQL regression failed: $sql" "$out"
     exit 3
   fi
-  printf '%s
-' "$out"
+  printf '%s\n' "$out"
 done
 
 bash scripts/test-rc1b-upload-concurrency.sh
 if ! out="$(bash scripts/test-beta-invite-concurrency.sh 2>&1)"; then
-  printf '%s
-' "$out"
+  printf '%s\n' "$out"
   annotate_failure "Beta invite concurrency failed" "$out"
   exit 3
 fi
-printf '%s
-' "$out"
+printf '%s\n' "$out"
+if ! out="$(bash scripts/test-service-receipt-concurrency.sh 2>&1)"; then
+  printf '%s\n' "$out"
+  annotate_failure "Service receipt concurrency failed" "$out"
+  exit 3
+fi
+printf '%s\n' "$out"
+if ! out="$(bash scripts/test-stock-adjustment-concurrency.sh 2>&1)"; then
+  printf '%s\n' "$out"
+  annotate_failure "Stock adjustment concurrency failed" "$out"
+  exit 3
+fi
+printf '%s\n' "$out"
+if ! out="$(bash scripts/test-invite-email-throttle-concurrency.sh 2>&1)"; then
+  printf '%s\n' "$out"
+  annotate_failure "Invite email throttle concurrency failed" "$out"
+  exit 3
+fi
+printf '%s\n' "$out"
+if ! out="$(bash scripts/test-ai-report-concurrency.sh 2>&1)"; then
+  printf '%s\n' "$out"
+  annotate_failure "AI report concurrency failed" "$out"
+  exit 3
+fi
+printf '%s\n' "$out"
 node --test tests/blockers/f03_quote_to_wo_authority.test.mjs
 
 echo 'CI_SQL_RLS: OK'

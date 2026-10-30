@@ -5,9 +5,9 @@ import {carregarBaseOrcamentoV2DB} from '../../lib/quoteV2Api';
 import {hasBlockingReuseItems,normalizeReuseItem} from '../../lib/quoteReuseMerge';
 import {novoQuoteReuseRequestId,salvarOrcamentoReutilizavelV2DB} from '../../lib/quoteReuseV2Api';
 
-const today=()=>new Date().toISOString().slice(0,10);
-const addDays=(base,days)=>{const d=new Date(`${base}T12:00:00`);d.setDate(d.getDate()+Number(days||0));return d.toISOString().slice(0,10);};
-const money=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import {hojeISO as today,addDiasISO as addDays} from '../../lib/dates';
+
+import { brl as money } from '../../lib/money';
 
 export default function QuoteReuseEditorV2({companyId,seed,setSeed,onClose,onUseTemplate,onAddKit,onManage}){
   const [base,setBase]=useState(null);const [loading,setLoading]=useState(true);const [saving,setSaving]=useState(false);const [error,setError]=useState('');const [saved,setSaved]=useState(null);const requestId=useRef(null);
