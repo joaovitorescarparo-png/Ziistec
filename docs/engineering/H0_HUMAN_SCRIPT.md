@@ -6,21 +6,21 @@ Estado do ambiente e limites: `H0_ENVIRONMENT.md`. Este roteiro **não foi execu
 
 Aparelhos: **Proprietário A** = computador (e Android para rotas/PDF) · **Técnico A** = iPhone · **Proprietário B** = computador (janela anônima).
 
-## Antes do TESTE 1 (preparação do proprietário, uma vez)
+## Preparação (já feita)
 
-1. Abra o link acima já logado na Vercel (conta do time `js-connect`). Se pedir login da Vercel, é a proteção do Preview; no iPhone do técnico use o mesmo login ou o botão Compartilhar da Vercel.
-2. No painel do Supabase, projeto **ziistec-h0** → Authentication → URL Configuration: Site URL = o link acima; em Redirect URLs, o mesmo link com `/` no fim.
-3. Authentication → Users → Add user → Create new user, **três vezes**, marcando **Auto Confirm User**: proprietário A, técnico A, proprietário B. Escolha as senhas e guarde no gerenciador de senhas. **Não mande senha por aqui.**
-4. Mande só os **três e-mails**. Eu preparo os convites beta e os dados de teste; depois aviso que pode começar.
+- Auth do H0 configurado (Site URL e Redirect URL no link acima) e três usuários criados com e-mail confirmado: **Proprietário A**, **Técnico A** e **Proprietário B**. As senhas são suas; ninguém mais as tem.
+- Empresas criadas pelo caminho real do produto: **H0 Demo A** (Proprietário A como dono, Técnico A como técnico ativo, trial Profissional) e **H0 Demo B** (Proprietário B como dono). Convites beta dos dois donos já consumidos.
+- O H0 está sem clientes, orçamentos, OS ou financeiro: os testes criam tudo. O trial do H0 vai até **2026-11-15**; depois disso o sistema fica só para leitura (peça para estender se precisar de mais prazo).
+- Abra o link já logado na Vercel (conta do time `js-connect`); a proteção do Preview pede isso. No iPhone do técnico use o mesmo login ou o botão Compartilhar da Vercel.
 
 Marque cada teste: **PASSOU**, **FALHOU** (anote o que viu e tire foto) ou **NÃO TESTÁVEL**. Falha que perde dado, mostra dado de outra empresa ou mostra preço ao técnico = P0. Falha que trava o fluxo = P1. Incômodo sem travar = P2.
 
 ---
 
-**TESTE 1 — Entrar e criar a empresa (Proprietário A, computador)**
+**TESTE 1 — Entrar na empresa (Proprietário A, computador)**
 - Onde clicar: abra o link → Entrar.
-- O que fazer: entre com o e-mail e a senha do proprietário A. Na primeira vez, crie a empresa com o nome `H0 Demo A`.
-- Resultado esperado: abre o Início da empresa. Nenhuma tela mostra palavras como migration, RPC, RLS ou "preview". (Opcional: "Esqueci a senha"; o e-mail pode não chegar, o e-mail embutido do Supabase é limitado — se não chegar, marque NÃO TESTÁVEL.)
+- O que fazer: entre com o e-mail e a senha do proprietário A.
+- Resultado esperado: abre direto o Início da empresa **H0 Demo A** (não pede para criar empresa nem convite beta). Nenhuma tela mostra palavras como migration, RPC, RLS ou "preview". (Opcional: "Esqueci a senha"; o e-mail pode não chegar, o e-mail embutido do Supabase é limitado — se não chegar, marque NÃO TESTÁVEL.)
 
 **TESTE 2 — Cadastros básicos (Proprietário A, computador)**
 - Onde clicar: Clientes → **Novo cliente**; depois **Serviços e produtos** → **Novo serviço** / **Novo produto**.
@@ -32,10 +32,10 @@ Marque cada teste: **PASSOU**, **FALHOU** (anote o que viu e tire foto) ou **NÃ
 - O que fazer: escolha `Cliente H0 Um`, adicione o serviço e o produto, dê desconto de R$ 10, salve, clique em **Aprovar orçamento** e depois em **Gerar OS** (técnico: deixe sem técnico por enquanto).
 - Resultado esperado: a OS nasce na lista de Ordens de serviço com o **mesmo valor aprovado** do orçamento.
 
-**TESTE 4 — Convidar o técnico (Proprietário A, computador)**
-- Onde clicar: Equipe → **Adicionar colaborador**.
-- O que fazer: informe o **e-mail do técnico A** com a função técnico.
-- Resultado esperado: o convite fica salvo como pendente. O e-mail do convite pode não ser enviado neste ambiente (não faz parte do H0); isso não é falha. O técnico entra direto na etapa seguinte.
+**TESTE 4 — Equipe (Proprietário A, computador)**
+- Onde clicar: Equipe.
+- O que fazer: confira a lista. Depois, **Adicionar colaborador** com um e-mail inventado (por exemplo `extra.h0@example.com`).
+- Resultado esperado: o Técnico A aparece como técnico ativo (já vinculado na preparação). O colaborador novo fica como convite pendente; o e-mail do convite não é enviado neste ambiente (não faz parte do H0) e isso não é falha. Pode remover o convite depois.
 
 **TESTE 5 — Agendar (Proprietário A, computador)**
 - Onde clicar: Ordens de serviço → abra a OS → **Agendar**; depois Agenda.
@@ -43,7 +43,7 @@ Marque cada teste: **PASSOU**, **FALHOU** (anote o que viu e tire foto) ou **NÃ
 - Resultado esperado: a OS aparece no dia certo; trocar o horário (Reagendar) atualiza a Agenda.
 
 **TESTE 6 — Executar em campo (Técnico A, iPhone)**
-- Onde clicar: abra o link no iPhone → Entrar (e-mail e senha do técnico A) → **Meu dia**.
+- Onde clicar: abra o link no iPhone → Entrar (e-mail e senha do técnico A; abre direto na empresa H0 Demo A) → **Meu dia**.
 - O que fazer: abra a OS → **Iniciar atendimento** → tire 2 fotos com a câmera → preencha causa e solução (use **Ditar** em um campo; se negar o microfone, o texto não pode sumir) → **Finalizar atendimento** → informe o nome de quem recebeu → concluir. Toque em concluir duas vezes seguidas.
 - Resultado esperado: cronômetro "Em atendimento" depois de iniciar; fotos anexadas; a OS conclui **uma só vez**; nenhum erro técnico.
 
@@ -73,7 +73,7 @@ Marque cada teste: **PASSOU**, **FALHOU** (anote o que viu e tire foto) ou **NÃ
 - Resultado esperado: abre o app escolhido com o endereço inteiro; na OS sem endereço o botão fica desligado com "Este atendimento ainda não possui um endereço disponível para abrir a rota."; a escolha de app continua depois de sair e entrar.
 
 **TESTE 12 — Outra empresa não vê nada (Proprietário B, computador, janela anônima)**
-- Onde clicar: abra o link → Entrar com o e-mail do proprietário B → crie a empresa `H0 Demo B`.
+- Onde clicar: abra o link → Entrar com o e-mail do proprietário B (a empresa `H0 Demo B` já existe).
 - O que fazer: veja Clientes, Ordens de serviço, Financeiro.
 - Resultado esperado: tudo **vazio**; nada de `H0 Demo A`. (Se aparecer dado da empresa A: P0.)
 
@@ -85,7 +85,7 @@ Marque cada teste: **PASSOU**, **FALHOU** (anote o que viu e tire foto) ou **NÃ
 **TESTE 14 — Desativar colaborador (Proprietário A, computador; depois Técnico A, iPhone)**
 - Onde clicar: Equipe → técnico A → desativar.
 - O que fazer: no iPhone, recarregue a página do técnico.
-- Resultado esperado: o técnico **perde o acesso na hora**.
+- Resultado esperado: o técnico **perde o acesso na hora**. Depois reative o técnico em Equipe para os outros testes.
 
 ---
 

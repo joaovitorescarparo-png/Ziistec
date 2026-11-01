@@ -1,7 +1,7 @@
 # H0 — ambiente isolado de homologação (estado)
 
 Data: 2026-10-29/30 · Branch `claude/blocks34-port-beta-v1` · Complementa `H0_HOMOLOGATION_PLAN.md`.
-Estado: **H0 criado e com o banco em 0112; frontend Preview READY; Auth e dados sintéticos pendentes (dependem do proprietário).** Teste humano ainda não executado: a Fase 1 continua **NOT READY**. Roteiro: `H0_HUMAN_SCRIPT.md`.
+Estado em 2026-11-01: **H0 criado, banco em 0112, frontend Preview READY, Auth configurado, empresas e vínculos preparados e validados.** Falta só o teste humano: a Fase 1 continua **NOT READY**. Roteiro: `H0_HUMAN_SCRIPT.md`.
 
 ## 1. Identidade dos ambientes (por configuração, não por nome)
 
@@ -42,13 +42,24 @@ Prova de equivalência com o laboratório (PGlite com 0099 reconstruído como no
 3. `api/work-order-report` vai junto com o Preview (pasta `api/`); sem chave de IA responde com o texto padrão.
 4. O e-mail embutido do Supabase só entrega para membros da organização e tem limite baixo: a recuperação de senha pode não chegar a endereços com `+`. É limitação de SMTP, não do produto; SMTP próprio é item de pré-lançamento.
 
-## 5. O que falta (depende do proprietário)
+## 5. Auth e vínculos (2026-11-01)
 
-1. No painel do projeto `ziistec-h0` (Authentication → URL Configuration): Site URL e Redirect URL = o link do Preview (com `/` no fim).
-2. Criar 3 usuários com "Auto Confirm User" (senhas escolhidas e guardadas por ele): proprietário A, técnico A, proprietário B. Passar só os 3 e-mails.
-3. Com os e-mails: convites beta para os dois proprietários e semente sintética (clientes, serviços, produtos, OS) aplicadas no H0.
-4. Executar `H0_HUMAN_SCRIPT.md` nos aparelhos e devolver PASSOU/FALHOU por teste.
+O proprietário configurou Site URL/Redirect URL e criou 3 usuários com e-mail confirmado (as senhas nunca passaram por aqui). Verificado no H0: exatamente 3 usuários, todos confirmados, nenhum bloqueado. Provedores externos desligados; cadastro público aberto (`disable_signup=false`) e `mailer_autoconfirm=false`: quem se cadastrar sozinho precisa confirmar o e-mail e **não cria empresa sem convite beta** (beta fechado); o Preview ainda fica atrás da Vercel Authentication.
 
-## 6. Descarte
+Vínculos feitos pelo caminho real do produto, sem escrever tabelas à mão: convite beta (um por dono) → `zt_create_company` como cada dono → `company_invites` criado pelo dono A sob RLS → `zt_accept_invites` pelo técnico. Resultado: **H0 Demo A** (dono A + técnico A, trial Profissional R$ 79,90 até 2026-11-15) e **H0 Demo B** (dono B). Nomes de perfil sintéticos. Nenhum e-mail pessoal vai para o repositório.
+
+Validação como cada pessoa (RLS real), com cliente → orçamento → OS → conclusão → cobrança → pagamento → comprovante → histórico criados **dentro de uma transação desfeita no fim** (H0 continua sem dados de negócio):
+- dono A: vê só a H0 Demo A e a equipe dela (2); cobrança R$ 680 paga; comprovante `CS-` "Documento não fiscal" de R$ 680, reemissão com o mesmo pedido devolve o mesmo comprovante; histórico do cliente com valor e pagamento; escrever na empresa B é negado (42501); reescrever o `user_id` do vínculo é negado (0112).
+- técnico A: vê só a H0 Demo A e a OS atribuída; lê `approved_total` e `select *` em `work_orders` → negado (42501); financeiro, itens com preço e comprovantes → 0 linhas; itens de campo sem `unit_price`/`total`; emitir comprovante e ler histórico → negado (42501).
+- dono B: vê só a H0 Demo B; cliente, OS, cobrança e comprovante da empresa A → 0 linhas; emitir comprovante, ler histórico e gravar na empresa A → negado (42501).
+- técnico desativado pelo dono A: 0 empresas, 0 OS e 0 clientes visíveis na hora.
+
+Isso não substitui o teste humano em aparelho real, câmera, microfone, PDF e WhatsApp.
+
+## 6. O que falta (depende de pessoas)
+
+Executar `H0_HUMAN_SCRIPT.md` nos aparelhos e devolver PASSOU/FALHOU/NÃO TESTÁVEL por teste. O trial do H0 termina em 2026-11-15.
+
+## 7. Descarte
 
 O H0 é descartável: apagar o projeto `ziistec-h0` no painel Supabase e remover as guardas do H0 (commits `64a15bd` e `a7622e3`) antes de qualquer PR para a `main`.
