@@ -33,3 +33,16 @@ export async function mudarStatusPlataformaDB(companyId,status){
   const db=toDb[status]||status;
   check(await supabase.rpc('zt_platform_set_subscription_status',{p_company:companyId,p_status:db}));
 }
+
+/* Beta fechado: as três RPCs exigem administrador da plataforma com MFA no servidor. */
+export async function listarConvitesBetaDB(){
+  return check(await supabase.rpc('zt_platform_list_beta_invites'))||[];
+}
+
+export async function criarConviteBetaDB(email,dias){
+  return check(await supabase.rpc('zt_platform_create_beta_invite',{p_email:email,p_valid_days:dias}));
+}
+
+export async function revogarConviteBetaDB(inviteId){
+  return check(await supabase.rpc('zt_platform_revoke_beta_invite',{p_invite:inviteId}));
+}
