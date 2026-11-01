@@ -9,15 +9,42 @@ const ALLOWED_ORIGINS = new Set([
   "https://ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app",
 ]);
 
-const json = (status: number, body: unknown, origin = "") => new Response(JSON.stringify(body), {
+const json = (status: number, body: unknown, origin = "", extraHeaders: Record<string, string> = {}) => new Response(JSON.stringify(body), {
   status,
   headers: {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     "Vary": "Origin",
     ...(ALLOWED_ORIGINS.has(origin) ? { "Access-Control-Allow-Origin": origin } : {}),
+    ...extraHeaders,
   },
 });
+
+// SEC-06: nome da empresa e do convidado são texto livre do proprietário e entram no HTML do convite
+// ({{ .Data.company_name }} em nó de texto). O Auth (Go html/template) já escapa na renderização; aqui a
+// neutralização é explícita e não depende dele. Escapar para entidades (&amp;, &lt;) seria escapado de novo pelo
+// Auth e o convidado veria "&amp;lt;"; por isso & < > " ' viram caracteres inertes equivalentes e o resto do Unicode
+// (acentos, emoji, CJK) passa intacto. Controles, separadores de linha e sobreposições bidi também saem.
+const INERT_MARKUP: Record<string, string> = {
+  "&": "\u{FF06}",
+  "<": "\u{FF1C}",
+  ">": "\u{FF1E}",
+  '"': "\u{201D}",
+  "'": "\u{2019}",
+};
+const inertText = (value: unknown, max: number) => Array.from(
+  String(value ?? "")
+    .replace(/[\p{Cc}\u{2028}\u{2029}\u{202A}-\u{202E}\u{2066}-\u{2069}]+/gu, " ")
+    .replace(/[&<>"']/g, (char) => INERT_MARKUP[char])
+    .replace(/\s+/g, " ")
+    .trim(),
+).slice(0, max).join("");
+
+// SEC-05: o banco decide o reenvio (zt_claim_team_invite_email); aqui só se converte a decisão em resposta.
+const retryAfterSeconds = (value: unknown) => {
+  const seconds = Math.ceil(Number(value));
+  return Number.isFinite(seconds) ? Math.min(Math.max(seconds, 1), 3600) : 60;
+};
 
 const normalizeRedirect = (value: unknown) => {
   try {
@@ -102,7 +129,20 @@ Deno.serve(async (req: Request) => {
     .single();
   if (companyError || !company) return json(404, { error: "company_not_found" }, origin);
 
-  const companyName = String(company.trade_name || company.name || "Sua empresa").trim();
+  const companyName = inertText(company.trade_name || company.name, 160) || "Sua empresa";
+
+  // SEC-05: cooldown e limites por hora ficam no banco (empresa, convite e destinatário). Sem a decisão do banco
+  // nada é enviado: a chave de serviço só é criada depois deste portão.
+  const { data: claim, error: claimError } = await userClient.rpc("zt_claim_team_invite_email", { p_invite: invite.id });
+  if (claimError?.code === "42501") return json(403, { error: "owner_required" }, origin);
+  if (claimError || !claim || typeof claim.allowed !== "boolean") {
+    return json(503, { ok: false, sent: false, reason: "throttle_unavailable" }, origin);
+  }
+  if (!claim.allowed) {
+    const retryAfter = retryAfterSeconds(claim.retryAfterSeconds);
+    return json(429, { ok: false, sent: false, reason: "rate_limited", retry_after_seconds: retryAfter }, origin, { "Retry-After": String(retryAfter) });
+  }
+
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -110,7 +150,7 @@ Deno.serve(async (req: Request) => {
     redirectTo,
     data: {
       ziistec_invite_id: invite.id,
-      invitee_name: invite.name || "",
+      invitee_name: inertText(invite.name, 120),
       company_name: companyName,
       role_label: invite.role === "technician" ? "técnico/colaborador" : "colaborador",
     },

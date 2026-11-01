@@ -1,6 +1,8 @@
 /* Texto da assinatura no beta. Plano, valor, status e período vêm do banco; aqui só se decide
    como mostrar. Trial mostra o valor que vale depois do teste, sem sugerir cobrança feita.
    Aceita o status do banco (trial/active/...) e o do app legado (trial/ativa/...). */
+import { hojeISO, dataBR } from "./dates.js";
+
 const NORMALIZA = {
   trial: "trial", active: "active", ativa: "active", past_due: "past_due", pendente: "past_due",
   suspended: "suspended", suspensa: "suspended", canceled: "canceled", cancelada: "canceled",
@@ -10,11 +12,7 @@ const DADOS = "Seus dados permanecem armazenados.";
 
 export const statusAssinatura = (status) => NORMALIZA[status] || status || null;
 
-export function hojeISO(agora = new Date()) {
-  const m = String(agora.getMonth() + 1).padStart(2, "0");
-  const d = String(agora.getDate()).padStart(2, "0");
-  return `${agora.getFullYear()}-${m}-${d}`;
-}
+export { hojeISO, dataBR };
 
 const dia = (iso) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
@@ -25,11 +23,6 @@ export function diasRestantes(fim, hoje = hojeISO()) {
   const a = dia(hoje), b = dia(fim);
   return a == null || b == null ? null : Math.round((b - a) / 86400000);
 }
-
-export const dataBR = (iso) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : "—";
-};
 
 export const precoMensal = (valor) =>
   `R$ ${Number(valor || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mês`;

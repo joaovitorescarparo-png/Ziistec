@@ -28,7 +28,7 @@ test('primary product photo reuses zt-product-images and does not accept unsuppo
 test('product flow keeps stock and field-sale metadata on the existing backend model', () => {
   assert.match(legacy, /Controlar estoque deste produto/);
   assert.match(legacy, /Estoque e movimentações/);
-  assert.match(legacy, /contexto\.abrirRecursoV2\("produtos"\)/);
+  assert.match(legacy, /contexto\.abrirRecursoV2\("produtos", \{ origem: "catalogo"/);
   assert.match(legacy, /Liberado para venda em campo/);
   assert.match(dataApi, /track_stock:Boolean\(x\.controlaEstoque\)/);
   assert.match(dataApi, /low_stock_threshold:Math\.max/);

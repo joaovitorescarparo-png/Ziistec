@@ -10,7 +10,7 @@ import {
 import { baixarOrcamentoPDF, compartilharOrcamentoPDF, suportaCompartilharArquivo } from '../../lib/quotePdf';
 import { mensagemErro } from '../../lib/supabase';
 
-const brl=(v)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+import { brl } from '../../lib/money';
 const dateBR=(v)=>v?String(v).slice(0,10).split('-').reverse().join('/'):'—';
 const safe=(v)=>String(v||'orcamento').replace(/[^a-zA-Z0-9._-]+/g,'-').slice(0,70);
 const statusMeta={

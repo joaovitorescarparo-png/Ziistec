@@ -4,7 +4,9 @@ import FieldSalesAdminV2 from './FieldSalesAdminV2';
 import { supabase } from '../../lib/supabase';
 
 export default function WorkOrderSaleV2(props) {
-  const [owner,setOwner]=useState(null);
+  // O App principal já sabe o papel (a membresia ativa vem da mesma tabela): só consulta de novo quando a tela é aberta sem ele.
+  const donoInformado=typeof props.owner==='boolean';
+  const [owner,setOwner]=useState(donoInformado?props.owner:null);
   const voltarAoApp = () => {
     const url = new URL(window.location.href);
     url.searchParams.delete('v2');
@@ -12,6 +14,7 @@ export default function WorkOrderSaleV2(props) {
   };
 
   useEffect(()=>{
+    if(donoInformado){setOwner(props.owner);return undefined;}
     let alive=true;
     (async()=>{
       const {data:{user}}=await supabase.auth.getUser();
@@ -20,7 +23,7 @@ export default function WorkOrderSaleV2(props) {
       if(alive)setOwner(!r.error&&r.data?.role==='owner'&&r.data?.status==='active');
     })();
     return()=>{alive=false;};
-  },[props.companyId]);
+  },[props.companyId,props.owner,donoInformado]);
 
   if(owner===null)return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-500">Abrindo vendas...</div>;
   if(owner)return <FieldSalesAdminV2 {...props} onClose={voltarAoApp}/>;

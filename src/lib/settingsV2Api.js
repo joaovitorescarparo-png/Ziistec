@@ -1,7 +1,6 @@
 import { supabase } from './supabase';
 import { uploadLogoEmpresaDB } from './runtimeApi';
 import { resolverLogoEmpresaDB } from './storageExtras';
-import { cancelarAssinaturaDB, reativarAssinaturaDB } from './subscriptionApi';
 
 const check=(r)=>{if(r?.error) throw r.error;return r?.data;};
 const clean=(v,max)=>{const s=String(v??'').trim();return s?s.slice(0,max):null;};
@@ -69,12 +68,4 @@ export async function salvarSettingsEmpresaV2DB(companyId,form){
 
 export async function salvarLogoSettingsV2DB(companyId,file){
   return uploadLogoEmpresaDB(file,companyId);
-}
-
-export async function cancelarAssinaturaSettingsV2DB(companyId){
-  return cancelarAssinaturaDB(companyId);
-}
-
-export async function reativarAssinaturaSettingsV2DB(companyId){
-  return reativarAssinaturaDB(companyId);
 }

@@ -11,7 +11,7 @@ import {
   salvarConfiguracaoVendaCampoDB,
 } from '../../lib/fieldSalesApi';
 
-const brl = (value) => Number(value || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+import { brl } from '../../lib/money';
 const dt = (value) => value ? new Date(value).toLocaleString('pt-BR') : '—';
 
 const paymentOptions = [

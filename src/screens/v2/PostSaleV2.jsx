@@ -2,8 +2,8 @@ import React,{useCallback,useEffect,useMemo,useState} from 'react';
 import {ArrowLeft,CalendarClock,Check,ChevronRight,Clock3,History,Loader2,MessageCircle,Plus,RefreshCw,Save,Settings2,ShieldCheck,X} from 'lucide-react';
 import {atualizarPosVendaV2DB,listarPoliticasPosVendaV2DB,listarPosVendaV2DB,salvarPoliticaPosVendaV2DB} from '../../lib/postSaleV2Api';
 
-const today=()=>new Date().toISOString().slice(0,10);
-const dateBR=v=>v?String(v).slice(0,10).split('-').reverse().join('/'):'—';
+import {hojeISO as today,dataBR as dateBR} from '../../lib/dates';
+
 const digits=v=>String(v||'').replace(/\D/g,'');
 const kinds={service_review:'Revisão do serviço',check_in:'Check-in',satisfaction:'Satisfação',maintenance:'Manutenção',warranty_expiring:'Garantia vencendo',custom:'Personalizado'};
 const policyKinds=['check_in','satisfaction','maintenance','warranty_expiring','custom'];

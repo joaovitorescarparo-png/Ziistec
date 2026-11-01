@@ -139,9 +139,9 @@ select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001'
 set local role authenticated;
 update public.quotes set status='approved' where id=(select quote_id from zt_fw4a1);
 update zt_fw4a1 t set created_wo=public.zt_create_work_order_from_quote(t.quote_id,null,null,null);
-do $$ declare t zt_fw4a1%rowtype; q public.quotes%rowtype; w public.work_orders%rowtype;
+do $$ declare t zt_fw4a1%rowtype; q public.quotes%rowtype; w record;
 begin
-  select * into t from zt_fw4a1; select * into q from public.quotes where id=t.quote_id; select * into w from public.work_orders where id=t.created_wo;
+  select * into t from zt_fw4a1; select * into q from public.quotes where id=t.quote_id; select client_location_id,client_id,company_id,service_place,address into w from public.work_orders where id=t.created_wo;
   if w.client_location_id<>q.client_location_id or w.client_id<>q.client_id or w.company_id<>q.company_id then raise exception 'OS não preservou vínculo relacional do orçamento'; end if;
   if w.service_place<>q.service_place or w.address is distinct from q.address then raise exception 'OS não preservou snapshot textual aprovado'; end if;
 end $$;

@@ -1,6 +1,8 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { supabaseServidor } from './_supabaseServerConfig.js';
+import { quotaUserMessage } from './_apiErrors.js';
 import { shouldBreakPdfBlock, canKeepClosingTogether } from './quotePdfLayout.js';
+import { LOGO_BOX, desenharLogoNaCaixa } from '../src/lib/pdfLogoBox.js';
 
 const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -119,7 +121,7 @@ export default async function handler(req, res) {
     }).catch(() => null);
     if (!quota?.ok) {
       const detail = quota ? await quota.json().catch(() => ({})) : {};
-      const msg = detail?.message || 'Limite de geração de PDF atingido.';
+      const msg = quotaUserMessage(detail, 'Limite de geração de PDF atingido.');
       const status = quota?.status === 401 ? 401 : quota?.status === 403 ? 403 : quota ? 429 : 502;
       return res.status(status).json({ error: msg });
     }
@@ -225,8 +227,8 @@ export default async function handler(req, res) {
     const headerH = 126;
     page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: headerH, color: navy });
     page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: 4, color: teal });
-    const companyTextX = logo ? margin + 140 : margin;
-    if (logo) drawLogoFit(page, logo, margin, A4[1] - 100, 128, 68, 1);
+    const companyTextX = logo ? margin + LOGO_BOX.textoX : margin;
+    if (logo) desenharLogoNaCaixa(page, logo, { x: margin, yBase: A4[1] - headerH / 2 - LOGO_BOX.height / 2 });
     const companyLines = wrapText(companyName, bold, logo ? 12.5 : 18, logo ? 170 : 290).slice(0, 2);
     let companyY = A4[1] - 54;
     for (const l of companyLines) { txt(l, companyTextX, companyY, logo ? 12.5 : 18, bold, white); companyY -= logo ? 15 : 20; }

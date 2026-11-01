@@ -6,6 +6,9 @@ import NovaSenha from "./screens/NovaSenha";
 import Onboarding from "./screens/Onboarding";
 import Carregando from "./screens/Carregando";
 import AssistantPanel from "./components/AssistantPanel";
+import { confirmDiscardNavigation } from "./lib/unsavedChanges";
+import { setDraftScope } from "./lib/formDrafts";
+import { estadosDeAberturaV2, recursoV2ExigeOwner, urlRecursoV2, voltaPeloHistorico } from "./lib/recursosV2";
 
 const ZiisTecApp = lazy(() => import("./legacy/ZiisTecApp"));
 const PlatformAdminGate = lazy(() => import("./screens/PlatformAdminGate"));
@@ -153,8 +156,15 @@ export default function App() {
     const url = new URL(window.location.href);
     if (valor) url.searchParams.set("v2", valor);
     else url.searchParams.delete("v2");
-    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    // Preserva o estado do histórico: a marca "aberta pelo app principal" não pode se perder ao trocar de tela V2.
+    window.history.replaceState(window.history.state || {}, "", `${url.pathname}${url.search}${url.hash}`);
   };
+
+  // Bloco 7: rascunho local só vale para o usuário + empresa desta sessão (outro escopo é apagado).
+  const draftUserId = s.sessaoAuth?.user?.id || null;
+  useEffect(() => {
+    setDraftScope(draftUserId && s.empresaId ? { userId: draftUserId, companyId: s.empresaId } : null);
+  }, [draftUserId, s.empresaId]);
 
   // Voltar do navegador sincroniza a tela com a URL (?v2= continua sendo a fonte da rota técnica).
   useEffect(() => {
@@ -166,13 +176,26 @@ export default function App() {
 
   // Tela aberta pelo Assistente fecha voltando no histórico; as demais seguem para o hub V2 como antes.
   const fecharWorkspace = (destino) => {
-    if (typeof window !== "undefined" && window.history.state?.[ASSISTANT_RECORD_STATE]) { window.history.back(); return; }
+    if (typeof window !== "undefined" && (window.history.state?.[ASSISTANT_RECORD_STATE] || voltaPeloHistorico(window.history.state))) { window.history.back(); return; }
     navegarV2(destino);
   };
 
   const abrirWorkspaceV2 = (valor) => {
+    if (!confirmDiscardNavigation()) return;
     if (valor === "orcamento-ia") setQuoteSeed("");
     navegarV2(valor);
+  };
+
+  // Abre uma tela V2 a partir do app principal: a aba de origem fica no histórico e Voltar/Fechar retorna a ela.
+  const abrirRecursoV2 = (chave, opcoes = {}) => {
+    if (typeof window === "undefined") return false;
+    if (recursoV2ExigeOwner(chave) && s.membresiaAtual?.role !== "owner") return false;
+    if (!confirmDiscardNavigation()) return false;
+    const { origemState, telaState } = estadosDeAberturaV2(window.history.state, opcoes.origem);
+    window.history.replaceState(origemState, "", window.location.href);
+    window.history.pushState(telaState, "", urlRecursoV2(window.location.href, chave, opcoes.params));
+    setWorkspaceV2(chave);
+    return true;
   };
 
   const abrirOrcamentoDaGarantia = (seed) => {
@@ -214,7 +237,7 @@ export default function App() {
       /* ETAPA A — ponto de integração: as telas do shell principal podem
          abrir um recurso V2 pontual sem sair da navegação antiga. As etapas
          C a E usam isto para absorver as funções V2 aba por aba. */
-      abrirRecursoV2: (chave) => navegarV2(chave),
+      abrirRecursoV2,
       salvarEmpresa: async (dados) => {
         const { error } = await supabase.from("companies")
           .update(paraEmpresaBanco(dados)).eq("id", s.empresaId);
@@ -231,6 +254,8 @@ export default function App() {
       work_order: ['memoria-os', 'wo'], quote: ['orcamentos'], financial_entry: ['financeiro'] };
     const target = targets[record.entityType];
     if (!target || !record.id || (record.entityType !== 'work_order' && s.membresiaAtual?.role !== 'owner')) return;
+    // Abrir o registro troca a tela inteira: formulário com alterações pergunta antes de descartar.
+    if (!confirmDiscardNavigation()) return;
     const url = new URL(window.location.href);
     for (const key of ['client', 'product', 'wo']) url.searchParams.delete(key);
     url.searchParams.set('v2', target[0]);
@@ -293,8 +318,8 @@ export default function App() {
   if (workspaceV2 === "contratos" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo preventivas e contratos"/>}><MaintenanceContractsV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "financeiro" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo financeiro"/>}><FinanceV2 {...workspaceProps}/></Suspense>);
   if (workspaceV2 === "configuracoes" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo configurações"/>}><SettingsV2 {...workspaceProps}/></Suspense>);
-  if (workspaceV2 === "pos-venda" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo pós-venda"/>}><PostSaleV2 {...workspaceProps} onClose={() => navegarV2(null)}/></Suspense>);
-  if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps}/></Suspense>);
+  if (workspaceV2 === "pos-venda" && owner) return comConexao(<Suspense fallback={<Carregando texto="Abrindo pós-venda"/>}><PostSaleV2 {...workspaceProps} onClose={() => fecharWorkspace(null)}/></Suspense>);
+  if (workspaceV2 === "venda-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo venda na ordem de serviço"/>}><WorkOrderSaleV2 {...workspaceProps} owner={owner}/></Suspense>);
   if (workspaceV2 === "memoria-os") return comConexao(<Suspense fallback={<Carregando texto="Abrindo memória técnica"/>}><WorkOrderMemoryV2 {...workspaceProps} owner={owner} initialWorkOrderId={new URLSearchParams(window.location.search).get("wo")}/></Suspense>);
 
   return comConexao(

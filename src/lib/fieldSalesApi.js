@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { brl } from './money';
 
 const check = (r) => { if (r?.error) throw r.error; return r?.data; };
 const n = (v) => Number(v || 0);
@@ -202,7 +203,7 @@ export async function carregarHistoricoClienteDB(companyId, clientId) {
       const osNumber = x.work_order_id ? osById[x.work_order_id]?.number : '';
       return {
         id:`sale:${x.id}`,tipo:'Venda',titulo:x.products?.name || 'Venda em campo',
-        descricao:`${n(x.quantity)} un · ${n(x.total).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · ${x.origin === 'work_order' ? `OS #${osNumber || '—'}` : labelFormaRecebimento(x.payment_method)} · Técnico: ${tech}`,
+        descricao:`${n(x.quantity)} un · ${brl(x.total)} · ${x.origin === 'work_order' ? `OS #${osNumber || '—'}` : labelFormaRecebimento(x.payment_method)} · Técnico: ${tech}`,
         local:x.service_place || '',data:x.created_at,
       };
     }),

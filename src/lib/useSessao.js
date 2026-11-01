@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, mensagemErro } from "./supabase";
+import { purgeDrafts } from "./formDrafts";
 
 /* Fonte de verdade da sessão é o Supabase Auth.
    Papel e empresa vêm de company_members — nunca de constante local. */
@@ -194,6 +195,7 @@ export function useSessao() {
   const sair = useCallback(async () => {
     await supabase?.auth.signOut();
     localStorage.removeItem("ziistec_empresa_id");
+    purgeDrafts();
     setRecuperandoSenha(false);
     limpar();
   }, [limpar]);
@@ -201,6 +203,7 @@ export function useSessao() {
   const finalizarRecuperacaoSenha = useCallback(async () => {
     await supabase?.auth.signOut();
     localStorage.removeItem("ziistec_empresa_id");
+    purgeDrafts();
     setRecuperandoSenha(false);
     limpar();
     window.history.replaceState({}, "", "/");

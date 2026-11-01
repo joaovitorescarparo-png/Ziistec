@@ -15,7 +15,7 @@ import { buildPixPayload, pixQrSvgDataUri } from '../../lib/pixQr';
 import { resolverImagemProdutoDB } from '../../lib/storageExtras';
 import { mensagemErro } from '../../lib/supabase';
 
-const brl = (value) => Number(value || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+import { brl } from '../../lib/money';
 const n = (value) => Number(String(value ?? '').replace(',', '.')) || 0;
 const dataBR = (value) => value ? String(value).split('-').reverse().join('/') : 'Sem data';
 const statusLabel = { unscheduled:'Aguardando', scheduled:'Agendada', in_progress:'Em andamento' };

@@ -16,7 +16,8 @@ create temp table zt_technician_sale_test (
   sold_item_id uuid,
   unassigned_blocked boolean default false,
   tech_public_item_visible boolean,
-  tech_public_unit_cost numeric,
+  tech_base_row_visible boolean,
+  tech_projection_has_price boolean,
   tech_private_cost_visible boolean,
   stock_after numeric,
   movement_delta numeric,
@@ -100,12 +101,17 @@ set sold_item_id = public.zt_sell_product_on_work_order(
   gen_random_uuid()
 );
 
+-- 0105: o técnico vê o item vendido pela projeção de campo (sem preço/custo), não pela linha base.
 update zt_technician_sale_test t
 set tech_public_item_visible = exists(
+      select 1 from public.zt_field_work_order_items(t.company_id,t.assigned_wo_id) i where i.id=t.sold_item_id
+    ),
+    tech_base_row_visible = exists(
       select 1 from public.work_order_items i where i.id=t.sold_item_id
     ),
-    tech_public_unit_cost = (
-      select i.unit_cost from public.work_order_items i where i.id=t.sold_item_id
+    tech_projection_has_price = exists(
+      select 1 from public.zt_field_work_order_items(t.company_id,t.assigned_wo_id) i
+       where i.id=t.sold_item_id and (to_jsonb(i) ? 'unit_price' or to_jsonb(i) ? 'unit_cost')
     ),
     tech_private_cost_visible = exists(
       select 1 from public.work_order_item_costs c where c.work_order_item_id=t.sold_item_id
@@ -163,7 +169,8 @@ select
   sold_item_id is not null as sale_created,
   unassigned_blocked,
   tech_public_item_visible,
-  tech_public_unit_cost,
+  tech_base_row_visible,
+  tech_projection_has_price,
   tech_private_cost_visible,
   stock_after,
   movement_delta,
@@ -173,7 +180,8 @@ select
     sold_item_id is not null
     and unassigned_blocked=true
     and tech_public_item_visible=true
-    and tech_public_unit_cost=0
+    and tech_base_row_visible=false
+    and tech_projection_has_price=false
     and tech_private_cost_visible=false
     and stock_after=3
     and movement_delta=-2

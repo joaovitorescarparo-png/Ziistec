@@ -40,11 +40,6 @@ export async function carregarChecklistOSV2DB(workOrderId){
   return check(r)||[];
 }
 
-export async function marcarChecklistItemV2DB(id,done){
-  const r=await idempotentWrite(()=>supabase.from('work_order_checklists').update({done:Boolean(done),updated_at:new Date().toISOString()}).eq('id',id).select('id,done').single());
-  return check(r);
-}
-
 export function novoReturnRequestId(){return uuid();}
 
 export async function marcarRetornoOSV2DB({workOrderId,reason,materialNeeded='',notes='',priority='normal',expectedReturnDate=null,requestId}){
@@ -59,11 +54,4 @@ export async function marcarRetornoOSV2DB({workOrderId,reason,materialNeeded='',
     p_request_id:operationId,
   }));
   return {id:check(r),requestId:operationId};
-}
-
-export async function carregarRetornosOSV2DB(workOrderId){
-  const r=await supabase.from('work_order_returns')
-    .select('id,work_order_id,reason,material_needed,notes,priority,expected_return_date,returned_at,resolved_at,created_at,created_by')
-    .eq('work_order_id',workOrderId).order('created_at',{ascending:true});
-  return check(r)||[];
 }

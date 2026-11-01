@@ -1,5 +1,6 @@
 import { supabase, mensagemErro } from './supabase';
 import { ensureRequestId, idempotentWrite } from './reliability';
+import { hojeISO } from './dates';
 
 const n = (v) => Number(v || 0);
 const qStatusToDb = { rascunho:'draft', enviado:'sent', aprovado:'approved', recusado:'declined', vencido:'expired' };
@@ -49,15 +50,19 @@ const toItem = (x, companyId, parentKey, parentId, pos=0, workOrder=false) => ({
 });
 
 const fromQuote = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, status:qStatusFromDb[x.status]||'rascunho', data:x.issue_date, validade:x.valid_until||'', desconto:n(x.discount), acrescimo:n(x.surcharge), condicao:x.payment_terms||'', mensagemCliente:x.customer_message||'', previsaoExecucao:x.execution_forecast_date||'', mostrarImagensProdutos:Boolean(x.show_product_images), obs:x.notes||'', local:x.address||'', localServico:x.service_place||'', itens:(x.quote_items||[]).sort((a,b)=>(a.position||0)-(b.position||0)).map(fromItem), osId:null });
-const quoteRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, status:qStatusToDb[x.status]||'draft', issue_date:x.data||new Date().toISOString().slice(0,10), valid_until:x.validade||null, discount:n(x.desconto), surcharge:n(x.acrescimo), payment_terms:x.condicao||null, customer_message:String(x.mensagemCliente||'').trim()||null, execution_forecast_date:x.previsaoExecucao||null, show_product_images:Boolean(x.mostrarImagensProdutos), notes:x.obs||null, address:x.local||null, service_place:x.localServico||null, created_by:userId||null });
-const fromWorkOrder = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, orcamentoId:x.quote_id, responsavelId:x.assigned_to, status:woStatusFromDb[x.status]||'aguardando', data:x.scheduled_date||'', concluidaEm:x.completed_at?String(x.completed_at).slice(0,10):'', hora:(x.scheduled_time||'').slice(0,5), local:x.address||'', localServico:x.service_place||'', descricaoLivre:x.request||'', obs:x.pre_notes||'', pendencia:x.pending_note||'', precisaRetorno:Boolean(x.needs_return), valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit), garantiaId:x.warranty_id, osOrigemId:x.origin_wo_id, relatoProblema:x.problem_report||'', cobrancaId:x.billing_entry_id, pendentePrecificacao:Boolean(x.pending_pricing), itens:(x.work_order_items||[]).map(fromItem), materiais:(x.work_order_materials||[]).map(fromMaterial), checklist:[], historico:[], fotos:[], adicionais:[], custosExtras:n(x.extra_cost), relato:'' });
-const woRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, quote_id:x.orcamentoId||null, assigned_to:x.responsavelId||userId||null, status:woStatusToDb[x.status]||'unscheduled', scheduled_date:x.data||null, scheduled_time:x.hora||null, address:x.local||null, service_place:x.localServico||null, request:x.descricaoLivre||x.solicitacao||null, pre_notes:x.obs||null, pending_note:x.pendencia||null, extra_cost:n(x.custosExtras), needs_return:Boolean(x.precisaRetorno), warranty_id:x.garantiaId||null, origin_wo_id:x.osOrigemId||null, is_warranty_visit:Boolean(x.emGarantia), problem_report:x.relatoProblema||null, created_by:userId||null });
+const quoteRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, status:qStatusToDb[x.status]||'draft', issue_date:x.data||hojeISO(), valid_until:x.validade||null, discount:n(x.desconto), surcharge:n(x.acrescimo), payment_terms:x.condicao||null, customer_message:String(x.mensagemCliente||'').trim()||null, execution_forecast_date:x.previsaoExecucao||null, show_product_images:Boolean(x.mostrarImagensProdutos), notes:x.obs||null, address:x.local||null, service_place:x.localServico||null, created_by:userId||null });
+const fromWorkOrder = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, orcamentoId:x.quote_id, responsavelId:x.assigned_to, status:woStatusFromDb[x.status]||'aguardando', data:x.scheduled_date||'', concluidaEm:x.completed_at?String(x.completed_at).slice(0,10):'', hora:(x.scheduled_time||'').slice(0,5), local:x.address||'', localServico:x.service_place||'', localId:x.client_location_id||null, descricaoLivre:x.request||'', obs:x.pre_notes||'', pendencia:x.pending_note||'', precisaRetorno:Boolean(x.needs_return), valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit), garantiaId:x.warranty_id, osOrigemId:x.origin_wo_id, relatoProblema:x.problem_report||'', cobrancaId:x.billing_entry_id, pendentePrecificacao:Boolean(x.pending_pricing), itens:(x.work_order_items||[]).map(fromItem), materiais:(x.work_order_materials||[]).map(fromMaterial), checklist:[], historico:[], fotos:[], adicionais:[], custosExtras:n(x.extra_cost), relato:'' });
+const woRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, quote_id:x.orcamentoId||null, assigned_to:x.responsavelId||userId||null, status:woStatusToDb[x.status]||'unscheduled', scheduled_date:x.data||null, scheduled_time:x.hora||null, address:x.local||null, service_place:x.localServico||null, request:x.descricaoLivre||x.solicitacao||null, pre_notes:x.obs||null, pending_note:x.pendencia||null, extra_cost:n(x.custosExtras), needs_return:Boolean(x.precisaRetorno), warranty_id:x.garantiaId||null, origin_wo_id:x.osOrigemId||null, is_warranty_visit:Boolean(x.emGarantia), problem_report:x.relatoProblema||null, created_by:userId||null,
+  // Só envia o vínculo quando o fluxo conhece o local; sem a chave o banco preserva o local atual.
+  ...(x.localId!==undefined?{client_location_id:x.localId||null}:{}) });
 const fromFinancial = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, tipo:x.kind==='income'?'receita':'despesa', descricao:x.description, valor:n(x.amount), vencimento:x.due_date, pago:x.paid, pagoEm:x.paid_at, forma:x.payment_method||null, categoria:x.category||'', clienteId:x.client_id, origemTipo:x.work_order_id?'os':x.purchase_id?'compra':'manual', origemId:x.work_order_id||x.purchase_id||null });
 const fromWarranty = (x) => ({ id:x.id, empresaId:x.company_id, clienteId:x.client_id, osId:x.work_order_id, tipo:x.kind==='service'?'servico':'produto', servicoId:x.service_id, produtoId:x.product_id, descricao:x.description, local:x.service_place||'', inicio:x.starts_on, ate:x.ends_on, serie:x.serial_number||'', origem:x.source||'work_order', obs:x.notes||'' });
 const fromPurchase = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, fornecedor:x.supplier_name, data:x.purchase_date, forma:x.payment_method||'', vencimento:x.due_date||'', obs:x.notes||'', lancamentoId:x.entry_id, itens:(x.purchase_items||[]).map(i=>({id:i.id,catalogoId:i.product_id,nome:i.name,qtd:n(i.quantity),custo:n(i.unit_cost)})) });
 
 const QUOTE_SELECT='*, quote_items:quote_items!quote_items_quote_company_fkey(*)';
-const WO_SELECT='*, work_order_items:work_order_items!wo_items_work_order_company_fkey(*), work_order_materials:work_order_materials!wo_materials_work_order_company_fkey(*)';
+// 0105: work_orders tem SELECT por coluna (approved_* só pelas RPCs do proprietário); "select *" falha pela Data API.
+const WO_COLUMNS='id,company_id,number,client_id,quote_id,assigned_to,status,scheduled_date,scheduled_time,address,service_place,request,pre_notes,pending_note,extra_cost,pending_pricing,needs_return,warranty_id,origin_wo_id,is_warranty_visit,problem_report,billing_entry_id,completed_at,created_by,created_at,updated_at,client_request_id,maintenance_contract_id,contract_cycle,deleted_at,client_location_id';
+const WO_SELECT=`${WO_COLUMNS}, work_order_items:work_order_items!wo_items_work_order_company_fkey(*), work_order_materials:work_order_materials!wo_materials_work_order_company_fkey(*)`;
 const PURCHASE_SELECT='*, purchase_items:purchase_items!purchase_items_purchase_company_fkey(*)';
 
 const aplicarCustosPrivados = (rows, itemCosts=[], materialCosts=[], workOrderCosts=[]) => {
@@ -103,11 +108,29 @@ async function carregarCustosPrivados(companyId, workOrderId=null) {
   };
 }
 
+// 0105: o técnico não lê work_order_items direto; recebe os itens das OS atribuídas a ele sem preço/custo.
+// O proprietário recebe lista vazia (lê a tabela com preço). Banco sem a 0105 segue entregando pelo embed.
+const rpcAusente=(error,nome)=>String(error?.code||'')==='PGRST202'||(String(error?.message||'').includes(nome)&&/(schema cache|does not exist|could not find)/i.test(String(error?.message||'')));
+
+async function carregarItensCampo(companyId, workOrderId=null) {
+  const r=await supabase.rpc('zt_field_work_order_items',{p_company:companyId,p_wo:workOrderId});
+  if(!r.error) return r.data||[];
+  if(rpcAusente(r.error,'zt_field_work_order_items')) return [];
+  throw r.error;
+}
+
+const aplicarItensCampo = (rows, itens=[]) => {
+  if(!itens.length) return rows||[];
+  const porOS=new Map();
+  for(const i of itens){ const lista=porOS.get(i.work_order_id)||[]; lista.push(i); porOS.set(i.work_order_id,lista); }
+  return (rows||[]).map((wo)=>(wo.work_order_items||[]).length||!porOS.has(wo.id)?wo:{...wo,work_order_items:porOS.get(wo.id)});
+};
+
 async function carregarOSCompletaDB(id) {
   const wo = await supabase.from('work_orders').select(WO_SELECT).eq('id',id).single();
   if (wo.error) throw wo.error;
-  const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(wo.data.company_id,id);
-  return aplicarCustosPrivados([wo.data],itemCosts,materialCosts,workOrderCosts)[0];
+  const [{itemCosts,materialCosts,workOrderCosts},itensCampo]=await Promise.all([carregarCustosPrivados(wo.data.company_id,id),carregarItensCampo(wo.data.company_id,id)]);
+  return aplicarCustosPrivados(aplicarItensCampo([wo.data],itensCampo),itemCosts,materialCosts,workOrderCosts)[0];
 }
 
 export async function carregarOSPorIdDB(id) {
@@ -121,8 +144,8 @@ export async function carregarOSPorOrcamentoDB(quoteId, companyId) {
     .order('created_at',{ascending:true}).limit(1).maybeSingle();
   if (response.error) throw response.error;
   if (!response.data) return null;
-  const { itemCosts, materialCosts, workOrderCosts } = await carregarCustosPrivados(companyId,response.data.id);
-  return fromWorkOrder(aplicarCustosPrivados([response.data],itemCosts,materialCosts,workOrderCosts)[0]);
+  const [{ itemCosts, materialCosts, workOrderCosts }, itensCampo] = await Promise.all([carregarCustosPrivados(companyId,response.data.id),carregarItensCampo(companyId,response.data.id)]);
+  return fromWorkOrder(aplicarCustosPrivados(aplicarItensCampo([response.data],itensCampo),itemCosts,materialCosts,workOrderCosts)[0]);
 }
 
 export async function carregarDadosEmpresa(companyId) {
@@ -137,8 +160,8 @@ export async function carregarDadosEmpresa(companyId) {
     supabase.from('warranties').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
   ]);
   const firstError=reqs.find(r=>r.error)?.error; if(firstError) throw firstError;
-  const {itemCosts,materialCosts,workOrderCosts}=await carregarCustosPrivados(companyId);
-  const ordens=aplicarCustosPrivados(reqs[4].data,itemCosts,materialCosts,workOrderCosts).map(fromWorkOrder);
+  const [{itemCosts,materialCosts,workOrderCosts},itensCampo]=await Promise.all([carregarCustosPrivados(companyId),carregarItensCampo(companyId)]);
+  const ordens=aplicarCustosPrivados(aplicarItensCampo(reqs[4].data,itensCampo),itemCosts,materialCosts,workOrderCosts).map(fromWorkOrder);
   const orcamentos=reqs[3].data.map(fromQuote).map(q=>({...q,osId:ordens.find(o=>o.orcamentoId===q.id)?.id||null}));
   return { clientes:reqs[0].data.map(fromClient), servicos:reqs[1].data.map(fromService), produtos:reqs[2].data.map(fromProduct), orcamentos, ordens, lancamentos:reqs[5].data.map(fromFinancial), compras:reqs[6].data.map(fromPurchase), garantias:reqs[7].data.map(fromWarranty) };
 }
@@ -189,7 +212,7 @@ export async function resolverPrecificacaoOSDB(id,itens,dueDays=7){ const precos
 export async function atualizarStatusOrcamentoDB(id,status){ const r=await supabase.from('quotes').update({status:qStatusToDb[status]||'draft'}).eq('id',id).select(QUOTE_SELECT).single(); return fromQuote(check(r)); }
 
 export async function salvarLancamentoDB(x,companyId){
-  const row={kind:x.tipo==='receita'?'income':'expense',description:x.descricao?.trim(),amount:n(x.valor),due_date:x.vencimento||new Date().toISOString().slice(0,10),paid:Boolean(x.pago),paid_at:x.pago?(x.pagoEm||new Date().toISOString().slice(0,10)):null,payment_method:x.pago?(x.forma||null):null,category:x.categoria||null,client_id:x.tipo==='receita'?(x.clienteId||null):null};
+  const row={kind:x.tipo==='receita'?'income':'expense',description:x.descricao?.trim(),amount:n(x.valor),due_date:x.vencimento||hojeISO(),paid:Boolean(x.pago),paid_at:x.pago?(x.pagoEm||hojeISO()):null,payment_method:x.pago?(x.forma||null):null,category:x.categoria||null,client_id:x.tipo==='receita'?(x.clienteId||null):null};
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_manual_financial_entry',{p_company:companyId,p_entry:x.id||null,p_request:req,p_row:row}));
   const id=check(response);

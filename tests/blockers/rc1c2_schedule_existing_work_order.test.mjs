@@ -10,6 +10,9 @@ const modalSource = source.slice(modalStart, source.indexOf('\n/*', modalStart))
 const modalCode = transformSync(`${modalSource}\nAgendarModal;`, { loader: 'jsx' }).code;
 const scheduleStart = source.indexOf('  const agendarOS = async');
 const scheduleSource = source.slice(scheduleStart, source.indexOf('  const desagendarOS', scheduleStart));
+// Bloco 7: agendarOS preserva os complementos da OS com a função real do legado.
+const mergeStart = source.indexOf('function mesclarOSRelida(');
+const mesclarOSRelida = vm.runInNewContext(`${source.slice(mergeStart, source.indexOf('\nfunction aplicarOSSalvaNoEstado', mergeStart))}\nmesclarOSRelida;`);
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const deferred = () => {
   let resolve;
@@ -30,7 +33,7 @@ function mountModal(onSalvar, os = { id: 'os-4', numero: 'OS-0004', data: '', ho
     empresa: { responsavel: 'Owner', temEquipe: true }, diaSugerido: '2026-09-20' };
   const component = vm.runInNewContext(modalCode, {
     React: { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), Fragment: 'Fragment' },
-    Modal: 'Modal', Btn: 'Btn', Field: 'Field', Input: 'Input', Select: 'Select', HOJE: '2026-09-19',
+    Modal: 'Modal', Btn: 'Btn', Field: 'Field', Input: 'Input', Select: 'Select', hojeISO: () => '2026-09-19',
     useState(initial) {
       const index = cursor++;
       if (!(index in slots)) slots[index] = initial;
@@ -148,7 +151,7 @@ function scheduling({ status = 'aguardando', real = true, update } = {}) {
   const forbiddenCalls = [];
   const forbidden = (name) => () => { forbiddenCalls.push(name); throw new Error(`Forbidden: ${name}`); };
   const schedule = vm.runInNewContext(`${scheduleSource}\nagendarOS;`, {
-    real, HOJE: '2026-09-19', uid: () => 'history-1', dataBR: (date) => date,
+    real, hojeISO: () => '2026-09-19', uid: () => 'history-1', dataBR: (date) => date, mesclarOSRelida,
     mensagemErro: (error) => error.message, aviso: (text) => notices.push(text),
     setOrdens: (apply) => { orders = apply(orders); },
     atualizarOSDB: async (id, patch) => {

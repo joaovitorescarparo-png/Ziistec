@@ -30,7 +30,7 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 |---|---|---|---|---|---|---|---|---|
 | `rls_auto_enable()` | baseline | service_role/event trigger | `pg_catalog` | trigger | schema-scoped | n/a | safe identifier format | SAFE |
 | `zt_accept_invites()` | 0080/redefined | authenticated, service_role | `""` | delegated | delegated | contextual | no | SAFE |
-| `zt_adjust_product_stock(p_company uuid, p_product uuid, p_delta numeric, p_notes text)` | 0051+ | authenticated, service_role | `""` | direct | owner/company | protected write | no | SAFE |
+| `zt_adjust_product_stock(p_company uuid, p_product uuid, p_delta numeric, p_notes text)` | 0051+ (EXECUTE revoked in 0109) | none: called only by the Assistant execution definer | `""` | direct | owner/company | protected write; not idempotent by itself, the Assistant ledger is | no | SAFE |
 | `zt_apply_checklist_template(p_wo uuid, p_template uuid)` | 0084 | authenticated, service_role | `""` | direct | OS/company/role | protected write | no | SAFE |
 | `zt_bill_work_order(p_wo uuid, p_due_days integer)` | baseline/redefined | service_role | `zt_private` | delegated | delegated | protected write | no | SAFE |
 | `zt_cancel_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
@@ -68,6 +68,21 @@ All rows below were read from Staging. `delegated` means the public wrapper call
 | `zt_platform_list_beta_invites()` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin read | no | SAFE |
 | `zt_platform_create_beta_invite(p_email text, p_valid_days integer)` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin, audited | no | SAFE |
 | `zt_platform_revoke_beta_invite(p_invite uuid)` | 0099 | authenticated, service_role | `""` | direct | platform-admin guard (MFA) | beta invite admin, audited | no | SAFE |
+| `zt_issue_service_receipt(p_wo uuid, p_request uuid, p_notes text, p_reissue_reason text)` | 0100 | authenticated, service_role | `""` | direct | owner/company + subscription | service receipt issue/reissue, idempotent | no | SAFE |
+| `zt_save_work_order_report(p_wo uuid, p_body text, p_request uuid)` | 0102 | authenticated, service_role | `""` | direct | owner or assigned + open OS | technical report, idempotent | no | SAFE |
+| `zt_client_service_history(p_client uuid, p_location uuid, p_limit integer)` | 0104 | authenticated, service_role | `""` | direct | owner/company | read, owner-only | no | SAFE |
+| `zt_work_order_history_detail(p_wo uuid)` | 0104 | authenticated, service_role | `""` | direct | owner or assigned OS | read; prices/financial owner-only | no | SAFE |
+| `zt_get_service_report(p_wo uuid)` | 0105 | authenticated | `""` | direct | owner or assigned OS | read; technician projection without payment/prices | no | SAFE |
+| `zt_field_work_order_items(p_company uuid, p_wo uuid)` | 0105 | authenticated | `""` | direct | active member; OS assigned to caller; owner gets none | read; no unit_price/unit_cost | no | SAFE |
+| `zt_adjust_product_stock(p_company uuid, p_product uuid, p_delta numeric, p_notes text, p_request uuid)` | 0109 | authenticated, service_role | `""` | direct | owner/company; (company, request) unique, replay returns the first balance, other product/delta rejected | manual stock adjustment, idempotent, row lock | no | SAFE |
+| `zt_claim_team_invite_email(p_invite uuid)` | 0110 | authenticated | `""` | direct | owner of the invite company; same 42501 for unknown and foreign invites; per-company advisory lock | invite e-mail throttle (60 s, 5/h recipient, 30/h company); stores only the e-mail hash | no | SAFE |
+| `zt_save_work_order_technical_base(p_wo uuid, p_cause text, p_solution text, p_difficulty text, p_learning text, p_request uuid)` | 0111 | authenticated | `""` | direct | owner, or assigned technician on an open OS; permission checked before the row lock, same 42501 for unknown and foreign OS | internal technical base, idempotent per request (same request with other content is 23505), subscription guard | no | SAFE |
+| `zt_save_attendance_confirmation(p_wo uuid, p_name text, p_absent boolean, p_request uuid)` | 0111 | authenticated | `""` | direct | owner, or assigned technician on an open OS | receiver name or absent flag (XOR), idempotent per request, subscription guard | no | SAFE |
+| `zt_work_order_report_facts(p_wo uuid, p_materials jsonb)` | 0111 | authenticated | `""` | direct | owner or assigned technician | read; fixed key set, never cost, price, margin, difficulty, internal note or client data; extra materials resolved from the same company catalog by id | no | SAFE |
+| `zt_claim_work_order_ai_report(p_wo uuid, p_request uuid)` | 0111 | authenticated | `""` | direct | owner or assigned technician on an open OS; row lock on the OS; shared AI quota after the per-OS limit | per-OS limit of 3 AI generations counted in the database (in-flight attempts count for 90 s, completed forever), replay returns the stored text | no | SAFE |
+| `zt_complete_work_order_ai_report(p_wo uuid, p_request uuid, p_text text)` | 0111 | authenticated | `""` | direct | only the user who claimed the request | stores the generated text once | no | SAFE |
+| `zt_mark_work_order_ai_report_used(p_wo uuid, p_request uuid, p_final_text text)` | 0111 | authenticated | `""` | direct | only the user who claimed the request, completed rows only | records which generation became the saved report and whether it was edited | no | SAFE |
+| `zt_work_order_ai_report_usage(p_wo uuid)` | 0111 | authenticated | `""` | direct | owner or assigned technician | read; used/limit/remaining and last-used provenance | no | SAFE |
 | `zt_quote_seed_from_work_order(p_work_order uuid)` | 0085 | authenticated, service_role | `""` | delegated | owner/company | read | no | SAFE |
 | `zt_reactivate_subscription(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
 | `zt_refresh_subscription_status(p_company uuid)` | baseline/redefined | authenticated, service_role | `""` | delegated | owner/company | subscription operation | no | SAFE |
@@ -148,7 +163,7 @@ All functions below are owned by `postgres`, `service_role`-only at function ACL
 | `zt_save_purchase_idempotent(p_company uuid, p_purchase uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+ | `public` | delegated to guarded save | no | SAFE |
 | `zt_save_quote(p_company uuid, p_quote uuid, p_row jsonb, p_items jsonb)` | baseline/redefined | `public` | auth + owner/company + subscription | no | SAFE |
 | `zt_save_quote_idempotent(p_company uuid, p_quote uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+ | `public` | delegated to guarded save | no | SAFE |
-| `zt_save_work_order(p_company uuid, p_wo uuid, p_row jsonb, p_items jsonb)` | baseline/redefined/0067 | `public` | auth + owner/company/assignee + subscription | no | SAFE |
+| `zt_save_work_order(p_company uuid, p_wo uuid, p_row jsonb, p_items jsonb)` | baseline/redefined/0067/0103 | `""` | auth + owner/company/assignee + subscription; client_location of the same company/client | no | SAFE |
 | `zt_save_work_order_idempotent(p_company uuid, p_wo uuid, p_request uuid, p_row jsonb, p_items jsonb)` | 0035+/0067 | `public` | delegated to guarded save | no | SAFE |
 | `zt_service_report_after_done()` | 0082 | `""` | trigger-context + OS/company | no | SAFE |
 | `zt_set_followup_status(p_followup uuid, p_status text)` | baseline/redefined | `""` | auth + owner/company + subscription | no | SAFE |

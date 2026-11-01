@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Boxes, CircleDollarSign, History, ImagePlus, Loader2, Minus, Package,
   Pencil, Plus, RefreshCcw, ScanLine, Search, ShieldCheck, TrendingUp, TriangleAlert, X,
 } from 'lucide-react';
 import { salvarProdutoDB } from '../../lib/dataApi';
+import { estoqueBaixo } from '../../lib/estoque';
+import { createAdjustmentRequestKeeper } from '../../lib/stockAdjustment';
 import {
   ajustarEstoqueDB,
   carregarMovimentosEstoqueDB,
@@ -19,7 +21,7 @@ import {
 import { mensagemErro } from '../../lib/supabase';
 import BarcodeScanner from '../../components/BarcodeScanner';
 
-const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+import { brl } from '../../lib/money';
 const n = (v) => Number(String(v ?? '').replace(',', '.')) || 0;
 const hojeHora = (v) => v ? new Date(v).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' }) : '—';
 
@@ -76,6 +78,8 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
   const [imageFile, setImageFile] = useState(null);
   const [removeImage, setRemoveImage] = useState(false);
   const [stock, setStock] = useState(null);
+  // SEC-04: o id do ajuste vale por operação (produto + quantidade) e só é trocado depois de concluído.
+  const adjustKeeper = useRef(createAdjustmentRequestKeeper());
   const [movementProduct, setMovementProduct] = useState(null);
   const [movements, setMovements] = useState([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
@@ -101,7 +105,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
 
   const metrics = useMemo(() => {
     const tracked = products.filter(p=>p.controlaEstoque);
-    const low = tracked.filter(p=>p.estoque <= p.estoqueMinimo);
+    const low = tracked.filter(estoqueBaixo);
     const cost = tracked.reduce((t,p)=>t + p.estoque * p.custo, 0);
     const sale = tracked.reduce((t,p)=>t + p.estoque * p.preco, 0);
     return { total:products.length, low:low.length, cost, sale };
@@ -111,7 +115,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
     const q = search.trim().toLowerCase();
     return products.filter(p => {
       const hay = `${p.nome} ${p.marca} ${p.modelo} ${p.sku||''} ${p.codigoBarras||''}`.toLowerCase();
-      const low = !p.controlaEstoque || p.estoque > p.estoqueMinimo;
+      const low = !estoqueBaixo(p);
       return (!q || hay.includes(q)) && (!onlyLow || !low);
     });
   }, [products, search, onlyLow]);
@@ -154,7 +158,8 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
       }
       const initial = Math.max(0, n(form.estoqueInicial));
       if (!editing && saved.controlaEstoque && initial > 0) {
-        await ajustarEstoqueDB(companyId, saved.id, initial, 'Estoque inicial do cadastro');
+        await ajustarEstoqueDB(companyId, saved.id, initial, 'Estoque inicial do cadastro', adjustKeeper.current.idFor(saved.id, initial));
+        adjustKeeper.current.done();
       }
       setForm(null);
       await load();
@@ -172,7 +177,8 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
     if (delta < 0 && qty > stock.produto.estoque) { setError('A saída é maior que o estoque atual.'); return; }
     setSaving(true); setError('');
     try {
-      await ajustarEstoqueDB(companyId, stock.produto.id, delta, stock.obs || (delta > 0 ? 'Entrada manual de estoque' : 'Saída manual de estoque'));
+      await ajustarEstoqueDB(companyId, stock.produto.id, delta, stock.obs || (delta > 0 ? 'Entrada manual de estoque' : 'Saída manual de estoque'), adjustKeeper.current.idFor(stock.produto.id, delta));
+      adjustKeeper.current.done();
       setStock(null);
       await load();
     } catch (e2) { setError(mensagemErro(e2)); }
@@ -191,7 +197,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <button onClick={onClose} className="rounded-xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50" aria-label="Voltar"><ArrowLeft size={19}/></button>
-          <div className="min-w-0"><div className="flex items-center gap-2"><h1 className="truncate text-base font-bold">Produtos e estoque</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">V2</span></div><p className="truncate text-xs text-slate-500">{companyName}</p></div>
+          <div className="min-w-0"><div className="flex items-center gap-2"><h1 className="truncate text-base font-bold">Produtos e estoque</h1></div><p className="truncate text-xs text-slate-500">{companyName}</p></div>
         </div>
         <div className="flex gap-2"><Btn variant="secondary" onClick={load} disabled={loading}><RefreshCcw size={16}/><span className="hidden sm:inline">Atualizar</span></Btn><Btn onClick={openNew} disabled={!available}><Plus size={16}/>Produto</Btn></div>
       </div>
@@ -199,13 +205,13 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
 
     <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-7">
       <div className="mb-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
-        <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 shrink-0 text-emerald-700" size={20}/><div><p className="text-sm font-bold text-emerald-950">Custos protegidos no banco</p><p className="mt-1 text-xs leading-relaxed text-emerald-800">Esta área é do proprietário. O técnico usa um catálogo comercial separado e não recebe custo, margem ou fornecedor pela API.</p></div></div>
+        <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 shrink-0 text-emerald-700" size={20}/><div><p className="text-sm font-bold text-emerald-950">Custos só para o proprietário</p><p className="mt-1 text-xs leading-relaxed text-emerald-800">Esta área é do proprietário. O técnico vê apenas o preço de venda dos produtos liberados para campo, nunca custo, margem ou fornecedor.</p></div></div>
       </div>
 
       {error && <div className="mb-5 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><TriangleAlert className="mt-0.5 shrink-0" size={18}/><div className="flex-1">{error}</div><button onClick={()=>setError('')}><X size={17}/></button></div>}
 
       {loading ? <div className="flex min-h-[45vh] items-center justify-center text-slate-500"><Loader2 className="mr-2 animate-spin" size={20}/>Carregando produtos...</div>
-      : available === false ? <div className="mx-auto max-w-xl rounded-3xl border border-amber-200 bg-white p-7 text-center shadow-sm"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700"><Boxes size={24}/></div><h2 className="mt-4 text-lg font-bold">Tela V2 pronta; banco ainda não migrado</h2><p className="mt-2 text-sm leading-relaxed text-slate-600">A página já está conectada ao contrato novo, mas as migrations 0050–0053 continuam fora da produção por segurança. Por isso ela fica bloqueada no preview até a homologação do banco.</p><p className="mt-3 text-xs text-slate-500">Nenhum dado de produção foi alterado.</p></div>
+      : available === false ? <div className="mx-auto max-w-xl rounded-3xl border border-amber-200 bg-white p-7 text-center shadow-sm"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700"><Boxes size={24}/></div><h2 className="mt-4 text-lg font-bold">Estoque ainda não disponível</h2><p className="mt-2 text-sm leading-relaxed text-slate-600">Este recurso está sendo liberado e ainda não está ativo na sua conta. O restante do ZiisTec continua funcionando normalmente.</p><p className="mt-3 text-xs text-slate-500">Seus produtos continuam disponíveis em Serviços e produtos.</p></div>
       : <>
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Kpi icon={Package} label="Produtos" value={metrics.total} detail="ativos e inativos"/>
@@ -222,7 +228,7 @@ export default function ProductStockV2({ companyId, companyName='Sua empresa', o
 
           {filtered.length === 0 ? <div className="px-5 py-16 text-center text-sm text-slate-500">Nenhum produto encontrado.</div>
           : <div className="divide-y divide-slate-100">{filtered.map(p => {
-            const low = p.controlaEstoque && p.estoque <= p.estoqueMinimo;
+            const low = estoqueBaixo(p);
             const margin = p.preco > 0 ? ((p.preco-p.custo)/p.preco)*100 : 0;
             return <article key={p.id} className="p-4 sm:p-5">
               <div className="flex gap-4">

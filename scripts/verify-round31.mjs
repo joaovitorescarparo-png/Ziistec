@@ -107,7 +107,8 @@ for (const marker of [
   'drawPageWatermark();',
   'const wmW = 390',
   'const wmH = 280',
-  'drawLogoFit(page, logo, margin, A4[1] - 100, 128, 68, 1)',
+  // Onda 1 · A3: a logo do cabeçalho usa a caixa padrão compartilhada (src/lib/pdfLogoBox.js); a marca-d'água segue em drawLogoFit.
+  'desenharLogoNaCaixa(page, logo, { x: margin, yBase: A4[1] - headerH / 2 - LOGO_BOX.height / 2 })',
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
