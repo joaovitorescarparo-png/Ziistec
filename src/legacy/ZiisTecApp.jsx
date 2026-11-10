@@ -9,6 +9,7 @@ import {
   Printer, MoreHorizontal, CalendarClock, Receipt, Banknote, Mic, MicOff,
   Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles, Navigation,
   TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building,
+  BookOpen, Star, ExternalLink, Link2, FileUp, WifiOff, Layers,
 } from "lucide-react";
 import { mensagemErro } from "../lib/supabase";
 import {
@@ -27,6 +28,14 @@ import {
 import { cancelarAssinaturaDB, reativarAssinaturaDB } from "../lib/subscriptionApi";
 import { chamarIAReal } from "../lib/aiApi";
 import { resolverLogoEmpresaDB, persistirFotosOSDB } from "../lib/storageExtras";
+import {
+  TIPOS_DOC, TIPOS_SECAO, carregarHomeCT, buscarEquipamentosCT, listarModelosCategoriaCT,
+  abrirEquipamentoCT, casosEquipamentoCT, alternarFavoritoCT, listarFabricantesCT,
+  salvarFabricanteCT, salvarModeloCT, salvarFichaCT, salvarDocumentoUrlCT,
+  enviarDocumentoArquivoCT, urlDocumentoCT, arquivarDocumentoCT,
+  listarEquipamentosOSCT, vincularEquipamentoOSCT, desvincularEquipamentoOSCT,
+  guardarFichaCache, lerFichaCache,
+} from "../lib/centralTecnicaApi";
 
 /* ================================================================ helpers */
 const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -228,8 +237,8 @@ const ST_ASSINATURA = {
 
 /* permissões por papel. A lista é curta de propósito: dois papéis, regras claras. */
 const PERMISSOES = {
-  proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "equipe", "config", "assinatura", "verValores", "todasOS"],
-  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais"],
+  proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "central", "gerirCentral", "equipe", "config", "assinatura", "verValores", "todasOS"],
+  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "central"],
 };
 const pode = (papel, chave) => (PERMISSOES[papel] || []).includes(chave);
 
@@ -606,6 +615,7 @@ export default function ZiisTec({ contexto }) {
   const [clienteAberto, setClienteAberto] = useState(null);
   const [orcamentoAberto, setOrcamentoAberto] = useState(null);
   const [osAberta, setOsAberta] = useState(null);
+  const [ctFoco, setCtFoco] = useState(null); // Central Técnica: equipamento aberto a partir da OS
   const [compraAberta, setCompraAberta] = useState(null);
   const [garantiaAberta, setGarantiaAberta] = useState(null);
 
@@ -678,8 +688,9 @@ export default function ZiisTec({ contexto }) {
 
   const irPara = (t) => {
     setTela(t); setClienteAberto(null); setOrcamentoAberto(null); setOsAberta(null); setCompraAberta(null);
-    setGarantiaAberta(null); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
+    setGarantiaAberta(null); setCtFoco(null); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
   };
+  const abrirAjudaTecnica = (modeloId) => { setTela("central"); setCtFoco({ id: modeloId, em: Date.now() }); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 }); };
   const abrirOS = (id) => { setTela("ordens"); setOsAberta(id); setBusca(false); setDrawer(false); };
   const abrirOrc = (id) => { setTela("orcamentos"); setOrcamentoAberto(id); setBusca(false); setDrawer(false); };
   const abrirCliente = (id) => { setTela("clientes"); setClienteAberto(id); setBusca(false); setDrawer(false); };
@@ -1011,6 +1022,7 @@ export default function ZiisTec({ contexto }) {
     clienteAberto, setClienteAberto, orcamentoAberto, setOrcamentoAberto, osAberta, setOsAberta,
     compraAberta, setCompraAberta, setTela, abrirOS, abrirOrc, abrirCliente, abrirCompra,
     garantiaAberta, setGarantiaAberta, abrirGarantia, real,
+    ctFoco, setCtFoco, abrirAjudaTecnica,
     pedirConfirmacao: setConfirmar,
   };
 
@@ -1022,6 +1034,7 @@ export default function ZiisTec({ contexto }) {
     { id: "orcamentos", label: "Orçamentos", icon: FileText },
     { id: "ordens", label: "Ordens de serviço", icon: ClipboardList },
     { id: "garantias", label: "Garantias", icon: ShieldCheck },
+    { id: "central", label: "Central Técnica", icon: BookOpen },
     { id: "compras", label: "Compras", icon: ShoppingCart },
     { id: "equipe", label: "Equipe", icon: Users2 },
     { id: "financeiro", label: "Financeiro", icon: Wallet },
@@ -1164,6 +1177,7 @@ export default function ZiisTec({ contexto }) {
           {tela === "orcamentos" && <Orcamentos {...props} />}
           {tela === "ordens" && <OrdensServico {...props} />}
           {tela === "garantias" && <Garantias {...props} />}
+          {tela === "central" && <CentralTecnica {...props} />}
           {tela === "compras" && <Compras {...props} />}
           {tela === "financeiro" && <Financeiro {...props} />}
           {tela === "equipe" && <Equipe {...props} />}
@@ -5083,5 +5097,701 @@ function FinanceiroPlataforma({ empresas, assinaturas, mudarAssinatura, pedirInt
         </div>
       </Panel>
     </>
+  );
+}
+
+/* ========================================================= Central Técnica
+   Biblioteca operacional de campo: busca única, categorias, equipamento com
+   ficha rápida, manuais, esquemas e casos resolvidos pela própria empresa.
+   Leitura para todo membro; gestão do acervo privado apenas pelo owner.
+   O conteúdo global ZiisTec chega somente leitura (escrita é administrativa). */
+const CT_SECAO_LABEL = Object.fromEntries(TIPOS_SECAO.map((s) => [s.id, s.label]));
+const CT_DOC_LABEL = Object.fromEntries(TIPOS_DOC.map((d) => [d.id, d.label]));
+const ctEhEsquema = (d) => d.tipo === "diagram" || d.tipo === "installation";
+
+function CentralTecnica(p) {
+  const { empresaId, usuarioAtual, permitido, aviso, real, ctFoco, setCtFoco } = p;
+  const dono = permitido("gerirCentral");
+  const [visao, setVisao] = useState({ tipo: "home" });
+  const [home, setHome] = useState(null);
+  const [erroHome, setErroHome] = useState(null);
+  const [busca, setBusca] = useState("");
+  const [resultados, setResultados] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  const [novoModelo, setNovoModelo] = useState(false);
+
+  const recarregarHome = () => {
+    if (!real || !empresaId || !usuarioAtual?.id) return;
+    carregarHomeCT(empresaId, usuarioAtual.id)
+      .then((d) => { setHome(d); setErroHome(null); })
+      .catch((e) => setErroHome(mensagemErro(e)));
+  };
+  useEffect(() => { setHome(null); setVisao({ tipo: "home" }); setBusca(""); recarregarHome(); }, [real, empresaId]);
+
+  /* OS → Ajuda técnica abre direto o equipamento */
+  useEffect(() => {
+    if (ctFoco?.id) { setVisao({ tipo: "equipamento", id: ctFoco.id }); setCtFoco(null); }
+  }, [ctFoco]);
+
+  /* busca única com debounce */
+  useEffect(() => {
+    if (!real || !empresaId) return;
+    const q = busca.trim();
+    if (q.length < 2) { setResultados(null); setBuscando(false); return; }
+    setBuscando(true);
+    const t = setTimeout(() => {
+      buscarEquipamentosCT(empresaId, q)
+        .then((r) => setResultados(r))
+        .catch((e) => { setResultados([]); aviso(mensagemErro(e)); })
+        .finally(() => setBuscando(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [busca, real, empresaId]);
+
+  if (!real) {
+    return (<>
+      <PageHead title="Central Técnica" sub="Fichas rápidas, manuais, esquemas e casos resolvidos pela sua equipe." />
+      <Panel><Empty icon={BookOpen} title="Disponível com a conta conectada"
+        sub="A Central Técnica usa a biblioteca da sua empresa no servidor. Entre com a sua conta para consultar fichas, manuais e casos." /></Panel>
+    </>);
+  }
+
+  const abrirEq = (id) => { setVisao({ tipo: "equipamento", id }); window.scrollTo?.({ top: 0 }); };
+
+  if (visao.tipo === "equipamento") {
+    return <CTEquipamento key={visao.id} id={visao.id} empresaId={empresaId} usuarioAtual={usuarioAtual}
+      dono={dono} aviso={aviso} onVoltar={() => { setVisao({ tipo: "home" }); recarregarHome(); }} />;
+  }
+
+  if (visao.tipo === "categoria") {
+    return <CTCategoria cat={visao.cat} empresaId={empresaId} aviso={aviso}
+      onVoltar={() => setVisao({ tipo: "home" })} onAbrir={abrirEq} />;
+  }
+
+  const emBusca = busca.trim().length >= 2;
+  const areas = new Set(home?.areas || []);
+  const categorias = (home?.categorias || []).slice().sort((a, b) =>
+    (areas.has(b.id) ? 1 : 0) - (areas.has(a.id) ? 1 : 0) || a.nome.localeCompare(b.nome));
+
+  return (<>
+    <PageHead title="Central Técnica" sub="Fichas rápidas, manuais, esquemas e casos resolvidos pela sua equipe."
+      action={dono ? <Btn icon={Plus} onClick={() => setNovoModelo(true)}>Novo equipamento</Btn> : null} />
+
+    <div className="max-w-2xl mb-7">
+      <SearchBox value={busca} onChange={setBusca} placeholder="Buscar equipamento, modelo, manual ou problema" />
+      <p className="text-[12px] text-slate-400 mt-2">Ex.: “FR 101”, “erro E4”, “reset”, “fechadura”.</p>
+    </div>
+
+    {erroHome && (
+      <Panel className="p-5 mb-6">
+        <div className="flex items-center gap-3 text-[14px] text-slate-600">
+          <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>{erroHome}</span>
+          <Btn variant="soft" size="sm" onClick={recarregarHome}>Tentar de novo</Btn>
+        </div>
+      </Panel>
+    )}
+
+    {emBusca ? (
+      <section>
+        <Rotulo>{buscando ? "Buscando…" : `Resultados · ${resultados?.length ?? 0}`}</Rotulo>
+        {buscando && !resultados ? <Panel className="p-6 text-[14px] text-slate-400">Buscando…</Panel>
+          : (resultados || []).length === 0 ? (
+            <Panel><Empty icon={Search} title="Nada encontrado"
+              sub="Tente o nome do modelo (ex.: FR 101), o fabricante, uma tag ou um código de erro." /></Panel>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-3">
+              {resultados.map((m) => <CTModeloCard key={m.id} m={m} onAbrir={() => abrirEq(m.id)} />)}
+            </div>
+          )}
+      </section>
+    ) : (<div className="space-y-8">
+      {(home?.favoritos?.length || 0) > 0 && (
+        <section>
+          <Rotulo>Favoritos</Rotulo>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {home.favoritos.map((m) => <CTModeloCard key={m.id} m={m} favorito onAbrir={() => abrirEq(m.id)} />)}
+          </div>
+        </section>
+      )}
+      {(home?.recentes?.length || 0) > 0 && (
+        <section>
+          <Rotulo>Vistos recentemente</Rotulo>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {home.recentes.map((m) => <CTModeloCard key={m.id} m={m} onAbrir={() => abrirEq(m.id)} />)}
+          </div>
+        </section>
+      )}
+      <section>
+        <Rotulo>Categorias</Rotulo>
+        {!home ? <Panel className="p-6 text-[14px] text-slate-400">Carregando…</Panel> : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {categorias.map((c) => (
+              <button key={c.id} onClick={() => setVisao({ tipo: "categoria", cat: c })}
+                className={cx("text-left bg-white rounded-2xl ring-1 ring-slate-200/70 p-4 hover:bg-slate-50 transition-colors", ring)}>
+                <Layers className="w-5 h-5 text-teal-700 mb-2.5" aria-hidden="true" />
+                <p className="text-[14px] font-medium text-slate-800 leading-tight">{c.nome}</p>
+                {areas.has(c.id) && <p className="text-[11px] text-teal-700 mt-1">Área da empresa</p>}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+      {(home?.favoritos?.length || 0) === 0 && (home?.recentes?.length || 0) === 0 && home && (
+        <Panel><Empty icon={BookOpen} title="Comece pela busca ou por uma categoria"
+          sub={dono ? "Cadastre os equipamentos que a sua equipe mais atende: modelo, ficha rápida e manual. O técnico encontra tudo em campo."
+            : "Os equipamentos consultados aparecem aqui como recentes. Toque na estrela para favoritar os que você mais usa."} /></Panel>
+      )}
+    </div>)}
+
+    {novoModelo && <CTNovoModelo onClose={() => setNovoModelo(false)} empresaId={empresaId}
+      usuarioAtual={usuarioAtual} categorias={home?.categorias || []} aviso={aviso}
+      onCriado={(m) => { setNovoModelo(false); recarregarHome(); abrirEq(m.id); }} />}
+  </>);
+}
+
+function CTModeloCard({ m, onAbrir, favorito }) {
+  return (
+    <button onClick={onAbrir} className={cx("text-left bg-white rounded-2xl ring-1 ring-slate-200/70 p-4 hover:bg-slate-50 transition-colors flex items-start gap-3", ring)}>
+      <div className="w-11 h-11 rounded-xl bg-teal-50 ring-1 ring-teal-200/70 text-teal-800 flex items-center justify-center shrink-0">
+        <Wrench className="w-5 h-5" aria-hidden="true" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[15px] font-medium text-slate-900 truncate">{m.nome}</p>
+        <p className="text-[13px] text-slate-500 truncate">{[m.fabricante, m.categoria].filter(Boolean).join(" · ")}</p>
+        {m.descricao && <p className="text-[12.5px] text-slate-400 truncate mt-0.5">{m.descricao}</p>}
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {favorito && <Star className="w-4 h-4 text-amber-500 fill-amber-400" aria-hidden="true" />}
+        {m.global ? <Pill tone="marca">ZiisTec</Pill> : null}
+        <ChevronRight className="w-4 h-4 text-slate-300" aria-hidden="true" />
+      </div>
+    </button>
+  );
+}
+
+function CTCategoria({ cat, empresaId, aviso, onVoltar, onAbrir }) {
+  const [lista, setLista] = useState(null);
+  const [fim, setFim] = useState(false);
+  const [carregandoMais, setCarregandoMais] = useState(false);
+  const carregar = (offset = 0) => listarModelosCategoriaCT(empresaId, cat.id, offset);
+  useEffect(() => {
+    let ativo = true;
+    carregar(0).then((r) => { if (ativo) { setLista(r); setFim(r.length < 30); } })
+      .catch((e) => { if (ativo) { setLista([]); aviso(mensagemErro(e)); } });
+    return () => { ativo = false; };
+  }, [cat.id, empresaId]);
+  return (<>
+    <button onClick={onVoltar} className={cx("inline-flex items-center gap-2 text-[14px] text-slate-500 hover:text-slate-800 mb-5", ring, "rounded-lg px-1 py-0.5 -ml-1")}>
+      <ArrowLeft className="w-4 h-4" /> Central Técnica
+    </button>
+    <PageHead title={cat.nome} sub="Equipamentos desta categoria disponíveis para a sua empresa." />
+    {!lista ? <Panel className="p-6 text-[14px] text-slate-400">Carregando…</Panel>
+      : lista.length === 0 ? (
+        <Panel><Empty icon={Layers} title="Nenhum equipamento nesta categoria"
+          sub="Use a busca da Central Técnica ou cadastre um novo equipamento." /></Panel>
+      ) : (<>
+        <div className="grid sm:grid-cols-2 gap-3">
+          {lista.map((m) => <CTModeloCard key={m.id} m={m} onAbrir={() => onAbrir(m.id)} />)}
+        </div>
+        {!fim && (
+          <div className="flex justify-center mt-5">
+            <Btn variant="soft" disabled={carregandoMais} onClick={() => {
+              setCarregandoMais(true);
+              carregar(lista.length).then((r) => { setLista((l) => [...l, ...r]); setFim(r.length < 30); })
+                .catch((e) => aviso(mensagemErro(e))).finally(() => setCarregandoMais(false));
+            }}>{carregandoMais ? "Carregando…" : "Carregar mais"}</Btn>
+          </div>
+        )}
+      </>)}
+  </>);
+}
+
+function CTEquipamento({ id, empresaId, usuarioAtual, dono, aviso, onVoltar }) {
+  const [dados, setDados] = useState(null);
+  const [offline, setOffline] = useState(false);
+  const [erro, setErro] = useState(null);
+  const [aba, setAba] = useState("ficha");
+  const [editandoFicha, setEditandoFicha] = useState(false);
+  const [novoDoc, setNovoDoc] = useState(false);
+  const [mudandoFav, setMudandoFav] = useState(false);
+
+  const recarregar = () => {
+    abrirEquipamentoCT(empresaId, usuarioAtual.id, id)
+      .then((d) => { setDados(d); setOffline(false); setErro(null); guardarFichaCache(empresaId, id, d); })
+      .catch((e) => {
+        const cache = lerFichaCache(empresaId, id);
+        if (cache) { setDados(cache); setOffline(true); setErro(null); }
+        else setErro(mensagemErro(e));
+      });
+  };
+  useEffect(() => { recarregar(); }, [id, empresaId]);
+
+  if (erro) {
+    return (<>
+      <button onClick={onVoltar} className={cx("inline-flex items-center gap-2 text-[14px] text-slate-500 hover:text-slate-800 mb-5", ring, "rounded-lg px-1 py-0.5 -ml-1")}>
+        <ArrowLeft className="w-4 h-4" /> Central Técnica
+      </button>
+      <Panel><Empty icon={WifiOff} title="Não foi possível abrir o equipamento" sub={erro}
+        action={<Btn variant="soft" onClick={recarregar}>Tentar de novo</Btn>} /></Panel>
+    </>);
+  }
+  if (!dados) return <Panel className="p-6 text-[14px] text-slate-400">Carregando…</Panel>;
+
+  const { modelo, ficha, fichaEmpresa, documentos, favorito, totalCasos } = dados;
+  const manuais = (documentos || []).filter((d) => !ctEhEsquema(d));
+  const esquemas = (documentos || []).filter(ctEhEsquema);
+
+  const alternarFav = async () => {
+    if (mudandoFav || offline) return;
+    setMudandoFav(true);
+    try { await alternarFavoritoCT(usuarioAtual.id, empresaId, id, !favorito); setDados((d) => ({ ...d, favorito: !favorito })); }
+    catch (e) { aviso(mensagemErro(e)); }
+    finally { setMudandoFav(false); }
+  };
+
+  return (<>
+    <button onClick={onVoltar} className={cx("inline-flex items-center gap-2 text-[14px] text-slate-500 hover:text-slate-800 mb-5", ring, "rounded-lg px-1 py-0.5 -ml-1")}>
+      <ArrowLeft className="w-4 h-4" /> Central Técnica
+    </button>
+
+    {offline && (
+      <div className="mb-4 rounded-xl bg-amber-50 ring-1 ring-amber-200/70 px-4 py-3 flex items-center gap-2.5 text-[13px] text-amber-800">
+        <WifiOff className="w-4 h-4 shrink-0" /> Sem conexão — exibindo a última versão salva neste aparelho.
+      </div>
+    )}
+
+    <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="min-w-0">
+        <p className="text-[13px] text-slate-500">{[modelo.fabricante, modelo.categoria].filter(Boolean).join(" · ")}</p>
+        <h1 className="text-[26px] sm:text-3xl font-semibold text-slate-900 tracking-[-0.02em] leading-tight">{modelo.nome}</h1>
+        {modelo.descricao && <p className="text-slate-500 mt-1.5 text-[15px]">{modelo.descricao}</p>}
+        {modelo.global && <div className="mt-2"><Pill tone="marca">Biblioteca ZiisTec</Pill></div>}
+      </div>
+      <button onClick={alternarFav} disabled={mudandoFav || offline} aria-pressed={favorito}
+        aria-label={favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+        className={cx("p-3 rounded-xl bg-white ring-1 ring-slate-200 hover:bg-slate-50 shrink-0", ring, (mudandoFav || offline) && "opacity-50")}>
+        <Star className={cx("w-5 h-5", favorito ? "text-amber-500 fill-amber-400" : "text-slate-400")} aria-hidden="true" />
+      </button>
+    </div>
+
+    <Tabs valor={aba} onChange={setAba} className="mb-6" opcoes={[
+      { id: "ficha", label: "Ficha rápida" },
+      { id: "manuais", label: `Manuais · ${manuais.length}` },
+      { id: "esquemas", label: `Esquemas · ${esquemas.length}` },
+      { id: "casos", label: `Casos da empresa · ${totalCasos}` },
+    ]} />
+
+    {aba === "ficha" && (<>
+      {dono && !offline && (
+        <div className="flex justify-end mb-4">
+          <Btn variant="soft" size="sm" icon={Pencil} onClick={() => setEditandoFicha(true)}>
+            {fichaEmpresa ? "Editar ficha da empresa" : ficha ? "Criar versão da empresa" : "Criar ficha rápida"}
+          </Btn>
+        </div>
+      )}
+      {ficha ? <CTFicha ficha={ficha} /> : (
+        <Panel><Empty icon={BookOpen} title="Este equipamento ainda não tem ficha rápida"
+          sub={dono ? "Crie a ficha com alimentação, bornes, reset e códigos de erro. É o que o técnico consulta em campo."
+            : "Peça ao responsável da empresa para cadastrar a ficha deste equipamento."} /></Panel>
+      )}
+    </>)}
+
+    {aba === "manuais" && <CTDocLista docs={manuais} vazioTitulo="Nenhum manual cadastrado"
+      dono={dono && !offline} aviso={aviso} onNovo={() => setNovoDoc("manual")} onMudou={recarregar} />}
+    {aba === "esquemas" && <CTDocLista docs={esquemas} vazioTitulo="Nenhum esquema cadastrado" esquema
+      dono={dono && !offline} aviso={aviso} onNovo={() => setNovoDoc("diagram")} onMudou={recarregar} />}
+    {aba === "casos" && (offline
+      ? <Panel><Empty icon={WifiOff} title="Casos indisponíveis offline" sub="Conecte-se para consultar os atendimentos anteriores da empresa." /></Panel>
+      : <CTCasos empresaId={empresaId} modeloId={id} total={totalCasos} aviso={aviso} />)}
+
+    {editandoFicha && <CTEditorFicha onClose={() => setEditandoFicha(false)}
+      base={fichaEmpresa || ficha} empresaId={empresaId} modeloId={id} usuarioAtual={usuarioAtual}
+      fichaEmpresaId={fichaEmpresa?.id || null} aviso={aviso}
+      onSalvo={() => { setEditandoFicha(false); recarregar(); }} />}
+    {novoDoc && <CTNovoDocumento tipoInicial={novoDoc} onClose={() => setNovoDoc(false)}
+      empresaId={empresaId} modeloId={id} usuarioAtual={usuarioAtual} aviso={aviso}
+      onCriado={() => { setNovoDoc(false); recarregar(); }} />}
+  </>);
+}
+
+/* ----- ficha rápida: cartões grandes, uma mão, leitura de campo ----- */
+function CTFicha({ ficha }) {
+  const secoes = ficha.secoes || [];
+  if (!secoes.length) return <Panel><Empty icon={BookOpen} title="Ficha sem seções" sub="O conteúdo desta ficha ainda não foi preenchido." /></Panel>;
+  return (
+    <div className="space-y-4">
+      {!ficha.global && <p className="text-[12px] text-slate-400">Ficha da empresa · versão {ficha.versao}{ficha.atualizadoEm ? ` · atualizada em ${dataBR(ficha.atualizadoEm)}` : ""}</p>}
+      {secoes.map((s, i) => <CTSecao key={i} s={s} />)}
+    </div>
+  );
+}
+
+function CTSecao({ s }) {
+  const itens = s.items || [];
+  const alerta = s.kind === "alerts";
+  return (
+    <Panel className={cx("p-5", alerta && "bg-amber-50 ring-amber-200/70")}>
+      <h3 className={cx("text-[12px] font-semibold uppercase tracking-[0.08em] mb-3 flex items-center gap-2",
+        alerta ? "text-amber-800" : "text-slate-400")}>
+        {alerta && <AlertTriangle className="w-4 h-4" aria-hidden="true" />}
+        {s.title || CT_SECAO_LABEL[s.kind] || "Seção"}
+      </h3>
+      <div className="space-y-3">
+        {itens.map((it, i) => {
+          if (it.steps?.length) {
+            return (
+              <div key={i}>
+                {it.label && <p className="text-[14px] font-medium text-slate-800 mb-1.5">{it.label}</p>}
+                <ol className="space-y-1.5 list-none">
+                  {it.steps.map((passo, j) => (
+                    <li key={j} className="flex gap-2.5 text-[15px] text-slate-700 leading-relaxed">
+                      <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 text-[12px] font-semibold flex items-center justify-center shrink-0 mt-0.5">{j + 1}</span>
+                      <span>{passo}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            );
+          }
+          if (it.code || it.meaning) {
+            return (
+              <div key={i} className="rounded-xl bg-slate-50 ring-1 ring-slate-200/70 p-3.5">
+                <div className="flex items-center gap-2.5">
+                  {it.code && <span className="font-mono text-[14px] font-semibold bg-slate-900 text-white rounded-lg px-2 py-0.5">{it.code}</span>}
+                  <p className="text-[14.5px] text-slate-800 font-medium">{it.meaning || it.name || ""}</p>
+                </div>
+                {it.action && <p className="text-[13.5px] text-slate-600 mt-1.5">O que fazer: {it.action}</p>}
+              </div>
+            );
+          }
+          if (it.symptom || it.cause || it.solution) {
+            return (
+              <div key={i} className="rounded-xl bg-slate-50 ring-1 ring-slate-200/70 p-3.5 space-y-1">
+                {it.symptom && <p className="text-[14.5px] font-medium text-slate-800">{it.symptom}</p>}
+                {it.cause && <p className="text-[13.5px] text-slate-600">Causa provável: {it.cause}</p>}
+                {it.test && <p className="text-[13.5px] text-slate-600">Teste: {it.test}</p>}
+                {it.solution && <p className="text-[13.5px] text-teal-800">Solução: {it.solution}</p>}
+              </div>
+            );
+          }
+          if (it.risk || it.note) {
+            return <p key={i} className="text-[14.5px] text-amber-900 leading-relaxed">{it.risk || it.note}</p>;
+          }
+          return (
+            <div key={i} className="flex items-baseline justify-between gap-4 border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+              <span className="text-[14px] text-slate-500">{it.label || it.name || "—"}</span>
+              <span className="text-[15px] font-medium text-slate-900 text-right">{it.value || "—"}</span>
+            </div>
+          );
+        })}
+        {!itens.length && <p className="text-[13px] text-slate-400">Sem itens nesta seção.</p>}
+      </div>
+    </Panel>
+  );
+}
+
+function CTDocLista({ docs, vazioTitulo, esquema, dono, aviso, onNovo, onMudou }) {
+  const [abrindo, setAbrindo] = useState(null);
+  const abrir = async (d) => {
+    setAbrindo(d.id);
+    try {
+      const url = await urlDocumentoCT(d);
+      if (!url) { aviso("Documento indisponível no momento."); return; }
+      window.open(url, "_blank", "noopener");
+    } catch (e) { aviso(mensagemErro(e)); }
+    finally { setAbrindo(null); }
+  };
+  return (<>
+    {dono && (
+      <div className="flex justify-end mb-4">
+        <Btn variant="soft" size="sm" icon={Plus} onClick={onNovo}>{esquema ? "Adicionar esquema" : "Adicionar documento"}</Btn>
+      </div>
+    )}
+    {!docs.length ? (
+      <Panel><Empty icon={esquema ? Layers : FileText} title={vazioTitulo}
+        sub={dono ? "Adicione o link oficial do fabricante ou envie um arquivo da empresa (PDF ou imagem)."
+          : "Quando a empresa cadastrar, o documento aparece aqui."} /></Panel>
+    ) : (
+      <div className="space-y-3">
+        {docs.map((d) => (
+          <Panel key={d.id} className="p-4 flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+              {d.origem === "official_url" ? <Link2 className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14.5px] font-medium text-slate-900 truncate">{d.titulo}</p>
+              <p className="text-[12.5px] text-slate-500 truncate">
+                {[CT_DOC_LABEL[d.tipo] || d.tipo, d.versao && `v. ${d.versao}`, d.idioma].filter(Boolean).join(" · ")}
+              </p>
+              <div className="flex gap-1.5 mt-1">
+                {d.oficial && <Pill tone="sucesso">Fonte oficial</Pill>}
+                {d.origem === "official_url" && !d.oficial && <Pill tone="neutro">Link do fabricante</Pill>}
+                {d.origem === "company_upload" && <Pill tone="neutro">Arquivo da empresa</Pill>}
+                {d.global && <Pill tone="marca">ZiisTec</Pill>}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Btn variant="soft" size="sm" icon={abrindo === d.id ? Loader2 : ExternalLink}
+                disabled={abrindo === d.id} onClick={() => abrir(d)}>Abrir</Btn>
+              {dono && !d.global && (
+                <Btn variant="ghost" size="sm" ariaLabel="Arquivar documento" icon={Trash2}
+                  onClick={async () => { try { await arquivarDocumentoCT(d.id); onMudou(); } catch (e) { aviso(mensagemErro(e)); } }} />
+              )}
+            </div>
+          </Panel>
+        ))}
+      </div>
+    )}
+  </>);
+}
+
+function CTCasos({ empresaId, modeloId, total, aviso }) {
+  const [casos, setCasos] = useState(null);
+  const [fim, setFim] = useState(false);
+  const [maisLoading, setMaisLoading] = useState(false);
+  useEffect(() => {
+    let ativo = true;
+    casosEquipamentoCT(empresaId, modeloId, 0)
+      .then((r) => { if (ativo) { setCasos(r); setFim(r.length < 10); } })
+      .catch((e) => { if (ativo) { setCasos([]); aviso(mensagemErro(e)); } });
+    return () => { ativo = false; };
+  }, [empresaId, modeloId]);
+  if (!casos) return <Panel className="p-6 text-[14px] text-slate-400">Carregando…</Panel>;
+  if (!casos.length) {
+    return <Panel><Empty icon={ClipboardList} title="Nenhum caso registrado para este equipamento"
+      sub="Quando uma OS com este equipamento vinculado for concluída com relato, o atendimento aparece aqui como caso técnico — sem dados do cliente nem valores." /></Panel>;
+  }
+  return (<>
+    <p className="text-[12.5px] text-slate-400 mb-3">Conhecimento técnico da sua empresa. Sem nome de cliente, endereço ou valores.</p>
+    <div className="space-y-3">
+      {casos.map((c) => (
+        <Panel key={c.id} className="p-5">
+          <div className="flex items-center justify-between gap-3 mb-2.5">
+            <Pill tone="sucesso">Caso resolvido</Pill>
+            <span className="text-[12px] text-slate-400">{c.numero}{c.concluidoEm ? ` · ${dataBR(c.concluidoEm)}` : ""}</span>
+          </div>
+          {c.sintoma && (<div className="mb-2.5">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-1">Sintoma</p>
+            <p className="text-[14.5px] text-slate-800">{c.sintoma}</p>
+          </div>)}
+          {c.relato && (<div className="mb-2.5">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.08em] mb-1">O que foi feito</p>
+            <p className="text-[14px] text-slate-700 whitespace-pre-line leading-relaxed">{c.relato}</p>
+          </div>)}
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {c.precisouRetorno && <Pill tone="atencao">Precisou de retorno</Pill>}
+            {c.pendencia && <Pill tone="atencao">Pendência: {c.pendencia}</Pill>}
+            {c.obsVinculo && <Pill tone="neutro">{c.obsVinculo}</Pill>}
+          </div>
+        </Panel>
+      ))}
+    </div>
+    {!fim && (
+      <div className="flex justify-center mt-5">
+        <Btn variant="soft" disabled={maisLoading} onClick={() => {
+          setMaisLoading(true);
+          casosEquipamentoCT(empresaId, modeloId, casos.length)
+            .then((r) => { setCasos((l) => [...l, ...r]); setFim(r.length < 10); })
+            .catch((e) => aviso(mensagemErro(e))).finally(() => setMaisLoading(false));
+        }}>{maisLoading ? "Carregando…" : "Ver mais casos"}</Btn>
+      </div>
+    )}
+  </>);
+}
+
+/* ----- gestão (owner): novo modelo, documento e editor de ficha ----- */
+function CTNovoModelo({ onClose, empresaId, usuarioAtual, categorias, aviso, onCriado }) {
+  const [f, setF] = useState({ nome: "", codigo: "", categoriaId: "", fabricanteId: "", descricao: "", tags: "" });
+  const [fabricantes, setFabricantes] = useState(null);
+  const [novoFab, setNovoFab] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  useEffect(() => {
+    listarFabricantesCT(empresaId).then(setFabricantes).catch((e) => { setFabricantes([]); aviso(mensagemErro(e)); });
+  }, [empresaId]);
+  const salvar = async () => {
+    if (!f.nome.trim()) { aviso("Informe o nome do modelo."); return; }
+    if (!f.categoriaId) { aviso("Escolha a categoria."); return; }
+    if (!f.fabricanteId && !novoFab.trim()) { aviso("Escolha ou cadastre o fabricante."); return; }
+    setSalvando(true);
+    try {
+      let fabId = f.fabricanteId;
+      if (!fabId) { const fab = await salvarFabricanteCT(empresaId, { nome: novoFab }); fabId = fab.id; }
+      const m = await salvarModeloCT(empresaId, {
+        nome: f.nome, codigo: f.codigo, categoriaId: f.categoriaId, fabricanteId: fabId,
+        descricao: f.descricao, tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean),
+      }, usuarioAtual?.id);
+      aviso("Equipamento cadastrado.");
+      onCriado(m);
+    } catch (e) { aviso(mensagemErro(e)); }
+    finally { setSalvando(false); }
+  };
+  return (
+    <Modal open onClose={onClose} title="Novo equipamento" sub="Entra na biblioteca privada da sua empresa."
+      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn disabled={salvando} icon={salvando ? Loader2 : Check} onClick={salvar}>{salvando ? "Salvando…" : "Cadastrar"}</Btn></>}>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Modelo" className="sm:col-span-2"><Input value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} placeholder="Ex.: FR 101" /></Field>
+        <Field label="Código do modelo" hint="Opcional. Como aparece na etiqueta."><Input value={f.codigo} onChange={(e) => setF({ ...f, codigo: e.target.value })} placeholder="Ex.: FR-101" /></Field>
+        <Field label="Categoria">
+          <Select value={f.categoriaId} onChange={(e) => setF({ ...f, categoriaId: e.target.value })}>
+            <option value="">Escolher…</option>
+            {categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          </Select>
+        </Field>
+        <Field label="Fabricante" className="sm:col-span-2">
+          <Select value={f.fabricanteId} onChange={(e) => setF({ ...f, fabricanteId: e.target.value })}>
+            <option value="">{fabricantes ? "Cadastrar novo…" : "Carregando…"}</option>
+            {(fabricantes || []).map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
+          </Select>
+        </Field>
+        {!f.fabricanteId && (
+          <Field label="Nome do novo fabricante" className="sm:col-span-2">
+            <Input value={novoFab} onChange={(e) => setNovoFab(e.target.value)} placeholder="Ex.: Intelbras" />
+          </Field>
+        )}
+        <Field label="Descrição curta" className="sm:col-span-2"><Input value={f.descricao} onChange={(e) => setF({ ...f, descricao: e.target.value })} placeholder="Ex.: Fechadura eletrônica de embutir" /></Field>
+        <Field label="Tags" hint="Separadas por vírgula. Ajudam a busca." className="sm:col-span-2"><Input value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} placeholder="fechadura, tag, senha" /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+function CTNovoDocumento({ tipoInicial, onClose, empresaId, modeloId, usuarioAtual, aviso, onCriado }) {
+  const [modo, setModo] = useState("url");
+  const [f, setF] = useState({ titulo: "", tipo: typeof tipoInicial === "string" ? tipoInicial : "manual", url: "", versao: "" });
+  const [arquivo, setArquivo] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const salvar = async () => {
+    if (!f.titulo.trim()) { aviso("Dê um título ao documento."); return; }
+    setSalvando(true);
+    try {
+      if (modo === "url") {
+        if (!/^https:\/\//i.test(f.url.trim())) { aviso("Informe o link oficial começando com https://"); setSalvando(false); return; }
+        await salvarDocumentoUrlCT(empresaId, modeloId, f, usuarioAtual?.id);
+      } else {
+        if (!arquivo) { aviso("Selecione o arquivo (PDF ou imagem)."); setSalvando(false); return; }
+        await enviarDocumentoArquivoCT(empresaId, modeloId, arquivo, f, usuarioAtual?.id);
+      }
+      aviso("Documento adicionado.");
+      onCriado();
+    } catch (e) { aviso(mensagemErro(e)); }
+    finally { setSalvando(false); }
+  };
+  return (
+    <Modal open onClose={onClose} title="Adicionar documento"
+      sub="Use o link oficial do fabricante sempre que existir. Arquivos enviados ficam privados da empresa."
+      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn disabled={salvando} icon={salvando ? Loader2 : Check} onClick={salvar}>{salvando ? "Enviando…" : "Adicionar"}</Btn></>}>
+      <Tabs valor={modo} onChange={setModo} opcoes={[{ id: "url", label: "Link oficial" }, { id: "arquivo", label: "Enviar arquivo" }]} />
+      <Field label="Título"><Input value={f.titulo} onChange={(e) => setF({ ...f, titulo: e.target.value })} placeholder="Ex.: Manual de instalação" /></Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Tipo">
+          <Select value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>
+            {TIPOS_DOC.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Versão" hint="Opcional"><Input value={f.versao} onChange={(e) => setF({ ...f, versao: e.target.value })} placeholder="Ex.: 1.2" /></Field>
+      </div>
+      {modo === "url" ? (
+        <Field label="Link oficial (https)" hint="O documento continua no site do fabricante; aqui guardamos a referência.">
+          <Input value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} placeholder="https://..." inputMode="url" />
+        </Field>
+      ) : (
+        <Field label="Arquivo (PDF ou imagem, até 50MB)" hint="Envie apenas material que a empresa pode guardar.">
+          <label className={cx("flex items-center gap-3 rounded-xl ring-1 ring-slate-200 bg-white px-3.5 py-3 cursor-pointer hover:bg-slate-50", ring)}>
+            <FileUp className="w-4 h-4 text-slate-400 shrink-0" />
+            <span className="text-[14px] text-slate-600 truncate">{arquivo ? arquivo.name : "Escolher arquivo…"}</span>
+            <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="sr-only"
+              onChange={(e) => setArquivo(e.target.files?.[0] || null)} />
+          </label>
+        </Field>
+      )}
+    </Modal>
+  );
+}
+
+function CTEditorFicha({ onClose, base, empresaId, modeloId, usuarioAtual, fichaEmpresaId, aviso, onSalvo }) {
+  const [secoes, setSecoes] = useState(() => JSON.parse(JSON.stringify(base?.secoes || [])));
+  const [salvando, setSalvando] = useState(false);
+  const [addKind, setAddKind] = useState("power");
+  const upSec = (i, patch) => setSecoes((l) => l.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const upItem = (i, k, patch) => setSecoes((l) => l.map((s, j) => j === i ? { ...s, items: s.items.map((it, m) => (m === k ? { ...it, ...patch } : it)) } : s));
+  const itemNovo = (kind) => kind === "codes" ? { code: "", meaning: "", action: "" }
+    : kind === "diagnostics" ? { symptom: "", cause: "", test: "", solution: "" }
+    : kind === "alerts" ? { risk: "" }
+    : (kind === "reset" || kind === "programming") ? { label: "", steps: [""] }
+    : { label: "", value: "" };
+  const salvar = async () => {
+    const limpas = secoes.map((s) => ({ ...s, title: (s.title || CT_SECAO_LABEL[s.kind] || "Seção").slice(0, 120),
+      items: (s.items || []).map((it) => it.steps ? { ...it, steps: it.steps.map((x) => x.trim()).filter(Boolean) } : it)
+        .filter((it) => Object.values(it).some((v) => Array.isArray(v) ? v.length : String(v || "").trim())) }))
+      .filter((s) => (s.items || []).length);
+    if (!limpas.length) { aviso("Adicione ao menos uma seção com conteúdo."); return; }
+    setSalvando(true);
+    try { await salvarFichaCT(empresaId, modeloId, fichaEmpresaId, limpas, usuarioAtual?.id); aviso("Ficha salva."); onSalvo(); }
+    catch (e) { aviso(mensagemErro(e)); }
+    finally { setSalvando(false); }
+  };
+  return (
+    <Modal open onClose={onClose} wide title={fichaEmpresaId ? "Editar ficha da empresa" : "Nova ficha rápida"}
+      sub="Registre apenas informação confirmada no manual ou na prática da equipe. Nada de suposição."
+      footer={<><Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn disabled={salvando} icon={salvando ? Loader2 : Check} onClick={salvar}>{salvando ? "Salvando…" : "Salvar ficha"}</Btn></>}>
+      {secoes.map((s, i) => (
+        <Panel key={i} className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <Input value={s.title || ""} onChange={(e) => upSec(i, { title: e.target.value })}
+              placeholder={CT_SECAO_LABEL[s.kind]} className="font-medium" />
+            <Btn variant="ghost" size="sm" ariaLabel="Remover seção" icon={Trash2}
+              onClick={() => setSecoes((l) => l.filter((_, j) => j !== i))} />
+          </div>
+          {(s.items || []).map((it, k) => (
+            <div key={k} className="rounded-xl ring-1 ring-slate-200/70 p-3 space-y-2">
+              {"steps" in it ? (<>
+                <Input value={it.label || ""} onChange={(e) => upItem(i, k, { label: e.target.value })} placeholder="Nome do procedimento (ex.: Reset total)" />
+                <Textarea rows={3} value={(it.steps || []).join("\n")}
+                  onChange={(e) => upItem(i, k, { steps: e.target.value.split("\n") })}
+                  placeholder={"Um passo por linha\nEx.: Desligue a alimentação"} />
+              </>) : "code" in it ? (
+                <div className="grid sm:grid-cols-3 gap-2">
+                  <Input value={it.code || ""} onChange={(e) => upItem(i, k, { code: e.target.value })} placeholder="Código (E4)" />
+                  <Input value={it.meaning || ""} onChange={(e) => upItem(i, k, { meaning: e.target.value })} placeholder="Significado" />
+                  <Input value={it.action || ""} onChange={(e) => upItem(i, k, { action: e.target.value })} placeholder="O que fazer" />
+                </div>
+              ) : "symptom" in it ? (
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <Input value={it.symptom || ""} onChange={(e) => upItem(i, k, { symptom: e.target.value })} placeholder="Sintoma" />
+                  <Input value={it.cause || ""} onChange={(e) => upItem(i, k, { cause: e.target.value })} placeholder="Causa provável" />
+                  <Input value={it.test || ""} onChange={(e) => upItem(i, k, { test: e.target.value })} placeholder="Teste" />
+                  <Input value={it.solution || ""} onChange={(e) => upItem(i, k, { solution: e.target.value })} placeholder="Solução" />
+                </div>
+              ) : "risk" in it ? (
+                <Textarea rows={2} value={it.risk || ""} onChange={(e) => upItem(i, k, { risk: e.target.value })} placeholder="Risco ou cuidado importante" />
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <Input value={it.label || ""} onChange={(e) => upItem(i, k, { label: e.target.value })} placeholder="Campo (ex.: Tensão)" />
+                  <Input value={it.value || ""} onChange={(e) => upItem(i, k, { value: e.target.value })} placeholder="Valor (ex.: 12 VDC)" />
+                </div>
+              )}
+              <div className="flex justify-end">
+                <Btn variant="ghost" size="sm" ariaLabel="Remover item" icon={Trash2}
+                  onClick={() => upSec(i, { items: s.items.filter((_, m) => m !== k) })} />
+              </div>
+            </div>
+          ))}
+          <Btn variant="quiet" size="sm" icon={Plus} onClick={() => upSec(i, { items: [...(s.items || []), itemNovo(s.kind)] })}>Adicionar item</Btn>
+        </Panel>
+      ))}
+      <div className="flex items-center gap-2">
+        <Select value={addKind} onChange={(e) => setAddKind(e.target.value)} className="max-w-[240px]">
+          {TIPOS_SECAO.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+        </Select>
+        <Btn variant="soft" size="sm" icon={Plus}
+          onClick={() => setSecoes((l) => [...l, { kind: addKind, title: CT_SECAO_LABEL[addKind], items: [itemNovo(addKind)] }])}>
+          Adicionar seção
+        </Btn>
+      </div>
+    </Modal>
   );
 }
