@@ -3148,6 +3148,9 @@ function OSDetalhe(p) {
             </Panel>
           </section>
 
+          <OSEquipamentosCT os={os} empresaId={empresaId} real={real} aviso={aviso}
+            abrirAjudaTecnica={p.abrirAjudaTecnica} podeEditar={os.status !== "concluida" && os.status !== "cancelada"} />
+
           {os.emGarantia && (
             <section>
               <Rotulo>Atendimento em garantia</Rotulo>
@@ -5791,6 +5794,107 @@ function CTEditorFicha({ onClose, base, empresaId, modeloId, usuarioAtual, ficha
           onClick={() => setSecoes((l) => [...l, { kind: addKind, title: CT_SECAO_LABEL[addKind], items: [itemNovo(addKind)] }])}>
           Adicionar seção
         </Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---- OS ↔ Central Técnica: vínculo de equipamento e Ajuda técnica ----
+   O vínculo é o que transforma o relato da Base Técnica em caso consultável
+   para os próximos atendimentos do mesmo modelo. */
+function OSEquipamentosCT({ os, empresaId, real, aviso, abrirAjudaTecnica, podeEditar }) {
+  const [lista, setLista] = useState(null);
+  const [vinculando, setVinculando] = useState(false);
+  const recarregar = () => {
+    if (!real) { setLista([]); return; }
+    listarEquipamentosOSCT(os.id, empresaId).then(setLista)
+      .catch(() => setLista([]));
+  };
+  useEffect(() => { recarregar(); }, [os.id, empresaId, real]);
+  if (!real) return null;
+  return (
+    <section>
+      <Rotulo acao={podeEditar
+        ? <Btn variant="soft" size="sm" icon={Plus} onClick={() => setVinculando(true)}>Vincular equipamento</Btn>
+        : null}>Equipamento</Rotulo>
+      <Panel className="p-5">
+        {!lista ? <p className="text-[13px] text-slate-400">Carregando…</p>
+          : lista.length === 0 ? (
+            <p className="text-[13.5px] text-slate-500 leading-relaxed">
+              Vincule o modelo atendido para abrir a ficha rápida, o manual e os casos já resolvidos pela equipe — e para que este atendimento vire conhecimento da empresa.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {lista.map((m) => (
+                <div key={m.vinculoId} className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-teal-50 ring-1 ring-teal-200/70 text-teal-800 flex items-center justify-center shrink-0">
+                    <Wrench className="w-5 h-5" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14.5px] font-medium text-slate-900 truncate">{m.nome}</p>
+                    <p className="text-[12.5px] text-slate-500 truncate">{[m.fabricante, m.categoria, m.obs].filter(Boolean).join(" · ")}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Btn size="sm" icon={BookOpen} onClick={() => abrirAjudaTecnica?.(m.id)}>Ajuda técnica</Btn>
+                    {podeEditar && (
+                      <Btn variant="ghost" size="sm" ariaLabel="Remover vínculo" icon={Trash2} onClick={async () => {
+                        try { await desvincularEquipamentoOSCT(m.vinculoId); recarregar(); }
+                        catch (e) { aviso(mensagemErro(e)); }
+                      }} />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+      </Panel>
+      {vinculando && <OSVincularEquipamentoCT os={os} empresaId={empresaId} aviso={aviso}
+        onClose={() => setVinculando(false)} onVinculado={() => { setVinculando(false); recarregar(); }} />}
+    </section>
+  );
+}
+
+function OSVincularEquipamentoCT({ os, empresaId, aviso, onClose, onVinculado }) {
+  const [busca, setBusca] = useState("");
+  const [resultados, setResultados] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  const [salvandoId, setSalvandoId] = useState(null);
+  useEffect(() => {
+    const q = busca.trim();
+    if (q.length < 2) { setResultados(null); return; }
+    setBuscando(true);
+    const t = setTimeout(() => {
+      buscarEquipamentosCT(empresaId, q)
+        .then(setResultados)
+        .catch((e) => { setResultados([]); aviso(mensagemErro(e)); })
+        .finally(() => setBuscando(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [busca, empresaId]);
+  const vincular = async (m) => {
+    setSalvandoId(m.id);
+    try { await vincularEquipamentoOSCT(empresaId, os.id, m.id, null); aviso(`${m.nome} vinculado à ${os.numero}.`); onVinculado(); }
+    catch (e) { aviso(mensagemErro(e)); }
+    finally { setSalvandoId(null); }
+  };
+  return (
+    <Modal open onClose={onClose} title="Vincular equipamento" sub="Busque o modelo atendido nesta ordem.">
+      <SearchBox value={busca} onChange={setBusca} autoFocus placeholder="Modelo, fabricante ou código (ex.: FR 101)" />
+      {buscando && <p className="text-[13px] text-slate-400">Buscando…</p>}
+      {resultados && !buscando && resultados.length === 0 && (
+        <p className="text-[13.5px] text-slate-500">Nada encontrado. O responsável pode cadastrar o modelo na Central Técnica.</p>
+      )}
+      <div className="space-y-2">
+        {(resultados || []).map((m) => (
+          <button key={m.id} disabled={salvandoId === m.id} onClick={() => vincular(m)}
+            className={cx("w-full text-left rounded-xl ring-1 ring-slate-200 bg-white p-3.5 hover:bg-slate-50 flex items-center gap-3", ring, salvandoId === m.id && "opacity-50")}>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14.5px] font-medium text-slate-900 truncate">{m.nome}</p>
+              <p className="text-[12.5px] text-slate-500 truncate">{[m.fabricante, m.categoria].filter(Boolean).join(" · ")}</p>
+            </div>
+            {salvandoId === m.id ? <Loader2 className="w-4 h-4 text-slate-400" /> : <Plus className="w-4 h-4 text-teal-700" />}
+          </button>
+        ))}
       </div>
     </Modal>
   );
