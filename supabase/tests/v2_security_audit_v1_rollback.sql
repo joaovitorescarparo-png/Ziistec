@@ -78,7 +78,13 @@ begin
              and c.relname not in ('attachments','clients','company_invites','financial_entries','products','purchase_items','purchases',
                                    'quote_items','quotes','services','suppliers','work_order_checklists','work_order_items','work_order_materials',
                                    'maintenance_contracts','work_orders','quote_templates','quote_template_items','quote_kits','quote_kit_items',
-                                   'work_order_reports','warranties')) x;
+                                   'work_order_reports','warranties',
+                                   -- Central Técnica (0113-0115): conteúdo da empresa e vínculo da OS, com RLS por
+                                   -- escopo (zt_eq_can_write / zt_wo_is_owned|zt_wo_is_mine+zt_wo_open), guardas de
+                                   -- tenant por trigger e guard de assinatura. Conteúdo GLOBAL não é apagável aqui.
+                                   'equipment_categories','equipment_manufacturers','equipment_models',
+                                   'equipment_documents','equipment_quick_guides','equipment_favorites',
+                                   'equipment_recent_views','company_technical_areas','work_order_equipment')) x;
   perform pg_temp.sec_check('catalogo_delete_direto_so_em_tabelas_revisadas', v_list is null, v_list);
 
   select string_agg(table_name, ',') into v_list
@@ -88,7 +94,12 @@ begin
              and c.relname not in ('attachments','clients','companies','company_invites','company_members','financial_entries','maintenance_contracts','products',
                                    'purchase_items','purchases','quote_items','quotes','services','suppliers','user_route_preferences',
                                    'work_order_checklists','work_order_items','work_order_materials','work_order_reports','work_orders',
-                                   'quote_templates','quote_template_items','quote_kits','quote_kit_items','warranties','profiles','platform_audit_logs')) x;
+                                   'quote_templates','quote_template_items','quote_kits','quote_kit_items','warranties','profiles','platform_audit_logs',
+                                   -- Central Técnica (0113-0115): mesma revisão do DELETE acima. work_order_equipment
+                                   -- recebe INSERT/DELETE e nenhum UPDATE de propósito.
+                                   'equipment_categories','equipment_manufacturers','equipment_models',
+                                   'equipment_documents','equipment_quick_guides','equipment_favorites',
+                                   'equipment_recent_views','company_technical_areas','work_order_equipment')) x;
   perform pg_temp.sec_check('catalogo_escrita_direta_so_em_tabelas_revisadas', v_list is null, v_list);
 
   select string_agg(id, ',') into v_list from storage.buckets where public;

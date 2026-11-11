@@ -116,12 +116,16 @@ create table if not exists public.work_order_equipment (
   created_at timestamptz not null default now(),
   constraint work_order_equipment_wo_company_fk
     foreign key (work_order_id,company_id) references public.work_orders(id,company_id) on delete cascade,
-  -- FK simples de propósito: com FK composta, ON DELETE SET NULL anularia também
-  -- company_id (NOT NULL) e travaria a remoção da unidade. O isolamento de tenant
-  -- da unidade é garantido pelo trigger abaixo, que exige mesma empresa E mesmo
-  -- cliente da OS — condição mais forte que a FK composta.
+  -- FK simples e CASCADE de propósito. Com FK composta, ON DELETE SET NULL
+  -- anularia também company_id (NOT NULL) e travaria a remoção da unidade; e
+  -- anular apenas a unidade transformaria o vínculo em "só modelo", podendo
+  -- colidir com um vínculo de modelo já existente na mesma OS. Removida a
+  -- unidade física, o vínculo àquela unidade perde sentido e sai junto — o
+  -- vínculo de conhecimento (modelo) é outra linha e sobrevive.
+  -- O isolamento de tenant da unidade é garantido pelo trigger abaixo, que exige
+  -- mesma empresa E mesmo cliente da OS: condição mais forte que a FK composta.
   constraint work_order_equipment_unit_fk
-    foreign key (installed_equipment_id) references public.installed_equipment(id) on delete set null,
+    foreign key (installed_equipment_id) references public.installed_equipment(id) on delete cascade,
   constraint work_order_equipment_notes_len check (notes is null or char_length(notes) <= 500)
 );
 -- Sem unidade física: um vínculo por modelo. Com unidade: um vínculo por unidade.

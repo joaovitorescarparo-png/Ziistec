@@ -27,7 +27,14 @@ begin
   -- 0108 adds none (composite supplier foreign keys). 0109 adds one public definer (idempotent stock adjustment overload; the old one keeps existing, without browser EXECUTE).
   -- 0110 adds one public definer (invite e-mail throttle claim).
   -- 0111 adds seven public definers (technical base save; attendance confirmation save; report facts; AI report claim/complete/mark-used/usage).
-  if v_total<>149 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=149 actual=%',v_total; end if;
+  -- 0113–0115 (Central Técnica) add thirteen public definers, all with search_path='' and no anon EXECUTE:
+  --   0113: zt_eq_can_read, zt_eq_can_write, zt_guard_subscription_write_if_tenant,
+  --         zt_eq_guard_model, zt_eq_guard_model_scope, zt_eq_guard_area, zt_eq_guide_guard;
+  --   0114: zt_equipment_search;
+  --   0115: zt_eq_guard_installed_equipment_model, zt_set_installed_equipment_model,
+  --         zt_eq_guard_work_order_equipment, zt_equipment_cases, zt_equipment_cases_count.
+  --   Their zt_private helpers (zt_ct_terms, zt_eq_validate_guide_sections, zt_eq_guide_search_text) are invoker.
+  if v_total<>162 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=162 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;
