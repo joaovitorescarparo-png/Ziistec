@@ -9,6 +9,19 @@ Plataforma para prestadores de serviços técnicos, com clientes, ordens de serv
 - `src/screens/`: autenticação, onboarding e administração da plataforma.
 - `supabase/`: migrations versionadas do banco, RLS e RPCs.
 - `api/`: funções server-side da Vercel.
+- `docs/engineering/`: memória técnica (arquitetura e decisões por módulo).
+- `scripts/ct-test/`: harness de testes SQL em banco Postgres descartável
+  (stub Supabase, ordem oficial das migrations, matriz de RLS e golden path
+  da Central Técnica). Uso: `PGHOST=<postgres descartável> scripts/ct-test/run.sh`.
+
+## Central Técnica
+
+Biblioteca operacional de campo (migrations `0050`–`0052`): equipamentos,
+fichas rápidas estruturadas, manuais/esquemas (link oficial ou upload privado
+com signed URL), favoritos/recentes, vínculo equipamento ↔ OS com "Ajuda
+técnica" e casos resolvidos derivados da Base Técnica — sanitizados no banco
+(sem cliente nem financeiro) e isolados por empresa via RLS. Detalhes em
+`docs/engineering/CENTRAL_TECNICA_V1.md`.
 
 O build não aplica mais uma cadeia de patches sobre o frontend. Antes de `dev` e `build`, a integridade do código consolidado é validada por SHA-256. A migration de fundação histórica ainda é reconstruída dos seus blocos com verificação de hash.
 

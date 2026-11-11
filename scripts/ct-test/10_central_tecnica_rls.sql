@@ -242,6 +242,21 @@ begin
     'Owner B grava em caminho da empresa A');
   perform tests.reset();
 
+  -- ================================= busca: entrada hostil e acentos
+  perform tests.login(ta);
+  -- caracteres de tsquery e tentativa de injeção não quebram nem vazam
+  select count(*) into v_count from public.zt_equipment_search(ca, $q$'; drop table equipment_models;--$q$, null, 10, 0);
+  perform tests.ok(v_count = 0, 'busca com injeção devolve vazio sem erro');
+  select count(*) into v_count from public.zt_equipment_search(ca, 'fé!ch&ad(ura:*', null, 10, 0);
+  perform tests.ok(v_count >= 0, 'busca com símbolos de tsquery não quebra');
+  -- acentos não atrapalham: "fechádura" encontra a tag "fechadura"
+  select count(*) into v_count from public.zt_equipment_search(ca, 'fechádura', null, 10, 0);
+  perform tests.ok(v_count = 1, 'busca ignora acentos');
+  -- busca vazia e espaços devolvem vazio
+  select count(*) into v_count from public.zt_equipment_search(ca, '   ', null, 10, 0);
+  perform tests.ok(v_count = 0, 'busca vazia devolve vazio');
+  perform tests.reset();
+
   -- ====================================== escopo global é blindado
   -- nem via UPDATE movendo company_id para null
   perform tests.login(ua);
