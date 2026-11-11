@@ -9,7 +9,11 @@ const agendaMobile=readFileSync('src/lib/agendaMobile.js','utf8');
 
 const must=(ok,label)=>{if(!ok) throw new Error(`ROUND 3.8: ${label}`);};
 
-must(legacy.includes('tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo"]'),'technician Meu dia Agenda permission missing');
+// "central" é consulta somente leitura da Central Técnica, isolada por RLS na
+// própria empresa; "gerirCentral" (administrar o acervo) continua fora do técnico.
+must(legacy.includes('tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo", "central"]'),'technician Meu dia Agenda permission missing');
+must(!/tecnico:[^\n]*"gerirCentral"/.test(legacy),'technician must not administer the technical library');
+must(/proprietario:[^\n]*"gerirCentral"/.test(legacy),'owner must keep technical library administration');
 must(legacy.includes('const ordensEmp = doTenant(ordens).filter((o) => permitido("todasOS") || o.responsavelId === usuarioAtual?.id);'),'technician Agenda/OS projection must remain assigned-only');
 must(agendaMobile.includes('order?.responsavelId === userId'),'technician Agenda client defense must remain assigned-only');
 must(workOrderRls.includes('assigned_to=(select auth.uid())'),'work_orders RLS must remain assigned-to authority');

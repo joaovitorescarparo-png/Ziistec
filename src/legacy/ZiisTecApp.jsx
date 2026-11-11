@@ -9,7 +9,8 @@ import {
   CircleCheck, Building2, User, CheckCircle2, Circle, AlertTriangle,
   Printer, MoreHorizontal, CalendarClock, Receipt, Banknote, Mic, MicOff,
   Package, ShoppingCart, ShieldCheck, Camera, Paperclip, Sparkles,
-  TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building, ChevronDown,
+  TrendingUp, RotateCcw, Loader2, Copy, Users2, LogOut, Lock, CreditCard, Building,
+  BookOpen, ChevronDown,
 } from "lucide-react";
 import GlobalSearchModal from "../components/GlobalSearchModal";
 import BarcodeScanner from "../components/BarcodeScanner";
@@ -49,6 +50,8 @@ import ChecklistTemplatePicker from "../components/ChecklistTemplatePicker";
 import ServiceReceiptPanel from "../components/ServiceReceiptPanel";
 import QuoteClientLocationField from "../components/QuoteClientLocationField";
 import LocationHistoryPanel from "../components/LocationHistoryPanel";
+import CentralTecnicaScreen from "../components/CentralTecnicaScreen";
+import WorkOrderEquipmentPanel from "../components/WorkOrderEquipmentPanel";
 import { listarLocaisClienteOrcamentoV2DB } from "../lib/quoteReuseV2Api";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
@@ -277,8 +280,8 @@ const ST_ASSINATURA = {
 
 /* permissões por papel. A lista é curta de propósito: dois papéis, regras claras. */
 const PERMISSOES = {
-  proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "equipe", "config", "assinatura", "verValores", "todasOS"],
-  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo"],
+  proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "central", "gerirCentral", "equipe", "config", "assinatura", "verValores", "todasOS"],
+  tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo", "central"],
 };
 const pode = (papel, chave) => (PERMISSOES[papel] || []).includes(chave);
 
@@ -764,6 +767,7 @@ export default function ZiisTec({ contexto }) {
   const [clienteAberto, setClienteAberto] = useState(null);
   const [orcamentoAberto, setOrcamentoAberto] = useState(null);
   const [osAberta, setOsAberta] = useState(null);
+  const [ctFoco, setCtFoco] = useState(null); // Central Técnica: equipamento aberto pela Ajuda Técnica da OS
   useEffect(() => {
     contexto?.onAssistantWorkOrder?.(tela === 'ordens' ? osAberta : null);
     return () => contexto?.onAssistantWorkOrder?.(null);
@@ -889,7 +893,12 @@ export default function ZiisTec({ contexto }) {
   const irPara = (t) => {
     if (!confirmDiscardNavigation()) return;
     setTela(t); setClienteAberto(null); setOrcamentoAberto(null); setOsAberta(null); setCompraAberta(null);
-    setGarantiaAberta(null); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
+    setGarantiaAberta(null); setCtFoco(null); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
+  };
+  /* Ajuda Técnica: do atendimento direto para a ficha daquele equipamento. */
+  const abrirAjudaTecnica = (modeloId) => {
+    if (!confirmDiscardNavigation()) return;
+    setTela("central"); setCtFoco(modeloId); setDrawer(false); setBusca(false); window.scrollTo?.({ top: 0 });
   };
   const abrirOS = (id) => { setTela("ordens"); setOsAberta(id); setBusca(false); setDrawer(false); };
   const abrirOrc = (id) => { setTela("orcamentos"); setOrcamentoAberto(id); setBusca(false); setDrawer(false); };
@@ -1310,7 +1319,7 @@ export default function ZiisTec({ contexto }) {
     clienteAberto, setClienteAberto, orcamentoAberto, setOrcamentoAberto, osAberta, setOsAberta,
     compraAberta, setCompraAberta, setTela, abrirOS, abrirOrc, abrirCliente, abrirCompra,
     garantiaAberta, setGarantiaAberta, abrirGarantia, real,
-    pedirConfirmacao: setConfirmar, excluirRegistro, contexto,
+    pedirConfirmacao: setConfirmar, excluirRegistro, contexto, abrirAjudaTecnica,
     abrirV2: contexto?.abrirRecursoV2 ? (chave, params) => contexto.abrirRecursoV2(chave, { origem: tela, params }) : undefined,
   };
 
@@ -1323,6 +1332,7 @@ export default function ZiisTec({ contexto }) {
     { id: "ordens", label: "Ordens de serviço", icon: ClipboardList },
     { id: "vendaCampo", label: "Produtos", icon: ShoppingCart },
     { id: "garantias", label: "Garantias", icon: ShieldCheck },
+    { id: "central", label: "Central Técnica", icon: BookOpen },
     { id: "compras", label: "Compras", icon: ShoppingCart },
     { id: "equipe", label: "Equipe", icon: Users2 },
     { id: "financeiro", label: "Financeiro", icon: Wallet },
@@ -1489,6 +1499,12 @@ export default function ZiisTec({ contexto }) {
           {tela === "orcamentos" && <Orcamentos {...props} />}
           {tela === "ordens" && <TelaErrorBoundary key={osAberta || "ordens-lista"} onBack={() => setOsAberta(null)}><OrdensServico {...props} /></TelaErrorBoundary>}
           {tela === "garantias" && <Garantias {...props} />}
+          {tela === "central" && (
+            <CentralTecnicaScreen
+              empresaId={empresaId} usuarioAtual={usuarioAtual} real={real} aviso={aviso}
+              podeGerir={permitido("gerirCentral")} foco={ctFoco}
+              onFocoConsumido={() => setCtFoco(null)} />
+          )}
           {tela === "compras" && <Compras {...props} />}
           {tela === "financeiro" && <Financeiro {...props} />}
           {tela === "equipe" && <Equipe {...props} />}
@@ -4089,6 +4105,12 @@ function OSDetalhe(p) {
               </Panel>
             </section>
           )}
+
+          <WorkOrderEquipmentPanel
+            workOrderId={os.id} clientId={os.clienteId} empresaId={empresaId}
+            usuarioAtual={usuarioAtual} real={real} aviso={aviso}
+            podeEditar={os.status !== "concluida" && os.status !== "cancelada"}
+            onAjudaTecnica={p.abrirAjudaTecnica} />
 
           <section>
             <Rotulo acao={permitido("catalogo")

@@ -101,7 +101,10 @@ test('A1 · as abas usam as entradas sem duplicar Compras/Configurações e o t�
   assert.doesNotMatch(legacy, /abrirV2\("(compras|configuracoes)"/);
   assert.doesNotMatch(legacy, /abrirRecursoV2\("(compras|configuracoes)"/);
   // o NAV do técnico continua curto e só abre a venda de campo
-  assert.match(legacy, /tecnico: \["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo"\]/);
+  // "central" é consulta somente leitura da Central Técnica (RLS da própria empresa);
+  // administrar o acervo ("gerirCentral") segue fora do papel do técnico.
+  assert.match(legacy, /tecnico: \["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo", "central"\]/);
+  assert.doesNotMatch(legacy, /tecnico:[^\n]*"gerirCentral"/);
   assert.match(legacy, /onClick=\{\(\) => n\.id === "vendaCampo" \? contexto\?\.abrirRecursoV2\?\.\("venda-os"\) : irPara\(n\.id\)\}/);
 });
 

@@ -52,7 +52,10 @@ test('UI exposes owner Lista/Semana/Mês and technician Meu dia without granting
   assert.match(source, /\[\["hoje", "Hoje"\], \["proximos", "Próximos"\], \["semdata", "Sem data"\], \["concluidos", "Concluídos"\]\]/);
   assert.match(source, /PageHead title=\{tecnico \? "Meu dia" : "Agenda"\}/);
   assert.match(source, /action=\{!tecnico && <Btn icon=\{Plus\}/);
-  assert.match(source, /tecnico: \["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo"\]/);
+  // "central" é consulta somente leitura da Central Técnica (RLS da própria empresa);
+  // administrar o acervo ("gerirCentral") segue fora do papel do técnico.
+  assert.match(source, /tecnico: \["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo", "central"\]/);
+  assert.doesNotMatch(source, /tecnico:[^\n]*"gerirCentral"/);
 });
 
 test('frontend defense and database RLS preserve assigned-only and cross-tenant boundaries', () => {

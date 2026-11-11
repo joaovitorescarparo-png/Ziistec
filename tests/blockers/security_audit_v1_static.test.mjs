@@ -111,7 +111,13 @@ test('inventário de destinos externos: window.open só abre wa.me fixo, rota mo
       && /const digits=v=>String\(v\|\|''\)\.replace\(\/\\D\/g,''\)/.test(read(file));
     const mapa = file ==='src/screens/v2/ClientLocationsV2.jsx' && /^url,'_blank','noopener,noreferrer'\)/.test(call);
     const rota = file === 'src/screens/v2/WorkOrderMemoryBaseV2.jsx' && /noopener,noreferrer/.test(call);
-    assert.ok(legacyWhatsapp || comprovante || posVenda || mapa || rota, `destino de window.open não inventariado: ${file}: ${call}`);
+    // Documento técnico: a URL sai de urlDocumentoCT, que só devolve https — link
+    // oficial do fabricante (restrito a https por CHECK no banco) ou signed URL
+    // temporária do bucket privado. Nada de destino cru vindo da linha.
+    const documentoTecnico = file === 'src/components/CentralTecnicaScreen.jsx'
+      && /^url,'_blank','noopener,noreferrer'\)/.test(call)
+      && /const destinoHttps = \(url\) =>/.test(read('src/lib/centralTecnicaApi.js'));
+    assert.ok(legacyWhatsapp || comprovante || posVenda || mapa || rota || documentoTecnico, `destino de window.open não inventariado: ${file}: ${call}`);
   }
   // Navegação programática só para a própria origem: caminho + query + fragmento de uma URL derivada da página atual.
   let navigations = 0;
