@@ -4,3 +4,5 @@ dist
 .env.local
 .vercel
 supabase/0001_ziistec_fundacao_FINAL.sql
+supabase/.branches
+supabase/.temp
