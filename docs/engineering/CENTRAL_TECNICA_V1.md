@@ -140,8 +140,29 @@ dentro do PDF em `CENTRAL_TECH_V11_DOCUMENT_INDEXING.md`.
 
 - Conteúdo global não tem backoffice: entra por `service_role`/platform admin AAL2.
   Documentado, sem botão escondido.
-- 0113–0115 ainda não aplicadas em ambiente real quando este documento foi escrito;
-  H0 é o primeiro destino. Production e Beta Live intocados; `main` não mergeada.
+- 0113–0115 **não aplicadas em nenhum ambiente real**. O H0 (`auojcljfahhpkfqqbygd`)
+  está `INACTIVE` (pausado no plano Free): nem a verificação somente leitura do
+  baseline roda — a API responde "Database is possibly not accessible at the
+  moment". Retomar um projeto pausado é ação de infraestrutura do dono, então foi
+  deixada para ele; a sequência a executar depois de retomar está em
+  "Próximo passo no H0" abaixo. Production (`diztevlpbcfqleizswxr`) e Beta Live
+  (`xadoktssibuuebzzjrhv`) intocados; `main` não mergeada.
+
+## Próximo passo no H0
+
+Com o H0 retomado, nesta ordem:
+
+1. Provar o baseline somente leitura: `work_order_technical_base` (0111),
+   `installed_equipment` e `client_locations` (0083), `service_receipts` (0100) e
+   `zt_guard_company_member_identity` (0112) presentes; `equipment_models`,
+   `equipment_quick_guides` e `work_order_equipment` **ausentes**; contagem de
+   definers em 149.
+2. Aplicar `0113` → `0114` → `0115`, uma por vez, conferindo o retorno de cada uma.
+3. Reconferir: definers em 162, bucket `zt-equipment-docs` privado, as 9 tabelas
+   novas com RLS e nenhum privilégio para `anon`.
+4. Validar pelo PostgREST/Storage reais com dados sintéticos (Owner A, Technician A,
+   Owner B), incluindo signed URL de documento e negativa de acesso cruzado.
+5. Preview da branch de integração apontando para o H0 — nunca Production.
 - A verificação `verify-consolidated-source.mjs` valida o estado arqueológico
   pós-codemod (roda `apply-round32` antes) e já estava defasada do arquivo vivo
   antes desta onda; não é gate de CI nem de `verify:v2`. Os gates de integridade
