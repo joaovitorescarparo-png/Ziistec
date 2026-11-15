@@ -478,7 +478,8 @@ create or replace function public.zt_operations_board(
   p_company uuid,
   p_from date,
   p_to date,
-  p_limit integer default 400
+  p_limit integer default 400,
+  p_include_done boolean default false
 )
 returns jsonb
 language plpgsql
@@ -544,10 +545,13 @@ begin
         left join public.client_locations loc on loc.id = w.client_location_id
        where w.company_id = p_company
          and w.deleted_at is null
-         and w.status not in ('done','canceled')
+         and w.status <> 'canceled'
+         -- Concluídas só entram quando a tela pede: o quadro de despacho é do
+         -- que ainda vai acontecer, e carregar histórico encheria a coluna.
+         and (coalesce(p_include_done,false) or w.status <> 'done')
          and (
            (w.scheduled_date between v_from and v_to)
-           or w.scheduled_date is null
+           or (w.scheduled_date is null and w.status <> 'done')
            or (w.scheduled_date < v_from and w.status in ('scheduled','in_progress'))
          )
        order by coalesce(w.scheduled_date,'9999-12-31'), coalesce(w.scheduled_time,'23:59'), w.number
@@ -562,8 +566,8 @@ begin
     'cards', v_cards);
 end;
 $$;
-revoke all on function public.zt_operations_board(uuid,date,date,integer) from public,anon;
-grant execute on function public.zt_operations_board(uuid,date,date,integer) to authenticated,service_role;
+revoke all on function public.zt_operations_board(uuid,date,date,integer,boolean) from public,anon;
+grant execute on function public.zt_operations_board(uuid,date,date,integer,boolean) to authenticated,service_role;
 
 -- Aviso de conflito consultado pela tela antes de confirmar o arraste.
 create or replace function public.zt_work_order_schedule_conflicts(

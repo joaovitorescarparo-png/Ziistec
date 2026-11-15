@@ -51,6 +51,7 @@ import ServiceReceiptPanel from "../components/ServiceReceiptPanel";
 import QuoteClientLocationField from "../components/QuoteClientLocationField";
 import LocationHistoryPanel from "../components/LocationHistoryPanel";
 import CentralTecnicaScreen from "../components/CentralTecnicaScreen";
+import OperationsBoard from "../components/OperationsBoard";
 import WorkOrderEquipmentPanel from "../components/WorkOrderEquipmentPanel";
 import { listarLocaisClienteOrcamentoV2DB } from "../lib/quoteReuseV2Api";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
@@ -280,7 +281,7 @@ const ST_ASSINATURA = {
 
 /* permissões por papel. A lista é curta de propósito: dois papéis, regras claras. */
 const PERMISSOES = {
-  proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "central", "gerirCentral", "equipe", "config", "assinatura", "verValores", "todasOS"],
+  proprietario: ["inicio", "agenda", "clientes", "catalogo", "orcamentos", "ordens", "compras", "financeiro", "garantias", "central", "gerirCentral", "operacoes", "equipe", "config", "assinatura", "verValores", "todasOS"],
   tecnico: ["inicio", "agenda", "ordens", "registrarMateriais", "vendaCampo", "central"],
 };
 const pode = (papel, chave) => (PERMISSOES[papel] || []).includes(chave);
@@ -1330,6 +1331,7 @@ export default function ZiisTec({ contexto }) {
     { id: "catalogo", label: "Serviços e produtos", icon: Wrench },
     { id: "orcamentos", label: "Orçamentos", icon: FileText },
     { id: "ordens", label: "Ordens de serviço", icon: ClipboardList },
+    { id: "operacoes", label: "Central de Operações", icon: Users2 },
     { id: "vendaCampo", label: "Produtos", icon: ShoppingCart },
     { id: "garantias", label: "Garantias", icon: ShieldCheck },
     { id: "central", label: "Central Técnica", icon: BookOpen },
@@ -1499,6 +1501,11 @@ export default function ZiisTec({ contexto }) {
           {tela === "orcamentos" && <Orcamentos {...props} />}
           {tela === "ordens" && <TelaErrorBoundary key={osAberta || "ordens-lista"} onBack={() => setOsAberta(null)}><OrdensServico {...props} /></TelaErrorBoundary>}
           {tela === "garantias" && <Garantias {...props} />}
+          {tela === "operacoes" && (
+            <OperationsBoard
+              empresaId={empresaId} usuarioAtual={usuarioAtual} real={real}
+              aviso={aviso} abrirOS={abrirOS} hoje={hojeISO()} />
+          )}
           {tela === "central" && (
             <CentralTecnicaScreen
               empresaId={empresaId} usuarioAtual={usuarioAtual} real={real} aviso={aviso}
