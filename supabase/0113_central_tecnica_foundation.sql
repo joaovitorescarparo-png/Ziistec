@@ -22,6 +22,8 @@
 --                          daquela empresa; escrita do owner.
 -- O escopo é decidido no INSERT e NÃO muda depois: company_id é imutável em
 -- categoria, fabricante, modelo, documento e ficha (zt_eq_guard_company_immutable).
+-- O selo is_official é da plataforma: só documento GLOBAL, e só service_role ou
+-- platform admin AAL2 o liga (zt_eq_guard_document_official).
 -- Idempotente. Sem DROP TABLE, TRUNCATE ou DELETE de dados.
 
 do $$ begin
@@ -238,7 +240,12 @@ create index if not exists idx_equipment_models_compact_trgm
 -- ------------------------------------------------------- documento técnico
 -- Direito autoral: conteúdo de terceiro entra como METADADO + link oficial.
 -- Upload só do que a empresa pode guardar, em bucket privado por tenant.
--- is_official nunca é decidido pelo browser: só escopo global/administrativo.
+-- is_official é o selo de confiança da PLATAFORMA ZiisTec, não da empresa:
+--   * estrutural: documento privado (company_id preenchido) nunca é oficial
+--     (constraint equipment_documents_official_global_only);
+--   * de autoria: mesmo em escopo global, só service_role ou platform admin AAL2
+--     ligam/desligam o selo (trigger trg_equipment_documents_official).
+-- O owner comum cria documento privado, sempre com is_official=false.
 create table if not exists public.equipment_documents (
   id uuid primary key default gen_random_uuid(),
   company_id uuid references public.companies(id) on delete cascade,
@@ -272,6 +279,7 @@ create table if not exists public.equipment_documents (
   constraint equipment_documents_content_type_len check (content_type is null or char_length(content_type) <= 120),
   constraint equipment_documents_size_ck check (size_bytes is null or (size_bytes > 0 and size_bytes <= 52428800)),
   constraint equipment_documents_checksum_shape check (checksum is null or checksum ~ '^[a-f0-9]{64}$'),
+  constraint equipment_documents_official_global_only check (not is_official or company_id is null),
   constraint equipment_documents_source_shape check (
     (source_kind='official_url' and official_url is not null and bucket is null and path is null)
     or (source_kind='company_upload' and bucket is not null and path is not null and company_id is not null)
@@ -494,6 +502,42 @@ begin
   end loop;
 end
 $$;
+
+-- ------------------------------------------------ selo "oficial" do documento
+-- Autorização pelo banco, nunca por user_metadata: zt_is_platform_admin() lê
+-- profiles.is_platform_admin e exige AAL2 (0019). current_user distingue o
+-- navegador (authenticated/anon) do backend confiável (service_role, migration),
+-- mesma convenção das guardas 0044/0053/0101.
+-- SECURITY INVOKER de propósito: precisa do current_user real de quem escreve.
+create or replace function public.zt_eq_guard_document_official()
+returns trigger
+language plpgsql
+security invoker
+set search_path=''
+as $$
+begin
+  if tg_op='INSERT' then
+    if not new.is_official then return new; end if;
+  elsif new.is_official is not distinct from old.is_official then
+    return new;
+  end if;
+  if new.is_official and new.company_id is not null then
+    raise exception 'Documento privado da empresa não pode ser marcado como oficial'
+      using errcode='42501';
+  end if;
+  if current_user in ('authenticated','anon') and not coalesce(public.zt_is_platform_admin(),false) then
+    raise exception 'O selo de documento oficial é definido somente pela plataforma ZiisTec'
+      using errcode='42501';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.zt_eq_guard_document_official() from public,anon,authenticated;
+grant execute on function public.zt_eq_guard_document_official() to service_role;
+drop trigger if exists trg_equipment_documents_official on public.equipment_documents;
+create trigger trg_equipment_documents_official
+before insert or update on public.equipment_documents
+for each row execute function public.zt_eq_guard_document_official();
 
 -- Área técnica: categoria global ou da própria empresa.
 create or replace function public.zt_eq_guard_area()
