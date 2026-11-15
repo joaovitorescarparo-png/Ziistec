@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -168,9 +168,23 @@ test('Gate: runner SQL/RLS, inventário de definers e verify:v2 cobrem o securit
   const runner = read('scripts/run-sql-rls-ci.sh');
   assert.ok(runner.includes('supabase/tests/v2_central_tecnica_rls_rollback.sql') && runner.includes('supabase/tests/v2_central_tecnica_golden_path_rollback.sql'));
   const definers = read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql');
-  assert.ok(definers.includes("if v_total<>164 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=164 actual=%',v_total; end if;"));
+  // A cadeia cresceu com a 0116 (Operations Dispatch): 149 (0112) -> 164 com as
+  // 0113-0115 corrigidas -> 171 com a 0116. A prova por migration da Central
+  // Técnica continua exata, e o inventário precisa citar os dois catálogos.
+  assert.ok(definers.includes("if v_total<>171 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=171 actual=%',v_total; end if;"));
+  assert.ok(definers.includes('Cadeia: 149 (0112) -> 164 (0113-0115 corrigidas) -> 171 (0116).'),
+    'o inventário registra a cadeia inteira, não só o número final');
+  for (const nome of ['zt_publish_work_order_technical_case', 'zt_unpublish_work_order_technical_case',
+    'zt_eq_guard_company_immutable', 'zt_eq_guard_document_official']) {
+    assert.ok(definers.includes(nome), `o inventário nomeia ${nome}`);
+  }
+  for (const nome of ['zt_assign_work_order', 'zt_schedule_work_order', 'zt_set_work_order_priority',
+    'zt_operations_board', 'zt_work_order_schedule_conflicts', 'dispatch_load_work_order', 'dispatch_replay']) {
+    assert.ok(definers.includes(nome), `o inventário nomeia o definer ${nome} da 0116`);
+  }
   const definerCount = (sql) => [...stripComments(sql).matchAll(/create or replace function [\s\S]*?as \$\$/g)].filter((match) => /security definer/.test(match[0])).length;
-  assert.deepEqual([definerCount(m0113), definerCount(m0114), definerCount(m0115)], [7, 1, 7], 'definers por migration: 149 + 15 = 164');
+  assert.deepEqual([definerCount(m0113), definerCount(m0114), definerCount(m0115)], [7, 1, 7], 'definers por migration da Central Técnica: 149 + 15 = 164');
+  assert.equal(definerCount(read('supabase/0116_operations_dispatch.sql')), 7, 'a 0116 soma sete definers: 164 + 7 = 171');
 
   const golden = read('supabase/tests/v2_central_tecnica_golden_path_rollback.sql');
   for (const marker of ['19h_ADVERSARIAL_nenhum_valor_sensivel_bruto_na_resposta', '19m_ADVERSARIAL_busca_pelos_valores_sensiveis_nao_devolve_nada', '17b_sem_publicacao_nao_ha_caso_para_a_equipe', '10000000-0000-0000-0000-000000000005']) {
@@ -182,6 +196,16 @@ test('Gate: runner SQL/RLS, inventário de definers e verify:v2 cobrem o securit
   }
   const verify = JSON.parse(read('package.json')).scripts['verify:v2'];
   assert.ok(verify.includes('tests/blockers/central_tech_security_fix.test.mjs'));
-  // 0001–0112 não são tocadas por este fix: as três migrations continuam não renumeradas e não existe 0116.
-  assert.equal(/0116/.test(runner), false);
+  // 0001–0112 continuam intocadas e as três migrations da Central Técnica seguem
+  // sem renumeração. A 0116 que existe agora é a do despacho de operações, que
+  // entra DEPOIS das corrigidas e está registrada no runner — não é um
+  // renumeramento da Central Técnica.
+  assert.ok(runner.includes('supabase/tests/v2_operations_dispatch_rollback.sql')
+    && runner.includes('supabase/tests/v2_operations_golden_path_rollback.sql'),
+    'os testes da 0116 entram no mesmo gate oficial');
+  const migrations = readdirSync(path.join(root, 'supabase')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  assert.deepEqual(migrations.filter((f) => /^011[3-9]/.test(f)),
+    ['0113_central_tecnica_foundation.sql', '0114_central_tecnica_search.sql',
+      '0115_central_tecnica_os_and_cases.sql', '0116_operations_dispatch.sql'],
+    'a Central Técnica segue em 0113-0115 e a 0116 é só o despacho');
 });
