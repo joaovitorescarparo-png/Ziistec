@@ -4,8 +4,13 @@ const STAGING_SUPABASE_URL = 'https://xadoktssibuuebzzjrhv.supabase.co';
 const STAGING_PUBLISHABLE_KEY = 'sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e';
 const H0_SUPABASE_URL = 'https://auojcljfahhpkfqqbygd.supabase.co';
 const H0_PUBLISHABLE_KEY = 'sb_publishable_SzojrPawC9GAEBHoN9caSw_aTr_3o2a';
-// Branch de trabalho do H0 (projeto próprio e descartável). Fica fora de STAGING_BRANCHES: nunca resolve para o Beta nem para Production.
-const H0_BRANCHES = Object.freeze(['claude/blocks34-port-beta-v1']);
+// Branches de homologação do H0 (projeto próprio e descartável), por nome EXATO. Ficam fora de STAGING_BRANCHES: nunca resolvem
+// para o Beta nem para Production. Cada uma tem o host de Preview correspondente em H0_SUPABASE_HOSTS (src/lib/supabaseConfig.js).
+const H0_BRANCHES = Object.freeze([
+  'claude/blocks34-port-beta-v1',
+  // Central Técnica V1 (0113–0115): branch de integração, homologada somente contra o H0.
+  'claude/central-tecnica-v1-integration',
+]);
 const STAGING_BRANCH = 'product-v2-review';
 const STAGING_BRANCHES = Object.freeze([
   STAGING_BRANCH,

@@ -17,10 +17,14 @@ export const STAGING_SUPABASE_HOSTS = Object.freeze([
   "beta.ziistec.com",
 ]);
 
-// H0 (homologação isolada, projeto próprio e descartável): um único host de Preview, nunca compartilhado com Production ou Beta.
-// Só vale na branch de trabalho do H0; não pode seguir para a main (ver docs/engineering/H0_ENVIRONMENT_REQUIRED.md).
+// H0 (homologação isolada, projeto próprio e descartável): hosts de Preview EXATOS, nunca compartilhados com Production ou Beta.
+// Cada host é o Preview de uma branch de homologação listada em H0_BRANCHES (api/_supabaseServerConfig.js): a comparação é por
+// igualdade, sem curinga, prefixo ou substring. Só valem nessas branches; não podem seguir para a main
+// (ver docs/engineering/H0_ENVIRONMENT.md).
 export const H0_SUPABASE_HOSTS = Object.freeze([
   "ziistec-git-claude-blocks34-port-beta-v1-js-connect.vercel.app",
+  // Central Técnica V1 (0113–0115): Preview da branch de integração, homologada somente contra o H0.
+  "ziistec-git-claude-central-tecnica-v1-integration-js-connect.vercel.app",
 ]);
 
 export function resolverConfigSupabase({
