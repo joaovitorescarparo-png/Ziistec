@@ -337,7 +337,8 @@ export function resumoProposta({ intent, cliente, local, data, horario, descrica
     if (local?.nome) linhas.push(['Local', local.nome]);
     linhas.push(['Data', dataBR ? `${dataBR}${horario ? ` às ${horario}` : ''}` : 'Sem agendamento']);
     linhas.push(['Descrição', descricao || '—']);
-    linhas.push(['Responsável', responsavel?.nome || 'Não definido']);
+    // "Sem responsável" é o destino real: a OS nasce no quadro para distribuição.
+    linhas.push(['Responsável', responsavel?.nome || 'Sem responsável (vai para o quadro)']);
   } else if (intent === 'schedule_work_order') {
     linhas.push(['Ação', data ? 'Agendar ordem de serviço' : 'Remover agendamento']);
     linhas.push(['OS', ordem?.numero || '—']);

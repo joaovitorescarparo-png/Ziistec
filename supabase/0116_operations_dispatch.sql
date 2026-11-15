@@ -37,6 +37,23 @@ do $$ begin
     check (priority in ('normal','high','urgent'));
 end $$;
 
+-- A 0105 revogou SELECT de work_orders para authenticated e concedeu coluna por
+-- coluna, excluindo as financeiras (approved_*). Aquela lista foi montada com as
+-- colunas da época: sem refazer a concessão, priority nasceria ILEGÍVEL para o
+-- app (até para o proprietário), porque não estaria na lista. Refazemos a mesma
+-- regra da 0105 — tudo menos approved_* — agora incluindo priority.
+do $$
+declare v_cols text;
+begin
+  select string_agg(quote_ident(a.attname), ', ' order by a.attnum) into v_cols
+    from pg_attribute a
+   where a.attrelid = 'public.work_orders'::regclass
+     and a.attnum > 0
+     and not a.attisdropped
+     and a.attname not in ('approved_subtotal','approved_discount','approved_surcharge','approved_total');
+  execute format('grant select (%s) on table public.work_orders to authenticated', v_cols);
+end $$;
+
 -- Índices do quadro: a leitura é sempre por empresa + janela de data.
 create index if not exists idx_work_orders_dispatch_window
   on public.work_orders(company_id, scheduled_date, scheduled_time)

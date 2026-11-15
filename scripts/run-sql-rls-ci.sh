@@ -115,6 +115,8 @@ regressions=(
   supabase/tests/v2_first_customers_golden_path_rollback.sql
   supabase/tests/v2_central_tecnica_rls_rollback.sql
   supabase/tests/v2_central_tecnica_golden_path_rollback.sql
+  supabase/tests/v2_operations_dispatch_rollback.sql
+  supabase/tests/v2_operations_golden_path_rollback.sql
 )
 
 # Falha de regressão também vira anotação do GitHub (legível sem baixar o log do job).
