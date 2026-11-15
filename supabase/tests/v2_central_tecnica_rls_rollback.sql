@@ -5,6 +5,14 @@
 -- JOIN, busca ou Storage; escrita de conteúdo GLOBAL só com platform admin AAL2;
 -- ficha rápida inválida é recusada; a unidade física não pode ser vinculada à OS
 -- de outro cliente; os casos não trazem PII nem valor financeiro.
+-- Security fix (antes da 1ª aplicação no H0):
+--   * escopo imutável: owner de A e de B não move categoria/fabricante/modelo/
+--     documento/ficha A -> B, nem privado <-> global; a busca SECURITY DEFINER não
+--     devolve nome de pai de outra empresa mesmo com o pai corrompido;
+--   * is_official: owner comum não liga o selo; só service_role/platform admin AAL2,
+--     e só em documento global;
+--   * caso técnico é publicação curada do owner; a consulta não seleciona texto
+--     bruto da OS (conferido no corpo da função).
 -- Usa as identidades de ci_local_seed.sql. Destino: SOMENTE CI descartável.
 -- Tudo termina em ROLLBACK.
 
@@ -57,8 +65,30 @@ begin
   set local role anon;
 end $$;
 
+-- Backend confiável: sem JWT de usuário, papel service_role (BYPASSRLS, triggers valem).
+create function pg_temp.ct_service()
+returns void language plpgsql as $$
+begin
+  reset role;
+  perform set_config('request.jwt.claim.sub','',true);
+  perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+  set local role service_role;
+end $$;
+
+-- Volta ao papel do script (postgres) com a claim do Owner A, como nos fixtures:
+-- o guard de assinatura exige identidade mesmo para o superusuário.
+create function pg_temp.ct_root()
+returns void language plpgsql as $$
+begin
+  reset role;
+  perform set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+  perform set_config('request.jwt.claims','{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated","aal":"aal1"}',true);
+end $$;
+
+grant select, insert, update on zt_ct_results to service_role;
 grant execute on function pg_temp.ct_check(text,boolean,text), pg_temp.ct_state(text),
-  pg_temp.ct_count(text), pg_temp.ct_as(uuid,text), pg_temp.ct_anon() to authenticated, anon;
+  pg_temp.ct_count(text), pg_temp.ct_as(uuid,text), pg_temp.ct_anon(), pg_temp.ct_service()
+  to authenticated, anon, service_role;
 
 -- ---------------------------------------------------------------- fixtures
 -- As tabelas operacionais têm guard de assinatura, que exige identidade; os
@@ -181,7 +211,7 @@ begin
   -- nem promove conteúdo próprio a global
   perform pg_temp.ct_check('owner_a_nao_promove_modelo_a_global',
     pg_temp.ct_state(format($q$update public.equipment_models set company_id=null where id=%L$q$,v_model))<>'ok'
-    or (select company_id from public.equipment_models where id=v_model) is not null,null);
+    and (select company_id from public.equipment_models where id=v_model)='20000000-0000-0000-0000-000000000001',null);
 
   -- ficha rápida inválida é recusada pelo banco
   perform pg_temp.ct_check('ficha_sem_lista_de_secoes_recusada',
@@ -320,6 +350,333 @@ begin
     pg_temp.ct_count('select 1 from public.work_order_equipment')=0,null);
   perform pg_temp.ct_check('tecnico_b_nao_le_casos_da_a',
     pg_temp.ct_state(format($q$select public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',%L)$q$,v_model_a))<>'ok',null);
+end $$;
+reset role;
+
+-- ===================== ESCOPO IMUTÁVEL: owner de A e de B não move nada entre tenants
+-- O ataque do review: quem é owner das duas empresas passa na RLS de UPDATE com o
+-- company_id antigo (USING) e com o novo (WITH CHECK). O guard nega pelo par OLD/NEW.
+do $$
+declare
+  v_a constant uuid := '20000000-0000-0000-0000-000000000001';
+  v_b constant uuid := '20000000-0000-0000-0000-000000000002';
+  v_ab constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_mfr uuid; v_cat uuid; v_model uuid;
+  v_gmfr uuid := 'c7000000-0000-4000-8000-0000000e0001';
+  v_gcat uuid;
+  v_gmodel uuid := 'c7000000-0000-4000-8000-0000000f0001';
+  v_model2 uuid := 'c7000000-0000-4000-8000-0000000f0002';
+  v_doc uuid := 'c7000000-0000-4000-8000-0000000d0c01';
+  v_guide uuid := 'c7000000-0000-4000-8000-0000000d0c02';
+begin
+  -- Owner A passa a ser TAMBÉM owner ativo da Empresa B (fixture, como postgres).
+  insert into public.company_members(company_id,user_id,role,status,job_title)
+  values (v_b,v_ab,'owner','active','CI Owner A+B')
+  on conflict (company_id,user_id) do update set role='owner',status='active';
+
+  -- Biblioteca global mínima (como postgres): isola o guard de imutabilidade das
+  -- outras guardas de escopo — com pais globais, só ele pode negar a mudança.
+  select id into v_gcat from public.equipment_categories where company_id is null and slug='fechaduras';
+  insert into public.equipment_manufacturers(id,company_id,name) values (v_gmfr,null,'Fabricante Global CT');
+  insert into public.equipment_models(id,company_id,manufacturer_id,category_id,name)
+  values (v_gmodel,null,v_gmfr,v_gcat,'Modelo Global CT-G1');
+
+  select id,manufacturer_id,category_id into v_model,v_mfr,v_cat
+    from public.equipment_models where company_id=v_a and name='CT-100';
+
+  perform pg_temp.ct_as(v_ab);
+  perform pg_temp.ct_check('owner_ab_e_owner_das_duas_empresas',
+    public.zt_is_owner(v_a) and public.zt_is_owner(v_b),null);
+
+  -- conteúdo privado de A sobre pais GLOBAIS
+  insert into public.equipment_models(id,company_id,manufacturer_id,category_id,name)
+  values (v_model2,v_a,v_gmfr,v_gcat,'CT-300 pais globais');
+  insert into public.equipment_documents(id,company_id,model_id,title,source_kind,official_url)
+  values (v_doc,v_a,v_gmodel,'Nota interna A sobre modelo global','official_url','https://exemplo.invalid/a.pdf');
+  insert into public.equipment_quick_guides(id,company_id,model_id,sections)
+  values (v_guide,v_a,v_gmodel,'[{"kind":"other","title":"Dica interna A","items":[{"note":"conferir fonte"}]}]'::jsonb);
+
+  -- privado A -> privado B
+  perform pg_temp.ct_check('owner_ab_nao_move_fabricante_de_a_para_b',
+    pg_temp.ct_state(format('update public.equipment_manufacturers set company_id=%L where id=%L',v_b,v_mfr))='42501',null);
+  perform pg_temp.ct_check('owner_ab_nao_move_categoria_de_a_para_b',
+    pg_temp.ct_state(format('update public.equipment_categories set company_id=%L where id=%L',v_b,v_cat))='42501',null);
+  perform pg_temp.ct_check('owner_ab_nao_move_modelo_de_a_para_b',
+    pg_temp.ct_state(format('update public.equipment_models set company_id=%L where id=%L',v_b,v_model2))='42501',null);
+  perform pg_temp.ct_check('owner_ab_nao_move_documento_de_a_para_b',
+    pg_temp.ct_state(format('update public.equipment_documents set company_id=%L where id=%L',v_b,v_doc))='42501',null);
+  perform pg_temp.ct_check('owner_ab_nao_move_ficha_de_a_para_b',
+    pg_temp.ct_state(format('update public.equipment_quick_guides set company_id=%L where id=%L',v_b,v_guide))='42501',null);
+  -- privado -> global
+  perform pg_temp.ct_check('owner_ab_nao_promove_fabricante_a_global',
+    pg_temp.ct_state(format('update public.equipment_manufacturers set company_id=null where id=%L',v_mfr))<>'ok',null);
+  perform pg_temp.ct_check('owner_ab_nao_promove_categoria_a_global',
+    pg_temp.ct_state(format('update public.equipment_categories set company_id=null where id=%L',v_cat))<>'ok',null);
+  -- mover junto com outra coluna também é negado
+  perform pg_temp.ct_check('owner_ab_nao_move_fabricante_disfarcado_em_rename',
+    pg_temp.ct_state(format($q$update public.equipment_manufacturers set name='Renomeado',company_id=%L where id=%L$q$,v_b,v_mfr))='42501',null);
+  -- UPDATE comum continua funcionando (o guard não trava a edição legítima)
+  perform pg_temp.ct_check('owner_ab_edita_fabricante_sem_trocar_escopo',
+    pg_temp.ct_state(format($q$update public.equipment_manufacturers set website='https://exemplo.invalid/novo' where id=%L$q$,v_mfr))='ok',null);
+  reset role;
+
+  perform pg_temp.ct_check('escopo_inalterado_apos_tentativas',
+    (select company_id from public.equipment_manufacturers where id=v_mfr)=v_a
+    and (select company_id from public.equipment_categories where id=v_cat)=v_a
+    and (select company_id from public.equipment_models where id=v_model2)=v_a
+    and (select company_id from public.equipment_documents where id=v_doc)=v_a
+    and (select company_id from public.equipment_quick_guides where id=v_guide)=v_a
+    and (select name from public.equipment_manufacturers where id=v_mfr)='Fabricante Demo',null);
+
+  -- Nem o backend confiável move escopo por UPDATE comum.
+  perform pg_temp.ct_service();
+  perform pg_temp.ct_check('service_role_nao_move_fabricante_de_a_para_b',
+    pg_temp.ct_state(format('update public.equipment_manufacturers set company_id=%L where id=%L',v_b,v_mfr))='42501',null);
+  perform pg_temp.ct_check('service_role_nao_torna_global_em_privado',
+    pg_temp.ct_state(format('update public.equipment_manufacturers set company_id=%L where id=%L',v_a,v_gmfr))='42501',null);
+  perform pg_temp.ct_check('service_role_nao_torna_privado_em_global',
+    pg_temp.ct_state(format('update public.equipment_models set company_id=null where id=%L',v_model2))='42501',null);
+  perform pg_temp.ct_root();
+
+  -- os cinco triggers existem e não estão desabilitados
+  perform pg_temp.ct_check('guard_de_escopo_imutavel_nas_cinco_tabelas',
+    (select count(*) from pg_trigger g join pg_class c on c.oid=g.tgrelid
+      where not g.tgisinternal and g.tgenabled='O'
+        and g.tgname='trg_'||c.relname||'_company_immutable'
+        and c.relname in ('equipment_categories','equipment_manufacturers','equipment_models',
+                          'equipment_documents','equipment_quick_guides'))=5,null);
+
+  -- limpa o que só servia a este bloco
+  delete from public.equipment_documents where id=v_doc;
+  delete from public.equipment_quick_guides where id=v_guide;
+  delete from public.equipment_models where id=v_model2;
+  delete from public.company_members where company_id=v_b and user_id=v_ab;
+end $$;
+reset role;
+
+-- ============ TECHNICIAN A nunca recebe nome/categoria/fabricante privado da B
+do $$
+declare
+  v_a constant uuid := '20000000-0000-0000-0000-000000000001';
+  v_b constant uuid := '20000000-0000-0000-0000-000000000002';
+  v_bmfr uuid; v_bcat uuid; v_bmodel uuid;
+  v_mfr uuid; v_cat uuid; v_model uuid;
+begin
+  -- Empresa B cria o próprio acervo privado, com nomes inconfundíveis.
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000002');
+  insert into public.equipment_manufacturers(company_id,name) values (v_b,'Fabricante Sigiloso B') returning id into v_bmfr;
+  insert into public.equipment_categories(company_id,name,slug) values (v_b,'Categoria Sigilosa B','categoria-sigilosa-b') returning id into v_bcat;
+  insert into public.equipment_models(company_id,manufacturer_id,category_id,name,model_code)
+  values (v_b,v_bmfr,v_bcat,'Modelo Sigiloso B','MSB 900') returning id into v_bmodel;
+  reset role;
+
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000003');
+  perform pg_temp.ct_check('tecnico_a_nao_le_fabricante_privado_da_b',
+    pg_temp.ct_count(format('select 1 from public.equipment_manufacturers where id=%L or company_id=%L',v_bmfr,v_b))=0,null);
+  perform pg_temp.ct_check('tecnico_a_nao_le_categoria_privada_da_b',
+    pg_temp.ct_count(format('select 1 from public.equipment_categories where id=%L or company_id=%L',v_bcat,v_b))=0,null);
+  perform pg_temp.ct_check('tecnico_a_nao_le_modelo_privado_da_b',
+    pg_temp.ct_count(format('select 1 from public.equipment_models where id=%L or company_id=%L',v_bmodel,v_b))=0,null);
+  perform pg_temp.ct_check('busca_do_tecnico_a_nao_devolve_acervo_da_b',
+    pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','Sigiloso')$q$)=0
+    and pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','MSB900')$q$)=0
+    and pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','Sigilosa')$q$)=0,null);
+  perform pg_temp.ct_check('tecnico_a_nao_busca_dentro_da_b',
+    pg_temp.ct_state($q$select public.zt_equipment_search('20000000-0000-0000-0000-000000000002','Sigiloso')$q$)='42501',null);
+  perform pg_temp.ct_check('tecnico_a_nao_cria_modelo_sobre_pai_da_b',
+    pg_temp.ct_state(format($q$insert into public.equipment_models(company_id,manufacturer_id,category_id,name) values ('20000000-0000-0000-0000-000000000001',%L,%L,'Parasita')$q$,v_bmfr,v_bcat))<>'ok',null);
+  reset role;
+
+  -- Owner A também não ancora modelo próprio em pai privado da B.
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000001');
+  perform pg_temp.ct_check('owner_a_nao_cria_modelo_sobre_pai_da_b',
+    pg_temp.ct_state(format($q$insert into public.equipment_models(company_id,manufacturer_id,category_id,name) values ('20000000-0000-0000-0000-000000000001',%L,%L,'Parasita')$q$,v_bmfr,v_bcat))<>'ok',null);
+  reset role;
+
+  -- DEFESA EM PROFUNDIDADE da busca: simula o estado que os guards impedem (pai do
+  -- modelo CT-100 da A passa a pertencer à B). Os triggers de usuário das duas
+  -- tabelas-pai são desligados só nesta transação (tudo termina em ROLLBACK), como
+  -- faria um defeito futuro num guard; o papel do CI não é superusuário, por isso
+  -- DISABLE TRIGGER USER e não session_replication_role.
+  select id,manufacturer_id,category_id into v_model,v_mfr,v_cat
+    from public.equipment_models where company_id=v_a and name='CT-100';
+  alter table public.equipment_manufacturers disable trigger user;
+  alter table public.equipment_categories disable trigger user;
+  update public.equipment_manufacturers set company_id=v_b,name='Fabricante Vazado B' where id=v_mfr;
+  perform pg_temp.ct_check('fixture_pai_corrompido_montado',
+    (select company_id from public.equipment_manufacturers where id=v_mfr)=v_b,null);
+
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000003');
+  perform pg_temp.ct_check('busca_nao_devolve_fabricante_de_outra_empresa_com_pai_corrompido',
+    pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','CT 100') where manufacturer_name like '%Vazado%'$q$)=0
+    and pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','Vazado')$q$)=0
+    and pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','CT 100')$q$)=0,null);
+  reset role;
+
+  perform pg_temp.ct_root();
+  update public.equipment_manufacturers set company_id=v_a,name='Fabricante Demo' where id=v_mfr;
+  update public.equipment_categories set company_id=v_b,name='Categoria Vazada B' where id=v_cat;
+
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000003');
+  perform pg_temp.ct_check('busca_nao_devolve_categoria_de_outra_empresa_com_pai_corrompido',
+    pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','CT 100') where category_name like '%Vazada%'$q$)=0
+    and pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','CT 100')$q$)=0,null);
+  reset role;
+
+  perform pg_temp.ct_root();
+  update public.equipment_categories set company_id=v_a,name='Controle interno CT' where id=v_cat;
+  alter table public.equipment_manufacturers enable trigger user;
+  alter table public.equipment_categories enable trigger user;
+  perform pg_temp.ct_check('guards_religados_apos_a_simulacao',
+    pg_temp.ct_state(format('update public.equipment_manufacturers set company_id=%L where id=%L',v_b,v_mfr))='42501'
+    and pg_temp.ct_state(format('update public.equipment_categories set company_id=%L where id=%L',v_b,v_cat))='42501',null);
+
+  -- estado restaurado: a busca legítima volta a responder
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000003');
+  perform pg_temp.ct_check('busca_legitima_volta_apos_restaurar_os_pais',
+    pg_temp.ct_count($q$select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001','CT 100') where manufacturer_name='Fabricante Demo' and category_name='Controle interno CT'$q$)=1,null);
+  reset role;
+end $$;
+reset role;
+
+-- ========================= SELO OFICIAL: só a plataforma, e só em documento global
+do $$
+declare
+  v_a constant uuid := '20000000-0000-0000-0000-000000000001';
+  v_model uuid;
+  v_doc uuid;
+  v_gmodel constant uuid := 'c7000000-0000-4000-8000-0000000f0001';
+  v_gdoc constant uuid := 'c7000000-0000-4000-8000-0000000d0c11';
+begin
+  select id into v_model from public.equipment_models where company_id=v_a and name='CT-100';
+  select id into v_doc from public.equipment_documents where company_id=v_a and model_id=v_model and title='Manual CT-100';
+
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000001');
+  perform pg_temp.ct_check('owner_a_nao_cria_documento_oficial',
+    pg_temp.ct_state(format($q$insert into public.equipment_documents(company_id,model_id,title,source_kind,official_url,is_official) values ('20000000-0000-0000-0000-000000000001',%L,'Falso oficial','official_url','https://exemplo.invalid/f.pdf',true)$q$,v_model))='42501',null);
+  perform pg_temp.ct_check('owner_a_nao_promove_documento_a_oficial',
+    pg_temp.ct_state(format('update public.equipment_documents set is_official=true where id=%L',v_doc))='42501',null);
+  perform pg_temp.ct_check('owner_a_nao_cria_documento_global_oficial',
+    pg_temp.ct_state(format($q$insert into public.equipment_documents(company_id,model_id,title,source_kind,official_url,is_official) values (null,%L,'Falso global','official_url','https://exemplo.invalid/g.pdf',true)$q$,v_gmodel))<>'ok',null);
+  perform pg_temp.ct_check('owner_a_segue_criando_documento_privado_comum',
+    pg_temp.ct_state(format($q$insert into public.equipment_documents(company_id,model_id,title,source_kind,official_url) values ('20000000-0000-0000-0000-000000000001',%L,'Guia interno CT-100','official_url','https://exemplo.invalid/guia.pdf')$q$,v_model))='ok',null);
+  perform pg_temp.ct_check('owner_a_segue_editando_documento_privado_comum',
+    pg_temp.ct_state(format($q$update public.equipment_documents set version='2.0' where id=%L$q$,v_doc))='ok',null);
+  perform pg_temp.ct_root();
+  perform pg_temp.ct_check('nenhum_documento_privado_ficou_oficial',
+    not exists(select 1 from public.equipment_documents where company_id is not null and is_official),null);
+  delete from public.equipment_documents where company_id=v_a and title='Guia interno CT-100';
+
+  -- service_role administra o conteúdo global/oficial
+  perform pg_temp.ct_service();
+  perform pg_temp.ct_check('service_role_cria_documento_global_oficial',
+    pg_temp.ct_state(format($q$insert into public.equipment_documents(id,company_id,model_id,title,source_kind,official_url,is_official) values (%L,null,%L,'Manual oficial CT-G1','official_url','https://exemplo.invalid/oficial.pdf',true)$q$,v_gdoc,v_gmodel))='ok',null);
+  perform pg_temp.ct_check('service_role_desliga_e_religa_o_selo',
+    pg_temp.ct_state(format('update public.equipment_documents set is_official=false where id=%L',v_gdoc))='ok'
+    and pg_temp.ct_state(format('update public.equipment_documents set is_official=true where id=%L',v_gdoc))='ok',null);
+  -- nem a plataforma marca documento PRIVADO como oficial: o selo é do acervo global
+  perform pg_temp.ct_check('service_role_nao_marca_documento_privado_como_oficial',
+    pg_temp.ct_state(format('update public.equipment_documents set is_official=true where id=%L',v_doc))<>'ok',null);
+  perform pg_temp.ct_root();
+
+  -- platform admin: AAL1 não, AAL2 sim (mecanismo já existente, sem user_metadata)
+  update public.profiles set is_platform_admin=true where id='10000000-0000-0000-0000-000000000004';
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000004','aal1');
+  perform pg_temp.ct_check('platform_admin_aal1_nao_mexe_no_selo_oficial',
+    pg_temp.ct_state(format('update public.equipment_documents set is_official=false where id=%L',v_gdoc))<>'ok'
+    or (select is_official from public.equipment_documents where id=v_gdoc),null);
+  reset role;
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000004','aal2');
+  perform pg_temp.ct_check('platform_admin_aal2_gerencia_o_selo_oficial',
+    pg_temp.ct_state(format('update public.equipment_documents set is_official=false where id=%L',v_gdoc))='ok'
+    and pg_temp.ct_state(format('update public.equipment_documents set is_official=true where id=%L',v_gdoc))='ok',null);
+  reset role;
+  update public.profiles set is_platform_admin=false where id='10000000-0000-0000-0000-000000000004';
+
+  -- membro comum enxerga o documento global oficial, sem poder alterá-lo
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000003');
+  perform pg_temp.ct_check('tecnico_a_le_documento_global_oficial',
+    pg_temp.ct_count(format('select 1 from public.equipment_documents where id=%L and is_official',v_gdoc))=1,null);
+  reset role;
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000001');
+  update public.equipment_documents set is_official=false where id=v_gdoc;
+  reset role;
+  perform pg_temp.ct_check('owner_a_nao_desliga_selo_de_documento_global',
+    (select is_official from public.equipment_documents where id=v_gdoc),null);
+
+  perform pg_temp.ct_check('constraint_oficial_somente_global_existe',
+    exists(select 1 from pg_constraint where conname='equipment_documents_official_global_only'
+            and conrelid='public.equipment_documents'::regclass and convalidated),null);
+  perform pg_temp.ct_check('trigger_do_selo_oficial_ativo',
+    exists(select 1 from pg_trigger where tgname='trg_equipment_documents_official'
+            and tgrelid='public.equipment_documents'::regclass and tgenabled='O'),null);
+end $$;
+reset role;
+
+-- ======================= CASO TÉCNICO: publicação só do owner, escrita só por RPC
+do $$
+declare
+  v_wo constant uuid := 'c7000000-0000-4000-8000-00000000b001';
+  v_src text;
+begin
+  -- técnico atribuído registra a Base Técnica (0111 continua funcionando)
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000003');
+  perform pg_temp.ct_check('tecnico_a_registra_base_tecnica_da_propria_os',
+    pg_temp.ct_state(format($q$select public.zt_save_work_order_technical_base(%L,'Causa interna','Solução interna','easy','Aprendizado interno','c7000000-0000-4000-8000-00000000ba01')$q$,v_wo))='ok',null);
+  perform pg_temp.ct_check('tecnico_a_nao_publica_caso',
+    pg_temp.ct_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l','c7000000-0000-4000-8000-00000000ca01')$q$,v_wo))='42501',null);
+  perform pg_temp.ct_check('tecnico_a_nao_retira_caso',
+    pg_temp.ct_state(format('select public.zt_unpublish_work_order_technical_case(%L)',v_wo))='42501',null);
+  perform pg_temp.ct_check('tecnico_a_nao_escreve_colunas_de_caso_direto',
+    pg_temp.ct_state(format($q$update public.work_order_technical_base set case_cause='direto',case_published_at=now(),case_public_id=gen_random_uuid() where work_order_id=%L$q$,v_wo))='42501',null);
+  reset role;
+
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000001');
+  perform pg_temp.ct_check('owner_a_nao_publica_caso_de_os_aberta',
+    pg_temp.ct_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l','c7000000-0000-4000-8000-00000000ca02')$q$,v_wo))='22023',null);
+  perform pg_temp.ct_check('owner_a_nao_escreve_colunas_de_caso_direto',
+    pg_temp.ct_state(format($q$update public.work_order_technical_base set case_cause='direto' where work_order_id=%L$q$,v_wo))='42501',null);
+  reset role;
+
+  perform pg_temp.ct_as('10000000-0000-0000-0000-000000000002');
+  perform pg_temp.ct_check('owner_b_nao_publica_caso_da_a',
+    pg_temp.ct_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l','c7000000-0000-4000-8000-00000000ca03')$q$,v_wo))='42501',null);
+  perform pg_temp.ct_check('owner_b_nao_retira_caso_da_a',
+    pg_temp.ct_state(format('select public.zt_unpublish_work_order_technical_case(%L)',v_wo))='42501',null);
+  reset role;
+
+  perform pg_temp.ct_anon();
+  perform pg_temp.ct_check('anon_nao_publica_caso',
+    pg_temp.ct_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l','c7000000-0000-4000-8000-00000000ca04')$q$,v_wo))<>'ok',null);
+  reset role;
+
+  perform pg_temp.ct_check('nenhum_caso_publicado_por_caminho_negado',
+    not exists(select 1 from public.work_order_technical_base where work_order_id=v_wo
+                and (case_published_at is not null or case_cause is not null or case_public_id is not null)),null);
+
+  -- CONTRATO ESTRUTURAL da consulta: só o que foi publicado sai.
+  perform pg_temp.ct_check('contrato_de_saida_dos_casos',
+    pg_get_function_result('public.zt_equipment_cases(uuid,uuid,integer,integer)'::regprocedure)
+      ='TABLE(case_id uuid, published_on date, completed_on date, symptom text, cause text, solution text, learning text, difficulty text, unit_identified boolean)',
+    pg_get_function_result('public.zt_equipment_cases(uuid,uuid,integer,integer)'::regprocedure));
+
+  select lower(p.prosrc) into v_src from pg_proc p
+   where p.oid='public.zt_equipment_cases(uuid,uuid,integer,integer)'::regprocedure;
+  perform pg_temp.ct_check('consulta_de_casos_nao_seleciona_texto_bruto_da_os',
+    v_src !~ '(problem_report|\mrequest\M|\mnotes\M|\mnumber\M|\maddress\M|service_place|received_by|attendance|\mclients?\M|client_id|\mphone\M|\memail\M|tax_id)',null);
+  perform pg_temp.ct_check('consulta_de_casos_nao_seleciona_base_tecnica_bruta',
+    v_src !~ '(b\.cause|b\.solution|b\.learning|\mleft\()'
+    and v_src ~ 'b\.case_cause' and v_src ~ 'b\.case_solution' and v_src ~ 'b\.case_learning'
+    and v_src ~ 'case_published_at is not null',null);
+  perform pg_temp.ct_check('consulta_de_casos_nao_toca_em_financeiro',
+    v_src !~ '(price|cost|amount|margin|total|payment|financial|receipt|valor|preco|custo)',null);
+
+  select lower(p.prosrc) into v_src from pg_proc p
+   where p.oid='public.zt_publish_work_order_technical_case(uuid,text,text,text,text,uuid)'::regprocedure;
+  perform pg_temp.ct_check('publicacao_nao_copia_base_bruta_nem_le_financeiro',
+    v_src !~ '(v_row\.cause|v_row\.solution|v_row\.learning|b\.cause|b\.solution|b\.learning|problem_report|\mnotes\M|price|cost|amount|financial)'
+    and v_src !~ 'w\.\*',null);
+  perform pg_temp.ct_root();
 end $$;
 reset role;
 
@@ -466,7 +823,8 @@ begin
     from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='public'
      and p.proname in ('zt_equipment_search','zt_equipment_cases','zt_equipment_cases_count',
-       'zt_set_installed_equipment_model','zt_eq_can_read','zt_eq_can_write')
+       'zt_set_installed_equipment_model','zt_eq_can_read','zt_eq_can_write',
+       'zt_publish_work_order_technical_case','zt_unpublish_work_order_technical_case')
      and not (p.prosecdef and coalesce(array_to_string(p.proconfig,','),'') like '%search_path=%');
   perform pg_temp.ct_check('rpcs_novas_definer_com_search_path_fixo',v_bad is null,v_bad);
 
@@ -475,9 +833,35 @@ begin
     from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='public'
      and p.proname in ('zt_equipment_search','zt_equipment_cases','zt_equipment_cases_count',
-       'zt_set_installed_equipment_model')
+       'zt_set_installed_equipment_model',
+       'zt_publish_work_order_technical_case','zt_unpublish_work_order_technical_case')
      and has_function_privilege('anon',p.oid,'execute');
   perform pg_temp.ct_check('rpcs_novas_sem_execute_para_anon',v_bad is null,v_bad);
+
+  -- as duas guardas novas são INVOKER (não entram no inventário de definers) e
+  -- nenhuma função de trigger da Central é executável pelo navegador
+  select string_agg(p.proname,', ') into v_bad
+    from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public'
+     and p.proname in ('zt_eq_guard_company_immutable','zt_eq_guard_document_official')
+     and (p.prosecdef
+          or has_function_privilege('authenticated',p.oid,'execute')
+          or has_function_privilege('anon',p.oid,'execute')
+          or coalesce(array_to_string(p.proconfig,','),'') not like '%search_path=%');
+  perform pg_temp.ct_check('guardas_novas_invoker_sem_execute_para_o_navegador',
+    v_bad is null
+    and (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public'
+            and p.proname in ('zt_eq_guard_company_immutable','zt_eq_guard_document_official'))=2,v_bad);
+
+  -- a Base Técnica continua só-leitura para o navegador (colunas case_* incluídas)
+  perform pg_temp.ct_check('base_tecnica_sem_escrita_direta_para_authenticated',
+    not exists(select 1 from information_schema.role_table_grants
+                where grantee in ('authenticated','anon') and table_schema='public'
+                  and table_name='work_order_technical_base' and privilege_type<>'SELECT')
+    and not exists(select 1 from information_schema.column_privileges
+                where grantee in ('authenticated','anon') and table_schema='public'
+                  and table_name='work_order_technical_base' and privilege_type<>'SELECT'),null);
 
   -- guard de assinatura nas tabelas de escrita da empresa
   select string_agg(t.tbl,', ') into v_bad
@@ -520,7 +904,7 @@ begin
   select string_agg(name||' => '||coalesce(detail,''),' ; ' order by name) into v_failures
     from zt_ct_results where not ok;
   if v_failures is not null then raise exception 'CENTRAL_TECNICA_RLS_FAILED: %', v_failures; end if;
-  if (select count(*) from zt_ct_results) < 60 then
+  if (select count(*) from zt_ct_results) < 140 then
     raise exception 'CENTRAL_TECNICA_RLS_INCOMPLETE: % checks',(select count(*) from zt_ct_results);
   end if;
 end $$;

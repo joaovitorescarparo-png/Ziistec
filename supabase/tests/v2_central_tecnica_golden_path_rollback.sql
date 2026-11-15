@@ -1,10 +1,18 @@
 -- ZiisTec CENTRAL TÉCNICA V1 (0113-0115) — golden path sobre a arquitetura atual.
 -- Empresa -> owner -> técnico -> cliente -> local -> produto -> modelo técnico ->
 -- ficha -> documento -> OS -> vínculo do equipamento -> Ajuda Técnica -> execução
--- -> Base Técnica (RPC da 0111) -> conclusão (RPC de finalização com garantias) ->
--- equipamento instalado (RPC da 0083) identificado com o modelo -> caso aparece na
--- Central com causa/solução -> sem PII, sem financeiro -> Empresa B não enxerga ->
+-- -> Base Técnica ORIGINAL (RPC da 0111) -> conclusão (RPC de finalização com
+-- garantias) -> equipamento instalado (RPC da 0083) identificado com o modelo ->
+-- a OS concluída NÃO vira caso sozinha -> owner revisa e PUBLICA o caso técnico
+-- -> caso aparece na Central -> OUTRO técnico da empresa (não atribuído à OS)
+-- consulta e recebe somente o conteúdo técnico curado -> Empresa B não enxerga ->
 -- busca devolve só o autorizado.
+--
+-- TESTE ADVERSARIAL (security fix): a OS é montada de propósito com dado sensível
+-- em TODO campo de texto livre — telefone no request, endereço no problem_report,
+-- e-mail na Base Técnica original, preço nas notas, cliente com nome/CPF/telefone.
+-- O caso publicado é um texto separado e limpo. Qualquer valor bruto que volte a
+-- aparecer na resposta derruba o teste.
 -- Usa as identidades de ci_local_seed.sql. Destino: SOMENTE CI descartável.
 -- Tudo termina em ROLLBACK.
 
@@ -44,11 +52,50 @@ grant execute on function pg_temp.g_check(text,boolean,text), pg_temp.g_put(text
   pg_temp.g_get(text), pg_temp.g_state(text), pg_temp.g_count(text), pg_temp.g_as(uuid)
   to authenticated, anon;
 
+-- Technician A2: técnico ativo da Empresa A que NÃO é atribuído à OS do teste.
+-- É quem consulta a Central — o leitor para quem o caso é publicado.
+insert into auth.users (
+  instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,
+  raw_app_meta_data,raw_user_meta_data,created_at,updated_at
+) values
+  ('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000005','authenticated','authenticated','ci-tech-a2@example.invalid','',now(),'{}'::jsonb,'{}'::jsonb,now(),now())
+on conflict (id) do nothing;
+insert into public.profiles(id,full_name,email)
+values ('10000000-0000-0000-0000-000000000005','CI Technician A2','ci-tech-a2@example.invalid')
+on conflict (id) do nothing;
+
+-- Valores sensíveis plantados na OS (um por campo de texto livre).
+create temp table zt_ctg_secrets (label text primary key, needle text not null) on commit drop;
+insert into zt_ctg_secrets(label,needle) values
+  ('telefone_no_request','11 97777-1234'),
+  ('telefone_no_request_so_digitos','977771234'),
+  ('endereco_no_problem_report','Rua Sigilosa 77'),
+  ('apartamento_no_problem_report','apto 1204'),
+  ('email_na_base_tecnica','sindico.reservado@exemplo.invalid'),
+  ('nome_na_base_tecnica','Dona Hermengarda'),
+  ('preco_na_nota_do_vinculo','987,65'),
+  ('preco_na_nota_da_unidade','1.234,56'),
+  ('senha_na_nota_da_unidade','senha 4321'),
+  ('nome_do_cliente','Condomínio Reservado'),
+  ('endereco_do_cliente','Avenida Confidencial'),
+  ('telefone_do_cliente','11988887777'),
+  ('documento_do_cliente','12345678000199'),
+  ('local_do_servico','Portaria social'),
+  ('relato_ao_cliente','testado com três tags'),
+  ('valor_cobrado','450'),
+  ('custo_do_produto','300'),
+  ('preco_do_produto','699'),
+  ('serial_da_unidade','SN-CT-7001');
+grant select on zt_ctg_secrets to authenticated, anon;
+
 -- Technician B entra para o teste de isolamento.
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
 select set_config('request.jwt.claims','{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated","aal":"aal1"}',true);
 insert into public.company_members(company_id,user_id,role,status,job_title)
 values ('20000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000004','technician','active','CI Tech B')
+on conflict (company_id,user_id) do update set role='technician',status='active';
+insert into public.company_members(company_id,user_id,role,status,job_title)
+values ('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000005','technician','active','CI Tech A2')
 on conflict (company_id,user_id) do update set role='technician',status='active';
 
 -- ============================================ 1-6. cliente, local, produto (Owner A)
@@ -133,8 +180,8 @@ begin
       'assigned_to','10000000-0000-0000-0000-000000000003',
       'status','scheduled','scheduled_date',current_date::text,
       'address','Avenida Confidencial 900','service_place','Portaria social',
-      'request','Fechadura não abre com tag',
-      'problem_report','Fechadura não abre com tag',
+      'request','Fechadura não abre com tag. Ligar antes para 11 97777-1234 (977771234)',
+      'problem_report','Morador da Rua Sigilosa 77, apto 1204, relata que a fechadura não abre com tag',
       'created_by','10000000-0000-0000-0000-000000000001'),
     jsonb_build_array(jsonb_build_object(
       'company_id','20000000-0000-0000-0000-000000000001','kind','service',
@@ -151,7 +198,7 @@ begin
         'company_id','20000000-0000-0000-0000-000000000001',
         'client_id','d1000000-0000-4000-8000-000000000001',
         'assigned_to','10000000-0000-0000-0000-000000000003',
-        'status','scheduled','request','Fechadura não abre com tag',
+        'status','scheduled','request','Fechadura não abre com tag. Ligar antes para 11 97777-1234 (977771234)',
         'created_by','10000000-0000-0000-0000-000000000001'),
       '[]'::jsonb)=v_wo,null);
 end $$;
@@ -168,7 +215,7 @@ begin
   update public.work_orders set status='in_progress' where id=v_wo;
 
   insert into public.work_order_equipment(company_id,work_order_id,model_id,notes,created_by)
-  values ('20000000-0000-0000-0000-000000000001',v_wo,v_model,'fechadura da portaria social',
+  values ('20000000-0000-0000-0000-000000000001',v_wo,v_model,'fechadura da portaria social; visita cobrada R$ 987,65',
           '10000000-0000-0000-0000-000000000003');
   perform pg_temp.g_check('11_tecnico_vincula_modelo_na_os',
     pg_temp.g_count(format($q$select 1 from public.work_order_equipment where work_order_id=%L and installed_equipment_id is null$q$,v_wo))=1,null);
@@ -209,24 +256,28 @@ begin
           'd1000000-0000-4000-8000-00000000a001','Fechadura Demo CT-100',1,0,'SN-CT-7001',
           '10000000-0000-0000-0000-000000000003');
 
-  -- 14. Base Técnica pela RPC da 0111 (fonte do caso; nada é copiado depois)
+  -- 14. Base Técnica ORIGINAL pela RPC da 0111: registro interno, com dado sensível de propósito
   v_base := public.zt_save_work_order_technical_base(
     v_wo,
-    'Fonte de 12V em curto por infiltração na caixa de passagem.',
-    'Substituída a fonte, vedada a caixa e recadastradas as três tags do condomínio.',
+    'Fonte de 12V em curto por infiltração. Avisar sindico.reservado@exemplo.invalid.',
+    'Trocada a fonte e recadastradas as tags; a Dona Hermengarda ficou com a chave reserva.',
     'medium',
-    'Nesse modelo, conferir a vedação da caixa antes de trocar a placa.',
+    'Combinar acesso com a Dona Hermengarda pelo sindico.reservado@exemplo.invalid.',
     'd1000000-0000-4000-8000-00000000f002');
   perform pg_temp.g_check('14_base_tecnica_salva_pela_rpc_atual',
     coalesce(v_base->>'revision','')='1',v_base::text);
   perform pg_temp.g_check('14b_base_tecnica_idempotente_no_retry',
     (public.zt_save_work_order_technical_base(
       v_wo,
-      'Fonte de 12V em curto por infiltração na caixa de passagem.',
-      'Substituída a fonte, vedada a caixa e recadastradas as três tags do condomínio.',
+      'Fonte de 12V em curto por infiltração. Avisar sindico.reservado@exemplo.invalid.',
+      'Trocada a fonte e recadastradas as tags; a Dona Hermengarda ficou com a chave reserva.',
       'medium',
-      'Nesse modelo, conferir a vedação da caixa antes de trocar a placa.',
+      'Combinar acesso com a Dona Hermengarda pelo sindico.reservado@exemplo.invalid.',
       'd1000000-0000-4000-8000-00000000f002')->>'revision')='1',null);
+
+  -- 14c. antes da conclusão não há o que publicar (o técnico não publica em hipótese alguma)
+  perform pg_temp.g_check('14c_tecnico_atribuido_nao_publica_caso',
+    pg_temp.g_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l','d1000000-0000-4000-8000-00000000ca00')$q$,v_wo))='42501',null);
 
   -- 15. conclusão pelo fluxo real de finalização
   perform public.zt_finalize_work_order_with_warranty_overrides(
@@ -254,7 +305,7 @@ begin
   perform pg_temp.g_as('10000000-0000-0000-0000-000000000003');
   v_unit := public.zt_register_installed_equipment(
     v_wo,'d1000000-0000-4000-8000-00000000a002',null,'Portaria social',null,'SN-CT-7001',
-    'BARCODE-CT-7001','Instalada na folha principal',null);
+    'BARCODE-CT-7001','Instalada na folha principal; senha 4321; peça orçada em R$ 1.234,56',null);
   perform pg_temp.g_put('unit',v_unit::text);
   perform pg_temp.g_check('16_unidade_fisica_registrada_pela_rpc_existente',v_unit is not null,null);
 
@@ -269,56 +320,250 @@ begin
 end $$;
 reset role;
 
--- ===================================== 17-19. o caso aparece na Central Técnica
+-- ============ 17. OS concluída com Base Técnica NÃO vira caso compartilhado sozinha
 do $$
 declare
+  v_wo uuid := pg_temp.g_get('wo')::uuid;
+  v_model uuid := pg_temp.g_get('model')::uuid;
+begin
+  perform pg_temp.g_check('17_fixture_adversarial_esta_mesmo_na_os',
+    (select request like '%11 97777-1234%' and problem_report like '%Rua Sigilosa 77%'
+       from public.work_orders where id=v_wo)
+    and (select cause like '%sindico.reservado@exemplo.invalid%' and solution like '%Dona Hermengarda%'
+           from public.work_order_technical_base where work_order_id=v_wo)
+    and exists(select 1 from public.work_order_equipment where work_order_id=v_wo and notes like '%987,65%')
+    and exists(select 1 from public.installed_equipment where work_order_id=v_wo and notes like '%1.234,56%'),null);
+
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000005');
+  perform pg_temp.g_check('17b_sem_publicacao_nao_ha_caso_para_a_equipe',
+    pg_temp.g_count(format($q$select 1 from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',%L)$q$,v_model))=0
+    and public.zt_equipment_cases_count('20000000-0000-0000-0000-000000000001',v_model)=0,null);
+  reset role;
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000001');
+  perform pg_temp.g_check('17c_sem_publicacao_nao_ha_caso_nem_para_o_owner',
+    pg_temp.g_count(format($q$select 1 from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',%L)$q$,v_model))=0,null);
+  reset role;
+end $$;
+reset role;
+
+-- ======================= 18. o owner revisa e publica o caso técnico (texto limpo)
+do $$
+declare
+  v_wo uuid := pg_temp.g_get('wo')::uuid;
+  v_pub jsonb;
+  v_again jsonb;
+begin
+  -- quem não é owner da empresa não publica
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000003');
+  perform pg_temp.g_check('18_tecnico_atribuido_nao_publica_nem_apos_concluir',
+    pg_temp.g_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l','d1000000-0000-4000-8000-00000000ca01')$q$,v_wo))='42501',null);
+  reset role;
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000005');
+  perform pg_temp.g_check('18b_tecnico_nao_atribuido_nao_publica',
+    pg_temp.g_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l','d1000000-0000-4000-8000-00000000ca02')$q$,v_wo))='42501',null);
+  reset role;
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000002');
+  perform pg_temp.g_check('18c_owner_b_nao_publica_caso_da_a',
+    pg_temp.g_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l','d1000000-0000-4000-8000-00000000ca03')$q$,v_wo))='42501',null);
+  reset role;
+
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000001');
+  perform pg_temp.g_check('18d_publicacao_exige_conteudo_tecnico',
+    pg_temp.g_state(format($q$select public.zt_publish_work_order_technical_case(%L,'só sintoma',null,'  ',null,'d1000000-0000-4000-8000-00000000ca04')$q$,v_wo))='22023',null);
+  perform pg_temp.g_check('18e_publicacao_exige_identificador_da_operacao',
+    pg_temp.g_state(format($q$select public.zt_publish_work_order_technical_case(%L,'s','c','s','l',null)$q$,v_wo))='22023',null);
+
+  v_pub := public.zt_publish_work_order_technical_case(
+    v_wo,
+    'Fechadura não abre com tag cadastrada.',
+    'Fonte de 12V em curto por infiltração na caixa de passagem.',
+    'Substituída a fonte, vedada a caixa de passagem e recadastradas as tags.',
+    'Nesse modelo, conferir a vedação da caixa antes de trocar a placa.',
+    'd1000000-0000-4000-8000-00000000ca10');
+  perform pg_temp.g_put('case',v_pub->>'case_id');
+  perform pg_temp.g_check('18f_owner_publica_o_caso_revisado',
+    (v_pub->>'published')::boolean and (v_pub->>'revision')='1' and (v_pub->>'case_id') is not null,v_pub::text);
+  perform pg_temp.g_check('18g_identificador_do_caso_nao_e_o_da_os',
+    (v_pub->>'case_id')::uuid <> v_wo,null);
+  perform pg_temp.g_check('18h_retorno_da_publicacao_so_tem_campos_de_caso',
+    (select array_agg(k order by k) from jsonb_object_keys(v_pub) k)
+      = array['case_id','cause','learning','published','published_at','revision','solution','symptom','updated_at'],v_pub::text);
+
+  -- idempotência: o mesmo pedido devolve o mesmo estado, sem nova revisão
+  v_again := public.zt_publish_work_order_technical_case(
+    v_wo,
+    'Fechadura não abre com tag cadastrada.',
+    'Fonte de 12V em curto por infiltração na caixa de passagem.',
+    'Substituída a fonte, vedada a caixa de passagem e recadastradas as tags.',
+    'Nesse modelo, conferir a vedação da caixa antes de trocar a placa.',
+    'd1000000-0000-4000-8000-00000000ca10');
+  perform pg_temp.g_check('18i_publicacao_idempotente_no_retry',v_again=v_pub,v_again::text);
+  perform pg_temp.g_check('18j_mesmo_pedido_com_outro_conteudo_e_recusado',
+    pg_temp.g_state(format($q$select public.zt_publish_work_order_technical_case(%L,'x','outro','outro','outro','d1000000-0000-4000-8000-00000000ca10')$q$,v_wo))='23505',null);
+  reset role;
+
+  -- auditável: quem publicou, quando e a revisão; a Base Técnica original fica intacta
+  perform pg_temp.g_check('18k_publicacao_auditavel',
+    (select case_published_by='10000000-0000-0000-0000-000000000001'
+        and case_updated_by='10000000-0000-0000-0000-000000000001'
+        and case_published_at is not null and case_updated_at is not null and case_revision=1
+       from public.work_order_technical_base where work_order_id=v_wo),null);
+  perform pg_temp.g_check('18l_base_tecnica_original_intacta_apos_publicar',
+    (select cause like '%sindico.reservado@exemplo.invalid%' and solution like '%Dona Hermengarda%'
+        and difficulty='medium' and revision=1
+       from public.work_order_technical_base where work_order_id=v_wo),null);
+end $$;
+reset role;
+
+-- == 19. TESTE ADVERSARIAL: técnico da empresa, NÃO atribuído à OS, consulta os casos
+do $$
+declare
+  v_wo uuid := pg_temp.g_get('wo')::uuid;
   v_model uuid := pg_temp.g_get('model')::uuid;
   v_case record;
   v_row text;
+  v_all text;
+  v_leaks text;
+  v_number text;
 begin
-  perform pg_temp.g_as('10000000-0000-0000-0000-000000000003');
+  select number into v_number from public.work_orders where id=v_wo;
 
-  perform pg_temp.g_check('17_caso_aparece_para_o_tecnico_a',
-    pg_temp.g_count(format($q$select 1 from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',%L)$q$,v_model))=1,null);
-  perform pg_temp.g_check('17b_contagem_de_casos_bate',
-    public.zt_equipment_cases_count('20000000-0000-0000-0000-000000000001',v_model)=1,null);
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000005');
+
+  -- o leitor não tem nenhum outro caminho até a OS: nem a OS, nem a Base, nem o vínculo
+  perform pg_temp.g_check('19_tecnico_nao_atribuido_nao_le_a_os',
+    pg_temp.g_count(format('select 1 from public.work_orders where id=%L',v_wo))=0,null);
+  perform pg_temp.g_check('19b_tecnico_nao_atribuido_nao_le_a_base_tecnica_original',
+    pg_temp.g_count(format('select 1 from public.work_order_technical_base where work_order_id=%L',v_wo))=0,null);
+  perform pg_temp.g_check('19c_tecnico_nao_atribuido_nao_le_vinculo_nem_unidade',
+    pg_temp.g_count(format('select 1 from public.work_order_equipment where work_order_id=%L',v_wo))=0
+    and pg_temp.g_count(format('select 1 from public.installed_equipment where work_order_id=%L',v_wo))=0,null);
+
+  perform pg_temp.g_check('19d_caso_publicado_aparece_para_o_outro_tecnico',
+    pg_temp.g_count(format($q$select 1 from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',%L)$q$,v_model))=1
+    and public.zt_equipment_cases_count('20000000-0000-0000-0000-000000000001',v_model)=1,null);
 
   select * into v_case
     from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',v_model) limit 1;
 
-  perform pg_temp.g_check('18_caso_traz_causa_da_base_tecnica',
-    v_case.cause like '%curto por infiltração%',v_case.cause);
-  perform pg_temp.g_check('18b_caso_traz_solucao_da_base_tecnica',
-    v_case.solution like '%Substituída a fonte%',v_case.solution);
-  perform pg_temp.g_check('18c_caso_traz_dificuldade_e_aprendizado',
-    v_case.difficulty='medium' and v_case.learning like '%vedação da caixa%',null);
-  perform pg_temp.g_check('18d_caso_traz_sintoma_da_os',
-    v_case.symptom like '%não abre com tag%',v_case.symptom);
-  perform pg_temp.g_check('18e_caso_traz_data_de_conclusao',
-    v_case.completed_on=current_date,null);
-  perform pg_temp.g_check('18f_caso_marca_unidade_identificada',
-    v_case.unit_identified,null);
+  perform pg_temp.g_check('19e_caso_traz_o_texto_curado',
+    v_case.symptom='Fechadura não abre com tag cadastrada.'
+    and v_case.cause='Fonte de 12V em curto por infiltração na caixa de passagem.'
+    and v_case.solution='Substituída a fonte, vedada a caixa de passagem e recadastradas as tags.'
+    and v_case.learning='Nesse modelo, conferir a vedação da caixa antes de trocar a placa.',v_case::text);
+  perform pg_temp.g_check('19f_caso_traz_dificuldade_datas_e_unidade_identificada',
+    v_case.difficulty='medium' and v_case.completed_on=current_date
+    and v_case.published_on is not null and v_case.unit_identified,null);
+  perform pg_temp.g_check('19g_caso_usa_identificador_proprio',
+    v_case.case_id=pg_temp.g_get('case')::uuid and v_case.case_id<>v_wo,null);
 
-  -- 19. sanitização estrutural: nem PII nem financeiro saem na linha do caso
-  v_row := v_case::text;
-  perform pg_temp.g_check('19_caso_sem_nome_do_cliente',
-    position('Condomínio Reservado' in v_row)=0,null);
-  perform pg_temp.g_check('19b_caso_sem_endereco',
-    position('Avenida Confidencial' in v_row)=0,null);
-  perform pg_temp.g_check('19c_caso_sem_telefone',
-    position('11988887777' in v_row)=0,null);
-  perform pg_temp.g_check('19d_caso_sem_documento_do_cliente',
-    position('12345678000199' in v_row)=0,null);
-  perform pg_temp.g_check('19e_caso_sem_valor_cobrado',
-    position('450' in v_row)=0,null);
-  perform pg_temp.g_check('19f_caso_sem_custo_do_produto',
-    position('300' in v_row)=0 and position('699' in v_row)=0,null);
-  perform pg_temp.g_check('19g_contrato_da_rpc_sem_coluna_financeira',
+  -- TUDO que a consulta devolve, em todas as páginas, como texto. O identificador
+  -- do caso é um UUID aleatório e as datas são do dia do teste: saem de v_all para
+  -- que agulhas numéricas curtas ("450", "300") não casem por acaso — o UUID é
+  -- conferido à parte, em v_row, contra o id e o número da OS.
+  select coalesce(string_agg((to_jsonb(c)-'case_id'-'published_on'-'completed_on')::text,' | '),'') into v_all
+    from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',v_model,30,0) c;
+  select coalesce(string_agg(c::text,' | '),'') into v_row
+    from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',v_model,30,0) c;
+  perform pg_temp.g_check('19g2_resposta_nao_vazia_antes_de_procurar_vazamento',
+    char_length(v_all)>100 and v_all like '%vedação da caixa%',null);
+
+  select string_agg(x.label,', ' order by x.label) into v_leaks
+    from zt_ctg_secrets x
+   where position(lower(x.needle) in lower(v_all))>0;
+  perform pg_temp.g_check('19h_ADVERSARIAL_nenhum_valor_sensivel_bruto_na_resposta',v_leaks is null,v_leaks);
+
+  perform pg_temp.g_check('19i_caso_sem_id_nem_numero_da_os',
+    position(v_wo::text in v_row)=0 and position(v_number in v_row)=0
+    and char_length(coalesce(v_number,''))>0,null);
+  perform pg_temp.g_check('19j_caso_sem_texto_bruto_da_base_tecnica',
+    position('Avisar' in v_all)=0 and position('chave reserva' in v_all)=0
+    and position('Combinar acesso' in v_all)=0,null);
+  perform pg_temp.g_check('19k_caso_sem_texto_do_request_ou_do_problem_report',
+    position('Ligar antes' in v_all)=0 and position('Morador' in v_all)=0,null);
+  perform pg_temp.g_check('19l_caso_sem_nota_de_vinculo_ou_de_unidade',
+    position('visita cobrada' in v_all)=0 and position('folha principal' in v_all)=0
+    and position('R$' in v_all)=0,null);
+
+  -- busca explícita por cada valor adversarial: a Central não os indexa nem devolve
+  select string_agg(x.label,', ' order by x.label) into v_leaks
+    from zt_ctg_secrets x
+   where x.label not in ('valor_cobrado','custo_do_produto','preco_do_produto')
+     and exists(select 1 from public.zt_equipment_search('20000000-0000-0000-0000-000000000001',x.needle));
+  perform pg_temp.g_check('19m_ADVERSARIAL_busca_pelos_valores_sensiveis_nao_devolve_nada',v_leaks is null,v_leaks);
+
+  perform pg_temp.g_check('19n_contrato_da_rpc_so_com_colunas_de_caso',
+    (select array_agg(pa.parameter_name::text order by pa.ordinal_position)
+       from information_schema.routines r
+       join information_schema.parameters pa on pa.specific_name=r.specific_name
+      where r.routine_schema='public' and r.routine_name='zt_equipment_cases'
+        and pa.parameter_mode='OUT')
+      = array['case_id','published_on','completed_on','symptom','cause','solution','learning','difficulty','unit_identified'],null);
+  perform pg_temp.g_check('19o_contrato_da_rpc_sem_coluna_financeira',
     not exists(
       select 1 from information_schema.routines r
         join information_schema.parameters pa on pa.specific_name=r.specific_name
        where r.routine_schema='public' and r.routine_name='zt_equipment_cases'
          and lower(coalesce(pa.parameter_name,'')) ~ '(price|cost|amount|margin|valor|preco|custo)'),null);
+  reset role;
+
+  -- o técnico atribuído vê o mesmo caso curado (e segue lendo a própria Base Técnica)
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000003');
+  perform pg_temp.g_check('19p_tecnico_atribuido_ve_o_mesmo_caso_curado',
+    (select c.cause from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',v_model) c limit 1)
+      ='Fonte de 12V em curto por infiltração na caixa de passagem.',null);
+  perform pg_temp.g_check('19q_tecnico_atribuido_segue_lendo_a_propria_base_tecnica',
+    pg_temp.g_count(format('select 1 from public.work_order_technical_base where work_order_id=%L',v_wo))=1,null);
+  reset role;
+end $$;
+reset role;
+
+-- ============ 19r-19v. revisão, retirada e republicação do caso (sempre pelo owner)
+do $$
+declare
+  v_wo uuid := pg_temp.g_get('wo')::uuid;
+  v_model uuid := pg_temp.g_get('model')::uuid;
+  v_case uuid := pg_temp.g_get('case')::uuid;
+  v_out jsonb;
+begin
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000001');
+  v_out := public.zt_publish_work_order_technical_case(
+    v_wo,'Fechadura não abre com tag cadastrada.',
+    'Fonte de 12V em curto por infiltração na caixa de passagem.',
+    'Substituída a fonte, vedada a caixa de passagem e recadastradas as tags.',
+    'Nesse modelo, conferir a vedação da caixa e o aterramento antes de trocar a placa.',
+    'd1000000-0000-4000-8000-00000000ca11');
+  perform pg_temp.g_check('19r_revisao_do_caso_sobe_a_versao_e_mantem_o_identificador',
+    (v_out->>'revision')='2' and (v_out->>'case_id')::uuid=v_case,v_out::text);
+
+  v_out := public.zt_unpublish_work_order_technical_case(v_wo);
+  perform pg_temp.g_check('19s_owner_retira_o_caso',
+    not (v_out->>'published')::boolean and v_out->>'cause' is null,v_out::text);
+  perform pg_temp.g_check('19t_retirada_idempotente',
+    public.zt_unpublish_work_order_technical_case(v_wo)=v_out,null);
+  reset role;
+
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000005');
+  perform pg_temp.g_check('19u_caso_retirado_some_da_central',
+    pg_temp.g_count(format($q$select 1 from public.zt_equipment_cases('20000000-0000-0000-0000-000000000001',%L)$q$,v_model))=0
+    and public.zt_equipment_cases_count('20000000-0000-0000-0000-000000000001',v_model)=0,null);
+  reset role;
+
+  perform pg_temp.g_check('19v_retirada_nao_apaga_a_base_tecnica_original',
+    (select cause like '%sindico.reservado@exemplo.invalid%' and case_cause is null and case_published_at is null
+       from public.work_order_technical_base where work_order_id=v_wo),null);
+
+  -- republica para o restante do roteiro
+  perform pg_temp.g_as('10000000-0000-0000-0000-000000000001');
+  v_out := public.zt_publish_work_order_technical_case(
+    v_wo,'Fechadura não abre com tag cadastrada.',
+    'Fonte de 12V em curto por infiltração na caixa de passagem.',
+    'Substituída a fonte, vedada a caixa de passagem e recadastradas as tags.',
+    'Nesse modelo, conferir a vedação da caixa antes de trocar a placa.',
+    'd1000000-0000-4000-8000-00000000ca12');
+  perform pg_temp.g_check('19w_republicacao_mantem_o_identificador_do_caso',
+    (v_out->>'published')::boolean and (v_out->>'case_id')::uuid=v_case,v_out::text);
+  reset role;
 end $$;
 reset role;
 
@@ -363,7 +608,7 @@ begin
   select string_agg(name||' => '||coalesce(detail,''),' ; ' order by name) into v_failures
     from zt_ctg_results where not ok;
   if v_failures is not null then raise exception 'CENTRAL_TECNICA_GOLDEN_FAILED: %', v_failures; end if;
-  if (select count(*) from zt_ctg_results) < 35 then
+  if (select count(*) from zt_ctg_results) < 68 then
     raise exception 'CENTRAL_TECNICA_GOLDEN_INCOMPLETE: % checks',(select count(*) from zt_ctg_results);
   end if;
 end $$;
