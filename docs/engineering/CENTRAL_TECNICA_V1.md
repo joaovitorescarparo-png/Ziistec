@@ -53,6 +53,18 @@ Um conjunto de tabelas, dois escopos por `company_id`:
 Guarda de escopo por trigger: conteúdo global exige modelo/fabricante/categoria
 globais; conteúdo privado nunca referencia outra empresa.
 
+**Escopo imutável (security fix).** A RLS de UPDATE confere o `company_id` antigo
+e o novo separadamente: um owner de A **e** de B passaria nas duas ao mover um
+fabricante/categoria A → B, deixando modelos de A apontando por ID para um pai de B
+— e a busca SECURITY DEFINER atravessaria. Por isso `company_id` é **imutável após
+o INSERT** em categoria, fabricante, modelo, documento e ficha
+(`zt_eq_guard_company_immutable`, invoker, em todo UPDATE e para todos os papéis,
+inclusive `service_role`): privado A → B, privado → global e global → privado são
+negados. Migração de escopo, se um dia existir, será operação administrativa
+própria que move pai e filhos juntos. Defesa em profundidade:
+`zt_equipment_search` só junta fabricante/categoria globais ou do mesmo escopo do
+modelo — com um pai corrompido a linha some, nunca expõe nome de outra empresa.
+
 ## Ficha rápida
 
 `equipment_quick_guides.sections` é JSONB **validado** por
@@ -72,19 +84,36 @@ faz "FR101" achar "FR 101". O termo mais longo entra como predicado indexável n
 termos sem varrer a tabela. Casa modelo, código, fabricante, ficha e documento, e
 devolve `matched_in`.
 
-## Casos resolvidos
+## Casos técnicos: publicação curada (security fix)
 
-`zt_equipment_cases` lê `work_order_technical_base` (0111) — **não**
-`work_order_reports`, que é o relato do cliente e pode conter PII. Alcança a OS por
-três caminhos (modelo vinculado, unidade vinculada já identificada, unidade
-registrada naquela OS), exige `status='done'`, `deleted_at is null` e pelo menos
-causa/solução/aprendizado preenchidos.
+A Base Técnica da OS (`work_order_technical_base`, 0111) é o **registro interno
+original**: o técnico escreve em campo e o texto pode citar nome, telefone,
+endereço ou valor. Ela **não** vira caso sozinha.
 
-Sai: número da OS, data de conclusão, sintoma (`problem_report`/`request`), causa,
-solução, dificuldade, aprendizado, `needs_return`, nota do vínculo e se a unidade
-estava identificada. **Não entram no SELECT** nome, endereço, telefone ou documento
-do cliente, nem preço, custo, margem ou financeiro — a sanitização é estrutural, e
-nenhuma tabela da Central tem coluna de valor (teste verifica por nome de coluna).
+O caso compartilhado com a equipe é **outro texto**, nas colunas `case_*` da mesma
+linha (sem tabela nova): `case_public_id`, `case_symptom`, `case_cause`,
+`case_solution`, `case_learning`, `case_published_at/by`, `case_updated_at/by`,
+`case_revision`, `case_last_request_id`. Só existe quando o owner publica:
+
+- `zt_publish_work_order_technical_case(p_wo, p_symptom, p_cause, p_solution,
+  p_learning, p_request)` — owner da empresa da OS (derivada da OS, nunca do
+  cliente), OS `done`, assinatura ativa, idempotente por `p_request`, auditável.
+  Recebe o texto revisado como parâmetro; **não lê** `cause/solution/learning`,
+  `problem_report`, notas, cliente nem financeiro.
+- `zt_unpublish_work_order_technical_case(p_wo)` — retira o caso; a Base Técnica
+  original fica intacta.
+- A tela do owner (`TechnicalCasePublishPanel`, OS concluída) abre o formulário
+  **vazio**; usar a Base Técnica como rascunho é um botão explícito, com aviso de
+  que o texto será visto por toda a equipe.
+
+`zt_equipment_cases` devolve só: `case_id` (identificador do caso, não o id nem o
+número da OS), `published_on`, `completed_on`, `symptom/cause/solution/learning`
+**curados**, `difficulty` (valor fechado) e `unit_identified`. De `work_orders`
+só participam `id`, `company_id`, `status`, `deleted_at` e `completed_at`.
+
+A garantia é **estrutural**, não de filtro: texto bruto da OS não entra na resposta.
+Não se afirma que regex/IA detecte PII em texto livre — o que o owner publica é
+responsabilidade dele, e a tela avisa.
 
 ## Storage
 
@@ -93,7 +122,11 @@ Bucket privado `zt-equipment-docs` (50 MB; PDF/JPEG/PNG/WebP), caminho
 técnico precisa do manual em campo). Escrita/remoção: owner com assinatura ativa.
 Documento privado sai só por signed URL de 1h. Conteúdo de terceiro não é
 re-hospedado: entra como metadado + `official_url` restrito a `https://`.
-`is_official` nunca é decidido pelo navegador.
+`is_official` é selo da **plataforma**: a constraint
+`equipment_documents_official_global_only` o restringe a documento global, e o
+trigger `zt_eq_guard_document_official` só deixa `service_role` ou platform admin
+AAL2 (`zt_is_platform_admin`, nunca `user_metadata`) ligá-lo ou alterá-lo. Owner
+comum que tenta `is_official=true` (INSERT ou UPDATE) recebe 42501.
 
 ## Frontend
 
@@ -115,17 +148,30 @@ Entram em `scripts/run-sql-rls-ci.sh`, que já aplica toda migration ≥ 0050 po
 ordem de nome — a prova roda sobre `0001 → … → 0112 → 0113-0115`, sem cadeia
 paralela:
 
-- `v2_central_tecnica_rls_rollback.sql` (85 checks) — matriz anon/Owner A/
+- `v2_central_tecnica_rls_rollback.sql` (144 checks) — matriz anon/Owner A/
   Technician A/Owner B/Technician B por SELECT, UPDATE, RPC, JOIN, busca e Storage;
   escrita global só com AAL2; ficha e documento inválidos recusados; unidade de
-  outro cliente negada; busca resiste a injeção, símbolos e texto vazio.
-- `v2_central_tecnica_golden_path_rollback.sql` (45 checks) — fluxo completo pelas
+  outro cliente negada; busca resiste a injeção, símbolos e texto vazio;
+  owner A+B não move escopo; busca não vaza pai corrompido; `is_official` negado
+  ao owner; corpo das RPCs de caso conferido no catálogo.
+- `v2_central_tecnica_golden_path_rollback.sql` (70 checks) — fluxo completo pelas
   RPCs reais (OS idempotente, Base Técnica da 0111, finalização com garantias,
-  registro de equipamento instalado da 0083) até o caso aparecer sanitizado.
+  registro de equipamento instalado da 0083) → owner publica o caso → outro
+  técnico da empresa, **não atribuído**, consulta. **Adversarial:** a OS leva
+  telefone no `request`, endereço no `problem_report`, e-mail e nome na Base
+  Técnica, preço nas notas e cliente com nome/CPF/telefone; nenhum desses valores
+  aparece na resposta nem é encontrado pela busca.
+- `tests/blockers/central_tech_security_fix.test.mjs` (verify:v2) — contrato
+  estático das três correções.
+
+Os testes novos foram validados por mutação: reintroduzir texto bruto na consulta,
+desligar o guard de escopo, voltar à busca antiga ou remover o guard do selo faz
+os testes falharem.
 
 Dois guards existentes foram estendidos pelo caminho que eles documentam:
-inventário de SECURITY DEFINER (149 → 162, com a lista nominal das 13 funções
-novas, todas `search_path=''` e sem EXECUTE para anon) e a lista revisada de
+inventário de SECURITY DEFINER (149 → 164, com a lista nominal das 15 funções
+novas, todas `search_path=''` e sem EXECUTE para anon; as duas guardas novas da
+0113 são invoker) e a lista revisada de
 escrita direta em `v2_security_audit_v1_rollback.sql`.
 
 ## IA / Assistant
@@ -158,11 +204,35 @@ Com o H0 retomado, nesta ordem:
    `equipment_quick_guides` e `work_order_equipment` **ausentes**; contagem de
    definers em 149.
 2. Aplicar `0113` → `0114` → `0115`, uma por vez, conferindo o retorno de cada uma.
-3. Reconferir: definers em 162, bucket `zt-equipment-docs` privado, as 9 tabelas
+3. Reconferir: definers em 164, bucket `zt-equipment-docs` privado, as 9 tabelas
    novas com RLS e nenhum privilégio para `anon`.
 4. Validar pelo PostgREST/Storage reais com dados sintéticos (Owner A, Technician A,
    Owner B), incluindo signed URL de documento e negativa de acesso cruzado.
-5. Preview da branch de integração apontando para o H0 — nunca Production.
+5. Preview da branch de integração apontando para o H0 — nunca Production. Host
+   exato `ziistec-git-claude-central-tecnica-v1-integration-js-connect.vercel.app`
+   e branch exata `claude/central-tecnica-v1-integration` estão nas listas
+   fechadas do H0 (cliente e servidor); qualquer outro host/branch, Production ou
+   `main` falha fechado.
+
+## Security fix antes do H0 (branch `claude/central-tech-security-fix-v1`)
+
+0113–0115 nunca foram aplicadas em ambiente real; foram corrigidas no lugar,
+sem 0116 e sem tocar 0001–0112. Além das seções acima (casos curados, escopo
+imutável, selo oficial):
+
+- **CRLF:** `.gitattributes` fixa `supabase/0001_parts/part*.txt text eol=lf` (os
+  únicos .txt que entram em hash de gate). O verificador continua comparando bytes
+  e o hash esperado não mudou; checkout antigo com CRLF falha com `CRLF_DETECTED`
+  e a instrução de refazer o checkout.
+- **Advisors (baseline × novo):** `pg_trgm` em `public`, leaked-password
+  protection e as tabelas RLS sem policy (`beta_invites`,
+  `team_invite_email_sends`, `work_order_ai_reports`, de 0099/0110/0111) são
+  baseline. A Central adiciona RPCs SECURITY DEFINER executáveis por
+  `authenticated` por arquitetura (membresia/ownership conferidos dentro), nenhuma
+  para anon; as 9 tabelas novas têm RLS **com** policies.
+- **Operations:** `claude/operations-dispatch-v1` pode ter partido do HEAD inseguro
+  `74d18ef`. **Operations branch must rebase/cherry-pick security-fix before H0
+  integration.**
 - A verificação `verify-consolidated-source.mjs` valida o estado arqueológico
   pós-codemod (roda `apply-round32` antes) e já estava defasada do arquivo vivo
   antes desta onda; não é gate de CI nem de `verify:v2`. Os gates de integridade
