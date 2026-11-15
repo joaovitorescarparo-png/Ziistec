@@ -234,12 +234,22 @@ test('team-invite-email: JWT obrigatório, origem permitida, dono ativo antes da
 test('SEC-01: a trava de UPDATE do técnico cobre contrato e ciclo e a migration não muda grants nem tabelas', () => {
   const migrations = readdirSync(path.join(root, 'supabase')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   const definers = migrations.filter((f) => /create or replace function public\.zt_guard_work_order_technician_update\(/i.test(read(`supabase/${f}`)));
-  assert.equal(definers.at(-1), '0107_technician_contract_cycle_guard.sql', 'a definição vigente da trava é a 0107');
-  const sql = read('supabase/0107_technician_contract_cycle_guard.sql');
-  for (const field of ['maintenance_contract_id', 'contract_cycle', 'billing_entry_id', 'extra_cost', 'assigned_to', 'client_id', 'quote_id', 'warranty_id', 'company_id']) {
+  // A 0116 (Operations Dispatch) redefine a trava para incluir priority, que ela
+  // criou: sem isso o técnico mudaria a prioridade da própria OS. A asserção
+  // segue exata e passa a cobrir a lista inteira, agora com priority.
+  assert.equal(definers.at(-1), '0116_operations_dispatch.sql', 'a definição vigente da trava é a 0116');
+  const sql0107 = read('supabase/0107_technician_contract_cycle_guard.sql');
+  const sql = read('supabase/0116_operations_dispatch.sql');
+  for (const field of ['maintenance_contract_id', 'contract_cycle', 'billing_entry_id', 'extra_cost', 'assigned_to', 'client_id', 'quote_id', 'warranty_id', 'company_id', 'priority']) {
     assert.match(sql, new RegExp(`new\\.${field} is distinct from old\\.${field}`), field);
   }
-  assert.match(sql, /revoke execute on function public\.zt_guard_work_order_technician_update\(\) from public, anon, authenticated;/);
-  assert.equal(/\b(create|alter|drop)\s+table\b|create\s+policy|alter\s+policy|drop\s+policy|\bgrant\b/i.test(sql.replace(/--.*$/gm, '')), false, 'a 0107 não toca tabelas, policies nem concede privilégios');
-  assert.equal(/security definer/i.test(sql.replace(/--.*$/gm, '')), false, 'a trava continua security invoker');
+  // a 0107 continua intacta como estava, sem tocar tabelas, policies ou grants
+  assert.match(sql0107, /revoke execute on function public\.zt_guard_work_order_technician_update\(\) from public, anon, authenticated;/);
+  assert.equal(/\b(create|alter|drop)\s+table\b|create\s+policy|alter\s+policy|drop\s+policy|\bgrant\b/i.test(sql0107.replace(/--.*$/gm, '')), false, 'a 0107 não toca tabelas, policies nem concede privilégios');
+  assert.equal(/security definer/i.test(sql0107.replace(/--.*$/gm, '')), false, 'a trava da 0107 continua security invoker');
+  // na 0116 a trava também segue invoker (a função não virou definer)
+  const inicioTrava = sql.indexOf('create or replace function public.zt_guard_work_order_technician_update');
+  const trava0116 = sql.slice(inicioTrava, sql.indexOf('$$;', inicioTrava) + 3);
+  // Sem comentários: o corpo herda da 0107 a explicação que cita SECURITY DEFINER.
+  assert.equal(/security definer/i.test(trava0116.replace(/--.*$/gm, '')), false, 'a trava continua security invoker na 0116');
 });
