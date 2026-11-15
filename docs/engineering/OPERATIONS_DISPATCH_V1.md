@@ -123,6 +123,25 @@ definers 162 -> 169, listas de migrations pós-0105 com a 0116, e o SEC-01
 passando a apontar a definição vigente da trava do técnico (agora cobrindo
 `priority`).
 
+## Integração com a Central Técnica segura
+
+A 0116 entra **depois** das 0113-0115 corrigidas pelo security fix, e as duas
+features convivem sobre a mesma OS. O que isso implica:
+
+- cadeia de definers: 149 (0112) -> **164** com as 0113-0115 corrigidas ->
+  **171** com a 0116. O inventário do gate nomeia os dois catálogos; os guards
+  de trigger (`zt_guard_work_order_technician_update`,
+  `zt_eq_guard_company_immutable`, `zt_eq_guard_document_official`) seguem
+  `SECURITY INVOKER` e não entram nessa conta;
+- os casos da Central são **curados**: a Base Técnica interna não vira caso
+  sozinha, só o owner publica, e `zt_equipment_cases` devolve apenas o texto
+  publicado. O despacho não muda nada disso — ele só coloca a OS na mão do
+  técnico certo;
+- `v2_operations_central_cross_feature_rollback.sql` (37 checks) prova a jornada
+  completa numa OS só e que nada vaza em nenhum ponto: nem texto bruto da OS,
+  nem Base Técnica interna, nem PII, nem número/id da OS, nem financeiro — nem
+  no caso publicado, nem no quadro de operações.
+
 ## Riscos e pendências
 
 - 0116 **não aplicada em nenhum ambiente**. H0 está com outra frente fechando a

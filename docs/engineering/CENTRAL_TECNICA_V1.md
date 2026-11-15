@@ -241,3 +241,21 @@ imutável, selo oficial):
 - `verify:v2` fecha vermelho no baseline por interação de event loop na suíte do
   Assistant (`ai_gateway.test.mjs` passa isolado). Reproduzido igual no baseline
   intocado; fora do escopo desta onda e da frente em que Claude implementa.
+
+## Convivência com a Central de Operações (0116)
+
+A 0116 (despacho de OS) entra **depois** desta onda e **não renumera** nada: a
+Central Técnica segue em 0113-0115. Ela acrescenta `work_orders.priority`,
+`work_order_dispatch_events` e as RPCs de despacho, levando o inventário de
+definers de 164 para **171**.
+
+Dois pontos de contato, ambos cobertos por teste:
+
+- a mesma OS que o despacho distribui é a que recebe o vínculo de equipamento e,
+  depois de concluída, pode ter o caso publicado pelo owner;
+- o técnico que recebe a OS pelo despacho usa a Ajuda Técnica normalmente, mas
+  continua sem o quadro da equipe, sem `approved_*` e sem acesso ao caso antes
+  da publicação.
+
+`v2_operations_central_cross_feature_rollback.sql` prova a jornada inteira numa
+OS só, incluindo a ausência de texto bruto, PII e financeiro no caso curado.
