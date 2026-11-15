@@ -198,7 +198,7 @@ test('os testes SQL e de concorrência novos estão no runner do CI e os scripts
 
 test('o inventário de SECURITY DEFINER do gate acompanha as duas funções novas', () => {
   const audit = read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql');
-  assert.match(audit, /0109 adds one public definer[\s\S]*-- 0110 adds one public definer[\s\S]*if v_total<>162 then/);
+  assert.match(audit, /0109 adds one public definer[\s\S]*-- 0110 adds one public definer[\s\S]*if v_total<>164 then/);
   const doc = read('docs/engineering/SECURITY_DEFINER_AUDIT.md');
   assert.match(doc, /`zt_adjust_product_stock\(p_company uuid, p_product uuid, p_delta numeric, p_notes text, p_request uuid\)` \| 0109/);
   assert.match(doc, /`zt_claim_team_invite_email\(p_invite uuid\)` \| 0110/);
