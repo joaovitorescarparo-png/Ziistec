@@ -640,14 +640,14 @@ function CasosCT({ empresaId, modeloId, aviso }) {
   if (!casos) return <Card className="p-6 text-[14px] text-slate-400">Carregando…</Card>;
   if (!casos.length) {
     return (
-      <Card><Vazio icon={ClipboardList} titulo="Nenhum caso registrado para este equipamento"
-        texto="Quando uma OS com este equipamento for concluída com a Base Técnica preenchida, o atendimento aparece aqui como caso técnico — sem dados do cliente e sem valores." /></Card>
+      <Card><Vazio icon={ClipboardList} titulo="Nenhum caso publicado para este equipamento"
+        texto="Um atendimento vira caso quando o proprietário revisa a Base Técnica de uma OS concluída e publica o caso técnico. Só o texto publicado aparece aqui — sem dados do cliente, da OS ou valores." /></Card>
     );
   }
   return (
     <>
       <p className="mb-3 text-[12.5px] text-slate-400">
-        Conhecimento técnico da sua empresa, vindo da Base Técnica das OS concluídas. Sem nome de cliente, endereço ou valores.
+        Casos técnicos revisados e publicados pela sua empresa. Mostram somente o texto publicado — sem cliente, número da OS ou valores.
       </p>
       <div className="space-y-3">
         {casos.map((c) => (
@@ -655,7 +655,7 @@ function CasosCT({ empresaId, modeloId, aviso }) {
             <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
               <Pill tom="ok">Caso resolvido</Pill>
               <span className="text-[12px] text-slate-400">
-                {c.numero}{c.concluidoEm ? ` · ${dataBR(c.concluidoEm)}` : ''}
+                {c.concluidoEm ? `Atendimento de ${dataBR(c.concluidoEm)}` : c.publicadoEm ? `Publicado em ${dataBR(c.publicadoEm)}` : ''}
               </span>
             </div>
             {c.sintoma ? <Bloco titulo="Sintoma" texto={c.sintoma} /> : null}
@@ -665,8 +665,6 @@ function CasosCT({ empresaId, modeloId, aviso }) {
             <div className="mt-2 flex flex-wrap gap-1.5">
               {c.dificuldade ? <Pill>Dificuldade: {DIFICULDADE[c.dificuldade] || c.dificuldade}</Pill> : null}
               {c.unidadeIdentificada ? <Pill>Equipamento identificado</Pill> : null}
-              {c.precisouRetorno ? <Pill tom="atencao">Precisou de retorno</Pill> : null}
-              {c.obsVinculo ? <Pill>{c.obsVinculo}</Pill> : null}
             </div>
           </Card>
         ))}

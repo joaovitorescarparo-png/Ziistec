@@ -52,6 +52,7 @@ import QuoteClientLocationField from "../components/QuoteClientLocationField";
 import LocationHistoryPanel from "../components/LocationHistoryPanel";
 import CentralTecnicaScreen from "../components/CentralTecnicaScreen";
 import WorkOrderEquipmentPanel from "../components/WorkOrderEquipmentPanel";
+import TechnicalCasePublishPanel from "../components/TechnicalCasePublishPanel";
 import { listarLocaisClienteOrcamentoV2DB } from "../lib/quoteReuseV2Api";
 import { carregarChecklistOSV2DB, marcarRetornoOSV2DB, novoReturnRequestId } from "../lib/checklistReturnV2Api";
 import useSpeechInput from "../hooks/useSpeechInput";
@@ -4257,6 +4258,10 @@ function OSDetalhe(p) {
           )}
 
           <BaseTecnicaPainel os={os} real={real} recarregar={finalizando} />
+
+          <TechnicalCasePublishPanel
+            workOrderId={os.id} concluida={os.status === "concluida"}
+            podePublicar={permitido("gerirCentral")} real={real} aviso={aviso} recarregar={finalizando} />
 
           <section>
             <Rotulo acao={os.relato ? <span className="text-[12px] text-slate-400">salvo automaticamente</span> : null}>O que foi feito</Rotulo>

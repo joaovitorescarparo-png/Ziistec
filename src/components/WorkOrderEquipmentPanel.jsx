@@ -13,8 +13,9 @@ import {
                   (installed_equipment, 0083) e o modelo técnico vem com ela;
     diagnóstico — ainda não há unidade registrada: vincula-se só o MODELO.
 
-  O vínculo é o que faz a Base Técnica daquela OS virar caso consultável para os
-  próximos atendimentos do mesmo modelo.
+  O vínculo diz a qual modelo o atendimento pertence. A Base Técnica da OS não
+  vira caso sozinha: o proprietário revisa e publica o caso técnico
+  (TechnicalCasePublishPanel), e só então ele aparece na Central para a equipe.
 */
 
 const ring = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500';
@@ -54,7 +55,7 @@ export default function WorkOrderEquipmentPanel({
         ) : lista.length === 0 ? (
           <p className="text-[13.5px] leading-relaxed text-slate-500">
             Vincule o equipamento atendido para abrir a ficha rápida, o manual e os casos já resolvidos pela
-            equipe — e para que este atendimento vire conhecimento da empresa.
+            equipe. Depois de concluída a OS, o proprietário pode publicar o caso técnico deste atendimento.
           </p>
         ) : (
           <div className="space-y-3">

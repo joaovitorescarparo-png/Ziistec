@@ -12,8 +12,10 @@ import { supabase } from './supabase';
 
   Escopos: company_id null = biblioteca global ZiisTec (somente leitura aqui);
   company_id preenchido = conteúdo privado da empresa. RLS é a autoridade.
-  Casos vêm da Base Técnica (0111) já sanitizados pela RPC: sem dado do cliente
-  e sem nada financeiro.
+  Casos são PUBLICAÇÕES curadas: a Base Técnica da OS (0111) é o registro interno
+  original e não vira caso sozinha. O owner revisa e publica o texto técnico; a
+  RPC de consulta devolve só esse texto publicado — nunca o texto bruto da OS,
+  dado do cliente, número da OS ou valor.
 */
 
 const check = (r) => { if (r?.error) throw r.error; return r?.data; };
@@ -67,18 +69,70 @@ const fromFicha = (x) => (x ? {
   id: x.id, modeloId: x.model_id, titulo: x.title, secoes: x.sections || [],
   versao: x.version, global: !x.company_id, atualizadoEm: (x.updated_at || '').slice(0, 10),
 } : null);
+// Contrato de zt_equipment_cases (0115): só o conteúdo técnico publicado.
 const fromCaso = (x) => ({
-  id: x.case_id, numero: x.wo_number, concluidoEm: x.completed_on,
+  id: x.case_id, publicadoEm: x.published_on || null, concluidoEm: x.completed_on || null,
   sintoma: x.symptom || '', causa: x.cause || '', solucao: x.solution || '',
-  dificuldade: x.difficulty || '', aprendizado: x.learning || '',
-  precisouRetorno: Boolean(x.needs_return), obsVinculo: x.linked_notes || '',
+  aprendizado: x.learning || '', dificuldade: x.difficulty || '',
   unidadeIdentificada: Boolean(x.unit_identified),
+});
+const fromPublicacao = (x) => ({
+  publicado: Boolean(x?.published), casoId: x?.case_id || null,
+  publicadoEm: x?.published_at || null, revisao: Number(x?.revision || 0),
+  sintoma: x?.symptom || '', causa: x?.cause || '', solucao: x?.solution || '',
+  aprendizado: x?.learning || '',
 });
 const fromUnidade = (x) => ({
   id: x.id, nome: x.name, marca: x.brand || '', modelo: x.model || '',
   serie: x.serial_number || '', instaladoEm: (x.installed_at || '').slice(0, 10),
   local: x.client_locations?.name || '', modeloTecnicoId: x.equipment_model_id || null,
 });
+
+export const LIMITE_CASO = { sintoma: 500, texto: 3000 };
+
+/* ------------------------------------------- publicação do caso técnico (owner) */
+// Estado da publicação + a Base Técnica original, que o owner usa como referência
+// para escrever o caso. RLS da 0111: só owner e técnico atribuído leem esta linha.
+// Se a 0115 ainda não foi aplicada, as colunas case_* não existem: devolve
+// indisponivel e a tela simplesmente não mostra o painel.
+export async function carregarPublicacaoCasoCT(workOrderId) {
+  const r = await supabase.from('work_order_technical_base')
+    .select('cause,solution,learning,difficulty,case_public_id,case_symptom,case_cause,case_solution,case_learning,case_published_at,case_revision')
+    .eq('work_order_id', workOrderId).maybeSingle();
+  if (r.error) return { indisponivel: true };
+  const x = r.data;
+  if (!x) return { indisponivel: false, temBase: false, publicacao: fromPublicacao(null), base: null };
+  return {
+    indisponivel: false,
+    temBase: true,
+    base: { causa: x.cause || '', solucao: x.solution || '', aprendizado: x.learning || '', dificuldade: x.difficulty || '' },
+    publicacao: fromPublicacao({
+      published: Boolean(x.case_published_at), case_id: x.case_public_id,
+      published_at: x.case_published_at, revision: x.case_revision,
+      symptom: x.case_symptom, cause: x.case_cause, solution: x.case_solution, learning: x.case_learning,
+    }),
+  };
+}
+
+// O texto enviado é o que o owner revisou na tela. O banco confere empresa,
+// ownership, OS concluída e assinatura; nada aqui decide autorização.
+export async function publicarCasoTecnicoCT(workOrderId, caso, requestId) {
+  const limpo = (v, max) => String(v || '').trim().slice(0, max) || null;
+  const r = await supabase.rpc('zt_publish_work_order_technical_case', {
+    p_wo: workOrderId,
+    p_symptom: limpo(caso.sintoma, LIMITE_CASO.sintoma),
+    p_cause: limpo(caso.causa, LIMITE_CASO.texto),
+    p_solution: limpo(caso.solucao, LIMITE_CASO.texto),
+    p_learning: limpo(caso.aprendizado, LIMITE_CASO.texto),
+    p_request: requestId,
+  });
+  return fromPublicacao(check(r));
+}
+
+export async function retirarCasoTecnicoCT(workOrderId) {
+  const r = await supabase.rpc('zt_unpublish_work_order_technical_case', { p_wo: workOrderId });
+  return fromPublicacao(check(r));
+}
 
 /* ----------------------------------------------------------- leitura */
 export async function carregarHomeCT(companyId, userId) {
