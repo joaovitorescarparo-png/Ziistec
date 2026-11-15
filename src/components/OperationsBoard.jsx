@@ -12,6 +12,7 @@ import {
   atribuirOSDB, carregarQuadroOperacoes, conflitosAgendaDB,
   definirPrioridadeOSDB,
 } from '../lib/operationsApi';
+import { hojeISO as diaLocalISO } from '../lib/dates';
 import OperationsCommandSimulator from './OperationsCommandSimulator';
 
 /*
@@ -51,7 +52,9 @@ function Pill({ children, className }) {
 export default function OperationsBoard({
   empresaId, usuarioAtual, real, aviso, abrirOS, hoje,
 }) {
-  const hojeISO = hoje || new Date().toISOString().slice(0, 10);
+  // Nunca o corte do toISOString(): esse é o dia em UTC e, no Brasil, vira
+  // "amanhã" entre 21h e meia-noite — o quadro mostraria o dia errado à noite.
+  const hojeISO = hoje || diaLocalISO();
   const [filtro, setFiltro] = useState('semana');
   const [extras, setExtras] = useState({ tecnicoId: '', prioridade: '', local: '' });
   const [board, setBoard] = useState(null);
