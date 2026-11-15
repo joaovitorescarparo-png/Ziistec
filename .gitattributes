@@ -9,4 +9,11 @@
 # de heredoc deixa de casar. O Git Bash do Windows tolera CR, por isso não houve falha local.
 *.sh text eol=lf
 
-# Binários (imagens etc.) e os blocos .b64 do legado não são normalizados: nada aqui os marca como texto.
+# Partes canônicas da fundação (0001): `verify-foundation-integrity.mjs` e `reassemble.mjs` conferem o sha256 dos BYTES.
+# Sem esta regra, um clone do Windows (core.autocrlf=true) recebia as partes com CRLF e o gate falhava com o conteúdo
+# intacto. A regra é restrita a estes quatro arquivos: são os únicos .txt que entram em hash de gate. O verificador
+# continua comparando bytes (não normaliza em memória) e o hash esperado não muda.
+supabase/0001_parts/part*.txt text eol=lf
+
+# Binários (imagens etc.) e os blocos .b64 do legado não são normalizados: nada aqui os marca como texto. Os .b64 são
+# uma única linha sem terminador (git ls-files --eol: i/none), então a conversão de fim de linha não os alcança.
