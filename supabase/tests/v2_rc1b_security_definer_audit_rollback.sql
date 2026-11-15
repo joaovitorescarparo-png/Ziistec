@@ -38,7 +38,14 @@ begin
   --   Their zt_private helpers (zt_ct_terms, zt_eq_validate_guide_sections, zt_eq_guide_search_text,
   --   zt_ct_case_payload) are invoker, and so are the two new trigger guards of 0113
   --   (zt_eq_guard_company_immutable, zt_eq_guard_document_official): they add no definer.
-  if v_total<>164 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=164 actual=%',v_total; end if;
+  -- 0116 (Operations Dispatch) adds seven definers, all with search_path='' and no anon EXECUTE:
+  --   public: zt_assign_work_order, zt_schedule_work_order, zt_set_work_order_priority,
+  --           zt_operations_board, zt_work_order_schedule_conflicts;
+  --   zt_private: dispatch_load_work_order, dispatch_replay (both without browser EXECUTE).
+  --   zt_private.wo_schedule_conflicts is invoker, and so stays
+  --   zt_guard_work_order_technician_update, which 0116 only redefines to cover priority.
+  -- Cadeia: 149 (0112) -> 164 (0113-0115 corrigidas) -> 171 (0116).
+  if v_total<>171 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=171 actual=%',v_total; end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;

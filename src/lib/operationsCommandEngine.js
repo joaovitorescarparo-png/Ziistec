@@ -91,6 +91,22 @@ export async function executarComando(proposta, { confirmado = false, pedido } =
       p_row: row,
       p_items: [],
     }));
+    // A RPC oficial de criação atribui a OS a quem chama. Quando o comando não
+    // pediu responsável, a OS precisa cair em "Sem responsável" para o quadro
+    // distribuir — e isso também passa pela operação oficial, ficando auditado
+    // como unassign em vez de virar escrita direta na tabela.
+    if (!alvo.responsavelId) {
+      try {
+        // Pedido próprio: p_request é uuid, não aceita sufixo.
+        await atribuirOSDB(id, null, { origem, pedido: novoPedido() });
+      } catch (e) {
+        return {
+          status: STATUS.EXECUTADO, intent: proposta.intent, workOrderId: id, requestId,
+          aviso: 'A ordem foi criada, mas continuou com você como responsável.',
+          erroSecundario: e?.message || null,
+        };
+      }
+    }
     return { status: STATUS.EXECUTADO, intent: proposta.intent, workOrderId: id, requestId };
   }
 
