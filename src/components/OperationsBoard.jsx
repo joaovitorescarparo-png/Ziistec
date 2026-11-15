@@ -12,6 +12,7 @@ import {
   atribuirOSDB, carregarQuadroOperacoes, conflitosAgendaDB,
   definirPrioridadeOSDB,
 } from '../lib/operationsApi';
+import OperationsCommandSimulator from './OperationsCommandSimulator';
 
 /*
   Central de Operações — quadro de despacho do proprietário.
@@ -232,6 +233,11 @@ export default function OperationsBoard({
           ))}
         </div>
       )}
+
+      {/* O simulador fica aqui, no mesmo lugar de quem despacha, e usa a mesma
+          operação oficial — não é um caminho paralelo. */}
+      <OperationsCommandSimulator empresaId={empresaId} usuarioAtual={usuarioAtual}
+        hoje={hojeISO} aviso={aviso} onExecutado={() => carregar(true)} />
 
       {atribuindo ? (
         <ModalAtribuir card={atribuindo} colunas={colunas} usuarioAtual={usuarioAtual}
