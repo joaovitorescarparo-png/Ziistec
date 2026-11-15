@@ -20,6 +20,8 @@
 --                          qualquer empresa; escrita só platform admin (AAL2)/service_role.
 --   company_id NOT NULL -> conhecimento privado da empresa: leitura de membro ativo
 --                          daquela empresa; escrita do owner.
+-- O escopo é decidido no INSERT e NÃO muda depois: company_id é imutável em
+-- categoria, fabricante, modelo, documento e ficha (zt_eq_guard_company_immutable).
 -- Idempotente. Sem DROP TABLE, TRUNCATE ou DELETE de dados.
 
 do $$ begin
@@ -445,6 +447,53 @@ drop trigger if exists trg_equipment_recent_views_scope on public.equipment_rece
 create trigger trg_equipment_recent_views_scope
 before insert or update of company_id,model_id on public.equipment_recent_views
 for each row execute function public.zt_eq_guard_model_scope();
+
+-- ---------------------------------------------- escopo imutável após o INSERT
+-- A RLS de UPDATE confere o company_id ANTIGO (USING) e o NOVO (WITH CHECK), cada
+-- um isoladamente. Quem é owner de A e de B passaria nas duas checagens ao mover
+-- um fabricante/categoria A -> B, e os modelos filhos de A continuariam apontando
+-- por ID para um pai agora de B: referência cross-tenant que a busca SECURITY
+-- DEFINER atravessaria. Por isso o escopo não se move por UPDATE comum:
+--   privado A -> privado B : negado
+--   privado   -> global    : negado
+--   global    -> privado   : negado
+-- Vale para TODOS os papéis (inclusive service_role e platform admin). Se um dia
+-- existir migração de escopo, será uma operação administrativa própria, que mova
+-- pai e filhos juntos — não um UPDATE de coluna.
+-- SECURITY INVOKER de propósito: não lê nenhuma tabela, só compara OLD e NEW.
+create or replace function public.zt_eq_guard_company_immutable()
+returns trigger
+language plpgsql
+security invoker
+set search_path=''
+as $$
+begin
+  if new.company_id is distinct from old.company_id then
+    raise exception 'O escopo (empresa) deste registro da Central Técnica não pode ser alterado'
+      using errcode='42501';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.zt_eq_guard_company_immutable() from public,anon,authenticated;
+grant execute on function public.zt_eq_guard_company_immutable() to service_role;
+
+-- Sem "OF company_id": o trigger roda em todo UPDATE, então a regra vale também
+-- quando outra função/trigger tenta alterar a coluna fora da lista SET.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'equipment_categories','equipment_manufacturers','equipment_models',
+    'equipment_documents','equipment_quick_guides'
+  ] loop
+    execute format('drop trigger if exists trg_%1$s_company_immutable on public.%1$s',t);
+    execute format(
+      'create trigger trg_%1$s_company_immutable before update on public.%1$s '
+      'for each row execute function public.zt_eq_guard_company_immutable()',t);
+  end loop;
+end
+$$;
 
 -- Área técnica: categoria global ou da própria empresa.
 create or replace function public.zt_eq_guard_area()

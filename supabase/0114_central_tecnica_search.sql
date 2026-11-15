@@ -9,6 +9,13 @@
 -- O técnico digita uma coisa só: "FR 101", "erro E4", "reset", "motor não fecha".
 -- A RPC confere membresia, devolve apenas biblioteca global + conteúdo da própria
 -- empresa, pagina e diz onde casou. Nada financeiro trafega por aqui.
+--
+-- Defesa em profundidade de tenant: a função é SECURITY DEFINER (RLS não se aplica
+-- dentro dela), então NENHUM JOIN confia só no ID da FK. Fabricante e categoria só
+-- entram no resultado se forem globais ou do mesmo escopo do modelo; um pai
+-- inconsistente derruba a linha (falha fechada) em vez de expor nome de outra
+-- empresa. A 0113 já impede a inconsistência (escopo imutável + guard do modelo);
+-- aqui a leitura não depende disso.
 
 -- Divide o texto do usuário em termos seguros (sem interpolar texto cru em SQL).
 create or replace function zt_private.zt_ct_terms(p_query text)
@@ -117,7 +124,9 @@ begin
     -- fabricante
     select m.id,'manufacturer',0.4::real
       from visible_models m
-      join public.equipment_manufacturers f on f.id=m.manufacturer_id
+      join public.equipment_manufacturers f
+        on f.id=m.manufacturer_id
+       and (f.company_id is null or f.company_id=m.company_id)
      where v_main is not null
        and public.zt_ct_norm(f.name) like '%'||v_main||'%'
        and (coalesce(array_length(v_rest,1),0)=0
@@ -159,9 +168,15 @@ begin
          r.sources,
          r.best::real
     from ranked r
-    join public.equipment_models m on m.id=r.mid
-    join public.equipment_manufacturers f on f.id=m.manufacturer_id
-    join public.equipment_categories c on c.id=m.category_id
+    join public.equipment_models m
+      on m.id=r.mid
+     and (m.company_id is null or m.company_id=p_company)
+    join public.equipment_manufacturers f
+      on f.id=m.manufacturer_id
+     and (f.company_id is null or f.company_id=m.company_id)
+    join public.equipment_categories c
+      on c.id=m.category_id
+     and (c.company_id is null or c.company_id=m.company_id)
    order by r.best desc,m.name asc
    limit v_limit offset v_offset;
 end;
