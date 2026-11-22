@@ -192,3 +192,137 @@ export function aplicarMovimentoLocal(cards = [], cardId, destinoId) {
   const assignee = destinoParaAssignee(destinoId);
   return (cards || []).map((c) => (c && c.work_order_id === cardId ? { ...c, assignee_id: assignee } : c));
 }
+
+/* ===================================================================== V2
+   Derivações para a tela se explicar sozinha.
+
+   Tudo sai dos cartões que zt_operations_board já devolveu: nenhuma consulta
+   nova, nenhum N+1. O prestador precisa responder em segundos "o que preciso
+   fazer agora?", e isso é contagem e comparação de data/hora — não precisa de
+   banco, e por ser função pura dá para testar sem navegador.
+*/
+
+const ATIVO = (card) => card && card.status !== 'done' && card.status !== 'canceled';
+const hhmm = (v) => (v ? String(v).slice(0, 5) : '');
+
+/* Os quatro atalhos do topo. Cada um reaproveita um filtro que já existia:
+   tocar no atalho filtra a própria tela, nunca abre outro lugar. */
+export const ATALHOS = [
+  { id: 'hoje', label: 'Hoje', contador: 'hoje' },
+  { id: 'semresponsavel', label: 'Sem responsável', contador: 'semResponsavel' },
+  { id: 'atrasadas', label: 'Atrasados', contador: 'atrasados' },
+  { id: 'semana', label: 'Próximos', contador: 'proximos' },
+];
+
+/* Contagens do topo. "Próximos" é o que vem depois de hoje: hoje já tem atalho. */
+export function resumoDoDia(board, hoje) {
+  const h = diaISO(hoje);
+  const cards = (board?.cards || []).filter(ATIVO);
+  return {
+    hoje: cards.filter((c) => diaISO(c.scheduled_date) === h).length,
+    semResponsavel: cards.filter((c) => !c.assignee_id).length,
+    atrasados: cards.filter((c) => cartaoAtrasado(c, h)).length,
+    proximos: cards.filter((c) => diaISO(c.scheduled_date) > h).length,
+  };
+}
+
+/* Próximo atendimento de uma pessoa hoje: o primeiro com hora a partir de agora.
+   Sem hora não entra — não dá para afirmar que é o próximo. */
+export function proximoAtendimento(cards = [], assigneeId, { hoje, agora = '' } = {}) {
+  const h = diaISO(hoje);
+  const limite = hhmm(agora);
+  const doDia = (cards || []).filter((c) => (
+    ATIVO(c) && c.assignee_id === assigneeId
+    && diaISO(c.scheduled_date) === h && c.scheduled_time
+    && (!limite || hhmm(c.scheduled_time) >= limite)
+  ));
+  if (doDia.length === 0) return null;
+  return doDia.reduce((a, b) => (hhmm(a.scheduled_time) <= hhmm(b.scheduled_time) ? a : b));
+}
+
+/* Estado da pessoa, só com o que o sistema realmente sabe. Nunca inventa
+   duração, nunca estima trânsito, e só diz "Livre agora" quando não há nada em
+   atendimento nem nada marcado daqui para frente hoje. */
+export function estadoDoTecnico(cards = [], assigneeId, { hoje, agora = '' } = {}) {
+  const h = diaISO(hoje);
+  const meus = (cards || []).filter((c) => ATIVO(c) && c.assignee_id === assigneeId);
+  const doDia = meus.filter((c) => diaISO(c.scheduled_date) === h);
+  const emAtendimento = meus.some((c) => c.status === 'in_progress');
+  const proximo = proximoAtendimento(cards, assigneeId, { hoje: h, agora });
+
+  let texto;
+  if (emAtendimento) texto = 'Em atendimento';
+  else if (proximo) texto = `Próximo: ${hhmm(proximo.scheduled_time)}`;
+  else if (doDia.length === 0) texto = 'Sem serviço hoje';
+  else if (doDia.some((c) => !c.scheduled_time)) texto = 'Hoje sem horário';
+  else texto = 'Livre agora';
+
+  return { servicosHoje: doDia.length, proximo, emAtendimento, texto };
+}
+
+/* Atraso em palavras do dia a dia. Nada de "SLA" nem "vencido". */
+export function textoDoAtraso(card, hoje) {
+  if (!cartaoAtrasado(card, hoje)) return '';
+  const dia = diaISO(card.scheduled_date);
+  const ontem = somarDias(hoje, -1);
+  if (dia === ontem) return 'Atrasado desde ontem';
+  if (card.scheduled_time) return `Era para ${hhmm(card.scheduled_time)} de ${dataCurtaBR(dia)}`;
+  return `Atrasado desde ${dataCurtaBR(dia)}`;
+}
+
+const dataCurtaBR = (iso) => {
+  const d = diaISO(iso);
+  if (!d) return '';
+  const [, m, dia] = d.split('-');
+  return `${dia}/${m}`;
+};
+
+/* "Quando" como a pessoa fala: Hoje, Amanhã, Ontem, ou a data curta. */
+export function textoDoQuando(card, hoje) {
+  const dia = diaISO(card?.scheduled_date);
+  if (!dia) return 'Sem data';
+  const h = diaISO(hoje);
+  const nome = dia === h ? 'Hoje'
+    : dia === somarDias(h, 1) ? 'Amanhã'
+      : dia === somarDias(h, -1) ? 'Ontem'
+        : dataCurtaBR(dia);
+  return card.scheduled_time ? `${nome} · ${hhmm(card.scheduled_time)}` : nome;
+}
+
+/* Nome de quem vai fazer, para o cartão não depender da coluna onde está —
+   no celular as pessoas ficam uma embaixo da outra, mas o cartão também é lido
+   solto, dentro de "Precisa organizar" ou de um filtro. */
+export function nomeDoResponsavel(board, assigneeId, usuarioAtualId) {
+  if (!assigneeId) return '';
+  if (assigneeId === usuarioAtualId) return 'Você';
+  const m = (board?.members || []).find((x) => x.user_id === assigneeId);
+  return m?.name || 'Colaborador inativo';
+}
+
+/* Pessoas do modal "Quem vai fazer?", já com a carga do dia e o próximo
+   atendimento, mais o aviso de choque no horário pedido. O proprietário vem
+   primeiro e aparece como "Você". */
+export function pessoasParaEscolher(board, { hoje, agora = '', usuarioAtualId = '', card = null } = {}) {
+  const cards = board?.cards || [];
+  return (board?.members || []).map((m) => {
+    const estado = estadoDoTecnico(cards, m.user_id, { hoje, agora });
+    const choque = card
+      ? conflitosLocais(cards, {
+        cardId: card.work_order_id,
+        assigneeId: m.user_id,
+        data: card.scheduled_date,
+        hora: card.scheduled_time,
+      })
+      : 0;
+    return {
+      id: m.user_id,
+      nome: m.user_id === usuarioAtualId ? `${m.name} — Você` : m.name,
+      ehVoce: m.user_id === usuarioAtualId,
+      papel: m.role,
+      servicosHoje: estado.servicosHoje,
+      estado: estado.texto,
+      choque,
+      atual: Boolean(card) && card.assignee_id === m.user_id,
+    };
+  });
+}

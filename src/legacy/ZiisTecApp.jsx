@@ -1517,7 +1517,9 @@ export default function ZiisTec({ contexto }) {
           {tela === "operacoes" && (
             <OperationsBoard
               empresaId={empresaId} usuarioAtual={usuarioAtual} real={real}
-              aviso={aviso} abrirOS={abrirOS} hoje={hojeISO()} />
+              aviso={aviso} abrirOS={abrirOS} hoje={hojeISO()}
+              clientes={clientesEmp} salvarOS={salvarOS} salvarCliente={salvarCliente}
+              CampoVoz={CampoVoz} />
           )}
           {tela === "central" && (
             <CentralTecnicaScreen
