@@ -72,7 +72,11 @@ insert into public.products(id,company_id,name,unit,cost,price,active,track_stoc
 values
   ('33000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','Filtro de ar','un',30,50,true,true,10,6),
   ('33000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000001','Fita isolante','un',5,9,true,false,0,0),
-  ('33000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000001','Compressor','un',900,1500,true,true,1,12);
+  ('33000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000001','Compressor','un',900,1500,true,true,1,12),
+  -- Saldo folgado para as combinações de produto repetido e produto cobrado.
+  ('33000000-0000-0000-0000-000000000004','20000000-0000-0000-0000-000000000001','Fonte 12V','un',90,170,true,true,20,12),
+  ('33000000-0000-0000-0000-000000000005','20000000-0000-0000-0000-000000000001','Abraçadeira','un',1,3,true,false,0,0),
+  ('33000000-0000-0000-0000-000000000006','20000000-0000-0000-0000-000000000001','Cabo coaxial','m',4,9,true,true,30,0);
 
 -- ======================================================= 1. registro de hoje
 select pg_temp.retro_as('10000000-0000-0000-0000-000000000001');
@@ -319,6 +323,144 @@ begin
     (select stock_qty from public.products where id='33000000-0000-0000-0000-000000000003')=1,null);
 end $$;
 
+
+-- ============== consumo somado por produto: item cobrado + material, repetidos
+-- O produto do catálogo cobrado na OS saiu da prateleira igual ao material. E
+-- duas linhas do mesmo produto são duas entradas explícitas do usuário: somam,
+-- e viram UMA baixa — por linha, duas linhas iguais virariam replay e duas com
+-- quantidades diferentes colidiriam em 23505.
+do $$
+declare v jsonb; v_wo uuid; v_dia date := ((now() at time zone 'America/Sao_Paulo')::date - 3);
+begin
+  v := public.zt_register_completed_work_order(
+    '20000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-00000000d001',
+    jsonb_build_object('client_id','31000000-0000-0000-0000-000000000001','service_date',v_dia::text),
+    -- Fonte 12V cobrada duas vezes (2 + 1) e abraçadeira cobrada sem controle de estoque.
+    jsonb_build_array(
+      jsonb_build_object('kind','product','product_id','33000000-0000-0000-0000-000000000004','name','Fonte 12V','quantity',2,'unit_price',170),
+      jsonb_build_object('kind','product','product_id','33000000-0000-0000-0000-000000000004','name','Fonte 12V','quantity',1,'unit_price',170),
+      jsonb_build_object('kind','product','product_id','33000000-0000-0000-0000-000000000005','name','Abraçadeira','quantity',4,'unit_price',3),
+      jsonb_build_object('kind','service','service_id','32000000-0000-0000-0000-000000000001','name','Manutenção preventiva','quantity',1,'unit_price',200)),
+    -- Mesmo produto em duas linhas de material com quantidades diferentes (5 + 2),
+    -- e a própria Fonte 12V também como material (1): consumo adicional, soma.
+    jsonb_build_array(
+      jsonb_build_object('product_id','33000000-0000-0000-0000-000000000006','name','Cabo coaxial','quantity',5,'unit_cost',4),
+      jsonb_build_object('product_id','33000000-0000-0000-0000-000000000006','name','Cabo coaxial','quantity',2,'unit_cost',4),
+      jsonb_build_object('product_id','33000000-0000-0000-0000-000000000004','name','Fonte 12V','quantity',1,'unit_cost',90)),
+    jsonb_build_object('status','pending'));
+  v_wo := (v->>'work_order_id')::uuid;
+  perform pg_temp.retro_check('consumo_registra', v_wo is not null, v::text);
+
+  -- produto cobrado com controle de estoque baixa: 20 - (2+1 cobrados + 1 material) = 16
+  perform pg_temp.retro_check('cobrado_com_controle_baixa_somado',
+    (select stock_qty from public.products where id='33000000-0000-0000-0000-000000000004')=16,
+    'saldo='||(select stock_qty::text from public.products where id='33000000-0000-0000-0000-000000000004'));
+  -- material repetido soma: 30 - (5+2) = 23
+  perform pg_temp.retro_check('material_repetido_soma',
+    (select stock_qty from public.products where id='33000000-0000-0000-0000-000000000006')=23,
+    'saldo='||(select stock_qty::text from public.products where id='33000000-0000-0000-0000-000000000006'));
+  -- uma baixa por produto, nunca uma por linha
+  perform pg_temp.retro_check('uma_baixa_por_produto',
+    (select count(*) from public.inventory_movements
+      where company_id='20000000-0000-0000-0000-000000000001'
+        and product_id='33000000-0000-0000-0000-000000000004')=1
+    and (select count(*) from public.inventory_movements
+          where company_id='20000000-0000-0000-0000-000000000001'
+            and product_id='33000000-0000-0000-0000-000000000006')=1,
+    (select string_agg(product_id::text||'='||quantity_delta::text,', ')
+       from public.inventory_movements where company_id='20000000-0000-0000-0000-000000000001'));
+  perform pg_temp.retro_check('baixa_e_o_total_nao_a_parcela',
+    exists(select 1 from public.inventory_movements
+            where product_id='33000000-0000-0000-0000-000000000004' and quantity_delta=-4)
+    and exists(select 1 from public.inventory_movements
+                where product_id='33000000-0000-0000-0000-000000000006' and quantity_delta=-7),null);
+  -- produto cobrado sem controle de estoque não gera movimento nem passa a controlar
+  perform pg_temp.retro_check('cobrado_sem_controle_nao_movimenta',
+    (select count(*) from public.inventory_movements
+      where product_id='33000000-0000-0000-0000-000000000005')=0
+    and exists(select 1 from public.products
+                where id='33000000-0000-0000-0000-000000000005' and track_stock=false),null);
+  -- serviço não baixa estoque
+  perform pg_temp.retro_check('servico_nao_baixa_estoque',
+    (select count(*) from public.inventory_movements
+      where company_id='20000000-0000-0000-0000-000000000001'
+        and product_id in (select id from public.products where id='32000000-0000-0000-0000-000000000001'))=0,null);
+  -- financeiro: só os itens cobrados entram no valor; material não cobra nada
+  -- 2x170 + 1x170 + 4x3 + 200 = 722
+  perform pg_temp.retro_check('material_nao_duplica_financeiro',
+    (select count(*) from public.financial_entries where work_order_id=v_wo)=1
+    and exists(select 1 from public.financial_entries where work_order_id=v_wo and amount=722),
+    (select string_agg(amount::text,', ') from public.financial_entries where work_order_id=v_wo));
+exception when others then
+  perform pg_temp.retro_check('consumo_registra', false, sqlstate||' '||sqlerrm);
+end $$;
+
+-- retry da combinação inteira: nada baixa de novo, nada duplica
+do $$
+declare v jsonb; v_dia date := ((now() at time zone 'America/Sao_Paulo')::date - 3);
+begin
+  v := public.zt_register_completed_work_order(
+    '20000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-00000000d001',
+    jsonb_build_object('client_id','31000000-0000-0000-0000-000000000001','service_date',v_dia::text),
+    jsonb_build_array(
+      jsonb_build_object('kind','product','product_id','33000000-0000-0000-0000-000000000004','name','Fonte 12V','quantity',2,'unit_price',170),
+      jsonb_build_object('kind','product','product_id','33000000-0000-0000-0000-000000000004','name','Fonte 12V','quantity',1,'unit_price',170)),
+    jsonb_build_array(
+      jsonb_build_object('product_id','33000000-0000-0000-0000-000000000006','name','Cabo coaxial','quantity',5,'unit_cost',4),
+      jsonb_build_object('product_id','33000000-0000-0000-0000-000000000006','name','Cabo coaxial','quantity',2,'unit_cost',4)),
+    jsonb_build_object('status','pending'));
+  perform pg_temp.retro_check('retry_combinacao_reaproveita', (v->>'replayed')::boolean is true, v::text);
+  perform pg_temp.retro_check('retry_combinacao_nao_baixa_de_novo',
+    (select stock_qty from public.products where id='33000000-0000-0000-0000-000000000004')=16
+    and (select stock_qty from public.products where id='33000000-0000-0000-0000-000000000006')=23
+    and (select count(*) from public.inventory_movements
+          where product_id in ('33000000-0000-0000-0000-000000000004','33000000-0000-0000-0000-000000000006'))=2,null);
+  perform pg_temp.retro_check('retry_combinacao_nao_duplica_os_nem_cobranca',
+    (select count(*) from public.work_orders
+      where client_request_id='40000000-0000-0000-0000-00000000d001')=1
+    and (select count(*) from public.financial_entries
+          where work_order_id=(select id from public.work_orders
+                                where client_request_id='40000000-0000-0000-0000-00000000d001'))=1,null);
+exception when others then
+  perform pg_temp.retro_check('retry_combinacao_reaproveita', false, sqlstate||' '||sqlerrm);
+end $$;
+
+-- ============ estoque insuficiente pela SOMA desfaz OS, financeiro e garantia
+-- Cada linha caberia no saldo; a soma não. É a soma que decide, e a recusa não
+-- pode deixar OS, cobrança, garantia nem movimento para trás.
+do $$
+declare v_dia date := ((now() at time zone 'America/Sao_Paulo')::date - 1);
+  v_saldo_antes numeric; v_mov_antes bigint;
+begin
+  select stock_qty into v_saldo_antes from public.products where id='33000000-0000-0000-0000-000000000006';
+  select count(*) into v_mov_antes from public.inventory_movements
+   where product_id='33000000-0000-0000-0000-000000000006';
+
+  perform pg_temp.retro_check('soma_insuficiente_recusa',
+    pg_temp.retro_state(format($q$select public.zt_register_completed_work_order(
+      '20000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-00000000d002',
+      '{"client_id":"31000000-0000-0000-0000-000000000001","service_date":"%s"}'::jsonb,
+      '[{"kind":"product","product_id":"33000000-0000-0000-0000-000000000006","name":"Cabo coaxial","quantity":15,"unit_price":9},
+        {"kind":"service","service_id":"32000000-0000-0000-0000-000000000001","name":"Manutenção preventiva","quantity":1,"unit_price":200}]'::jsonb,
+      '[{"product_id":"33000000-0000-0000-0000-000000000006","name":"Cabo coaxial","quantity":15,"unit_cost":4}]'::jsonb)$q$,
+      v_dia))='23514',
+    'saldo antes='||coalesce(v_saldo_antes::text,'null'));
+  perform pg_temp.retro_check('soma_insuficiente_sem_os',
+    (select count(*) from public.work_orders
+      where client_request_id='40000000-0000-0000-0000-00000000d002')=0,null);
+  perform pg_temp.retro_check('soma_insuficiente_sem_cobranca_nem_garantia',
+    not exists(select 1 from public.financial_entries f
+                join public.work_orders w on w.id=f.work_order_id
+               where w.client_request_id='40000000-0000-0000-0000-00000000d002')
+    and not exists(select 1 from public.warranties g
+                    join public.work_orders w on w.id=g.work_order_id
+                   where w.client_request_id='40000000-0000-0000-0000-00000000d002'),null);
+  perform pg_temp.retro_check('soma_insuficiente_sem_movimento_nem_saldo',
+    (select stock_qty from public.products where id='33000000-0000-0000-0000-000000000006')=v_saldo_antes
+    and (select count(*) from public.inventory_movements
+          where product_id='33000000-0000-0000-0000-000000000006')=v_mov_antes,null);
+end $$;
+
 -- ========================================= 17/18. quem não pode, não registra
 select pg_temp.retro_as('10000000-0000-0000-0000-000000000003');
 do $$
@@ -433,7 +575,7 @@ begin
   select string_agg(name||' => '||coalesce(detail,''),' ; ' order by name) into v_failures
     from zt_retro_results where not ok;
   if v_failures is not null then raise exception 'RETROACTIVE_SERVICE_FAILED: %', v_failures; end if;
-  if (select count(*) from zt_retro_results) < 45 then
+  if (select count(*) from zt_retro_results) < 60 then
     raise exception 'RETROACTIVE_SERVICE_INCOMPLETE: % checks',(select count(*) from zt_retro_results);
   end if;
 end $$;

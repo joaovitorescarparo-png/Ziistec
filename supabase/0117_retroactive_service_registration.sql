@@ -20,8 +20,10 @@
 --      o que permite o histórico distinguir "serviço em X, registrado em Y";
 --   3. garantia começa na data real do serviço, preservando a duração;
 --   4. vencimento do recebível conta da data real do serviço;
---   5. produto que controla estoque dá baixa; produto que não controla, não gera
---      movimento (chamar o ajuste ligaria track_stock sem pedido do usuário).
+--   5. o consumo de estoque é somado por produto em TODO o registro — itens
+--      cobrados do catálogo e materiais — e dá UMA baixa por produto; produto
+--      que não controla estoque não gera movimento (chamar o ajuste ligaria
+--      track_stock sem pedido do usuário).
 --
 -- A OS normal e a finalização normal não mudam em nada: nenhuma função existente
 -- é redefinida aqui.
@@ -269,19 +271,45 @@ begin
      where id = v_billing and company_id = p_company;
   end if;
 
-  -- 5. estoque: baixa oficial, idempotente, só para produto que controla estoque.
-  for m in select value from jsonb_array_elements(coalesce(p_materials,'[]'::jsonb)) loop
-    if coalesce(m->>'product_id','') = '' then continue; end if;
+  -- 5. estoque: UMA baixa por produto, somando todo o consumo do registro.
+  -- Produto do catálogo cobrado na OS também saiu da prateleira: contá-lo só
+  -- quando o usuário repetisse a linha em materiais deixaria o estoque parado
+  -- enquanto a OS cobra a peça. Serviço e item livre sem produto não baixam.
+  -- Agregar antes de chamar é também o que mantém o retry idempotente quando o
+  -- mesmo produto aparece em mais de uma linha: um pedido por produto, não por
+  -- linha — por linha, duas linhas iguais virariam replay e duas linhas com
+  -- quantidades diferentes colidiriam em 23505.
+  for m in
+    select jsonb_build_object('product_id', c.product_id, 'quantity', sum(c.quantity)) as value
+      from (
+        select (i.value->>'product_id')::uuid as product_id,
+               greatest(coalesce((i.value->>'quantity')::numeric,1),0.001) as quantity
+          from jsonb_array_elements(coalesce(p_items,'[]'::jsonb)) i
+         where coalesce(i.value->>'product_id','') <> ''
+           and coalesce(i.value->>'kind','') = 'product'
+        union all
+        select (t.value->>'product_id')::uuid,
+               greatest(coalesce((t.value->>'quantity')::numeric,1),0.001)
+          from jsonb_array_elements(coalesce(p_materials,'[]'::jsonb)) t
+         where coalesce(t.value->>'product_id','') <> ''
+      ) c
+     group by c.product_id
+     order by c.product_id
+  loop
     v_product := (m->>'product_id')::uuid;
-    v_qty := greatest(coalesce((m->>'quantity')::numeric,1),0.001);
+    v_qty := (m->>'quantity')::numeric;
 
     select p.track_stock into v_track from public.products p
      where p.id=v_product and p.company_id=p_company;
+    if not found then
+      raise exception 'Produto da ordem não pertence a esta empresa' using errcode='23503';
+    end if;
     -- Produto que não controla estoque não gera movimento: chamar o ajuste
     -- ligaria track_stock sem o usuário ter pedido isso.
     if not coalesce(v_track,false) then continue; end if;
 
-    -- Pedido derivado do registro: retry do mesmo registro não baixa de novo.
+    -- Pedido derivado do registro e do produto: retry do mesmo registro não
+    -- baixa de novo, e o delta é sempre o total, nunca uma parcela.
     v_stock_request := md5(p_request::text||':'||v_product::text)::uuid;
     v_balance := public.zt_adjust_product_stock(
       p_company, v_product, -v_qty,

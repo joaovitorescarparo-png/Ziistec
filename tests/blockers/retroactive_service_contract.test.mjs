@@ -73,6 +73,13 @@ test('o formulário pede o que aconteceu e recusa data futura antes de salvar', 
   assert.match(form, /\.\.\.f, requestId: requestIdRef\.current,/, 'o retry reaproveita o mesmo pedido');
   assert.equal(/custo|margem|fornecedor/i.test(form.replace(/custo: pr\.custo|custo: m\.custo/g, '')), false,
     'o formulário não expõe custo, margem nem fornecedor fora do material do proprietário');
+  // o proprietário vê que o produto cobrado também sai do estoque, e que não
+  // precisa repetir a peça em materiais para isso acontecer
+  assert.match(form, /i\.tipo === "produto" && produtos\.find\(\(x\) => x\.id === i\.catalogoId\)\?\.controlaEstoque/,
+    'produto cobrado com controle de estoque é marcado na linha');
+  assert.ok(form.includes('· baixa estoque'));
+  assert.ok(form.includes('Use aqui materiais consumidos que não foram lançados acima como produto cobrado.'),
+    'materiais deixa claro que não é para repetir o produto já cobrado');
 });
 
 test('"Registrado posteriormente" é derivado, sem coluna nova', () => {
@@ -147,6 +154,23 @@ test('a RPC é do proprietário, idempotente, e respeita data real, estoque e fi
     'a venda em campo criaria um segundo recebível junto do faturamento da OS');
   assert.match(sql, /if not coalesce\(v_track,false\) then continue; end if;/);
   assert.match(sql, /v_stock_request := md5\(p_request::text\|\|':'\|\|v_product::text\)::uuid;/);
+  // o consumo é somado por produto ANTES de chamar o ajuste: uma baixa por
+  // produto, com o total. Por linha, duas linhas iguais virariam replay e duas
+  // com quantidades diferentes colidiriam em 23505.
+  const laco = sql.slice(sql.indexOf('for m in\n    select jsonb_build_object'), sql.indexOf('public.zt_adjust_product_stock('));
+  assert.ok(laco.length > 0, 'o laço de estoque parte de uma agregação, não de uma lista de linhas');
+  assert.match(laco, /group by c\.product_id/, 'uma baixa por produto');
+  assert.match(laco, /sum\(c\.quantity\)/, 'o delta é a soma, não a parcela');
+  assert.match(laco, /union all/, 'itens cobrados e materiais entram na mesma coleção');
+  // produto do catálogo cobrado na OS também é consumo; serviço e item livre não
+  assert.match(laco, /jsonb_array_elements\(coalesce\(p_items,'\[\]'::jsonb\)\)/);
+  assert.match(laco, /and coalesce\(i\.value->>'kind',''\) = 'product'/,
+    'só item de produto baixa estoque: serviço e item livre não');
+  assert.match(laco, /jsonb_array_elements\(coalesce\(p_materials,'\[\]'::jsonb\)\)/);
+  assert.equal((sql.match(/public\.zt_adjust_product_stock\(/g) || []).length, 1,
+    'uma única chamada de baixa no corpo, dentro do laço por produto');
+  // produto de outra empresa não passa pelo laço de estoque
+  assert.match(sql, /raise exception 'Produto da ordem não pertence a esta empresa' using errcode='23503'/);
   // financeiro: marca o lançamento existente, nunca cria um segundo
   assert.match(sql, /update public\.financial_entries\s*set paid = true,/);
   assert.equal(/insert into public\.financial_entries/.test(sql), false,
@@ -168,7 +192,13 @@ test('a regressão SQL/RLS do fluxo entra no gate oficial', () => {
     'passado_financeiro_pendente', 'pago_marca_lancamento', 'retry_nao_duplica_os',
     'retry_nao_duplica_estoque', 'retry_nao_duplica_financeiro', 'tecnico_nao_registra',
     'owner_b_nao_alcanca_empresa_a', 'nova_os_normal_funciona', 'finalizacao_normal_funciona',
-    'passado_garantia_na_data_do_servico', 'estoque_insuficiente_nao_deixa_os']) {
+    'passado_garantia_na_data_do_servico', 'estoque_insuficiente_nao_deixa_os',
+    'cobrado_com_controle_baixa_somado', 'cobrado_sem_controle_nao_movimenta',
+    'material_repetido_soma', 'uma_baixa_por_produto', 'baixa_e_o_total_nao_a_parcela',
+    'servico_nao_baixa_estoque', 'material_nao_duplica_financeiro',
+    'retry_combinacao_nao_baixa_de_novo', 'soma_insuficiente_recusa',
+    'soma_insuficiente_sem_os', 'soma_insuficiente_sem_cobranca_nem_garantia',
+    'soma_insuficiente_sem_movimento_nem_saldo']) {
     assert.ok(teste.includes(`'${cenario}'`), `o cenário ${cenario} é verificado`);
   }
 });

@@ -60,14 +60,38 @@ Usa `zt_adjust_product_stock` com delta negativo, e **não**
 `zt_sell_product_on_work_order`: a venda em campo criaria um segundo recebível
 ao lado do faturamento da própria OS, cobrando o cliente duas vezes.
 
-- O pedido de cada baixa é derivado do registro: `md5(request || ':' || product)`.
-  Retry do mesmo registro não baixa de novo.
+**O consumo é somado por produto antes de qualquer chamada.** A coleção de
+consumo junta duas origens:
+
+- itens de `p_items` com `kind = 'product'` e `product_id` — o produto do
+  catálogo cobrado na OS saiu da prateleira igual a qualquer outro;
+- materiais de `p_materials` com `product_id`.
+
+As quantidades são agrupadas por `product_id` e geram **uma** baixa por produto,
+com o total. Se o mesmo produto aparece nas duas listas, são duas entradas
+explícitas do usuário e somam. Serviço e item livre sem `product_id` não baixam
+nada.
+
+Agregar antes de chamar não é refinamento: é o que mantém o retry idempotente.
+Um pedido por linha quebraria de duas formas — duas linhas do mesmo produto com
+a mesma quantidade fariam a segunda virar replay e o estoque baixaria de menos;
+com quantidades diferentes, o ajuste encontraria o mesmo pedido com outro delta
+e devolveria `23505`, abortando o registro inteiro.
+
+- O pedido de cada baixa é derivado do registro e do produto:
+  `md5(request || ':' || product)`. Retry do mesmo registro não baixa de novo.
 - Produto sem `track_stock` não gera movimento. Chamar o ajuste ligaria
   `track_stock` sem o usuário ter pedido.
+- Produto de outra empresa no corpo da OS é recusado (`23503`).
 - O movimento cita a OS, a data real do serviço e a data do registro.
-- Estoque insuficiente **aborta o registro inteiro** (`23514`). É a leitura
+- Estoque insuficiente **aborta o registro inteiro** (`23514`), e é a soma que
+  decide: cada linha pode caber no saldo sem que o total caiba. É a leitura
   segura de "não deixar metade do registro aplicada": melhor recusar e pedir que
   a compra seja lançada do que gravar saldo negativo ou uma OS sem a baixa.
+
+No formulário, o produto cobrado que controla estoque é marcado com um discreto
+"baixa estoque" na própria linha, e a seção de materiais diz para não repetir ali
+o que já foi lançado acima como produto cobrado.
 
 ## Financeiro
 

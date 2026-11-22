@@ -4102,6 +4102,9 @@ function RegistrarServicoRealizado({ onClose, clientes, servicos, produtos, empr
                         onChange={(e) => set("itens", f.itens.map((x, k) => (k === idx ? { ...x, qtd: num(e.target.value) } : x)))}
                         className="w-16 rounded-lg ring-1 ring-slate-200 px-2 py-1.5 text-[13px]" />
                       <span className="text-[12px] text-slate-400">{unidadeLabel(i.unidade)} × {brl(i.preco)}</span>
+                      {i.tipo === "produto" && produtos.find((x) => x.id === i.catalogoId)?.controlaEstoque && (
+                        <span className="text-[12px] text-slate-400">· baixa estoque</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -4128,7 +4131,7 @@ function RegistrarServicoRealizado({ onClose, clientes, servicos, produtos, empr
           )}
         </div>
 
-        <Field label="Materiais utilizados (opcional)" hint="Produto que controla estoque dá baixa pelo fluxo normal. Quem não controla entra só como material da ordem.">
+        <Field label="Materiais utilizados (opcional)" hint="Use aqui materiais consumidos que não foram lançados acima como produto cobrado. Produto com controle de estoque dá baixa; quem não controla entra só como material da ordem.">
           {f.materiais.length > 0 && (
             <div className="rounded-xl ring-1 ring-slate-200 divide-y divide-slate-100 mb-3">
               {f.materiais.map((m, idx) => (
