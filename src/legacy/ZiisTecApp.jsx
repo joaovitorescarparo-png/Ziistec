@@ -1344,7 +1344,7 @@ export default function ZiisTec({ contexto }) {
     { id: "catalogo", label: "Serviços e produtos", icon: Wrench },
     { id: "orcamentos", label: "Orçamentos", icon: FileText },
     { id: "ordens", label: "Ordens de serviço", icon: ClipboardList },
-    { id: "operacoes", label: "Central de Operações", icon: Users2 },
+    { id: "operacoes", label: "Serviços", icon: Users2 },
     { id: "vendaCampo", label: "Produtos", icon: ShoppingCart },
     { id: "garantias", label: "Garantias", icon: ShieldCheck },
     { id: "central", label: "Central Técnica", icon: BookOpen },

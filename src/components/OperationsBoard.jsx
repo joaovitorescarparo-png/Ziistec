@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, CalendarClock, ChevronRight, Clock, Loader2, MapPin,
   Plus, RefreshCw, SlidersHorizontal, User, UserPlus, X,
@@ -14,7 +14,6 @@ import {
   definirPrioridadeOSDB,
 } from '../lib/operationsApi';
 import { hojeISO as diaLocalISO } from '../lib/dates';
-import OperationsCommandSimulator from './OperationsCommandSimulator';
 
 /*
   Serviços — a tela onde o prestador organiza o dia.
@@ -37,6 +36,23 @@ const dataBR = (v) => (v ? new Date(`${String(v).slice(0, 10)}T12:00:00`).toLoca
 const dataLonga = (v) => (v
   ? new Date(`${String(v).slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' })
   : '');
+/* O simulador de comandos é ferramenta interna de homologação técnica, não
+   função do produto: o prestador nunca deve encontrá-lo. Fica visível no
+   desenvolvimento local e, se alguém precisar dele numa homologação, com
+   VITE_ZT_OPERATIONS_SIMULATOR=true no ambiente daquele deploy. Em Production
+   a variável não existe e não há caminho na interface para ligá-la. */
+// Sem `?.` de propósito: é assim que o empacotador substitui as duas leituras
+// por literal e consegue dobrar a condição inteira antes de dividir os pacotes.
+const SIMULADOR_INTERNO = import.meta.env.DEV
+  || import.meta.env.VITE_ZT_OPERATIONS_SIMULATOR === 'true';
+
+/* Com a trava desligada, isto é `false ? import(...) : null`: o empacotador
+   elimina o ramo morto e a ferramenta não entra no pacote que o prestador
+   baixa. Não é só deixar de desenhar — o código não vai. */
+const OperationsCommandSimulator = SIMULADOR_INTERNO
+  ? lazy(() => import('./OperationsCommandSimulator'))
+  : null;
+
 const agoraHHMM = () => {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -356,10 +372,14 @@ export default function OperationsBoard({
         </>
       )}
 
-      {/* O simulador fica depois do trabalho do dia, no mesmo lugar de quem
-          organiza, e usa a mesma operação oficial — não é caminho paralelo. */}
-      <OperationsCommandSimulator empresaId={empresaId} usuarioAtual={usuarioAtual}
-        hoje={hojeISO} aviso={aviso} onExecutado={() => carregar(true)} />
+      {/* Ferramenta interna, nunca na interface normal. Quando habilitada, usa a
+          mesma operação oficial — não é caminho paralelo. */}
+      {OperationsCommandSimulator ? (
+        <Suspense fallback={null}>
+          <OperationsCommandSimulator empresaId={empresaId} usuarioAtual={usuarioAtual}
+            hoje={hojeISO} aviso={aviso} onExecutado={() => carregar(true)} />
+        </Suspense>
+      ) : null}
 
       {escolhendo ? (
         <ModalQuemVaiFazer card={escolhendo} board={board} hoje={hojeISO} agora={agora}

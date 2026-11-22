@@ -151,9 +151,22 @@ test('sem sinks clássicos de XSS na aplicação: innerHTML, document.write, eva
 test('variáveis VITE_* são públicas: o cliente só lê o par URL/chave anon, o rótulo do ambiente e dois booleanos de interface', () => {
   const names = new Set();
   for (const file of walk('src', (f) => /\.(jsx?|mjs)$/.test(f))) for (const m of read(file).matchAll(/VITE_[A-Z0-9_]+/g)) names.add(m[0]);
-  // Par URL/anon do banco, rótulo do ambiente e dois booleanos de interface. Nada com segredo.
-  assert.deepEqual([...names].sort(), ['VITE_ENABLE_GOOGLE_AUTH', 'VITE_SUPABASE_ANON_KEY', 'VITE_SUPABASE_URL', 'VITE_VERCEL_ENV', 'VITE_ZIISTEC_BETA']);
+  // Par URL/anon do banco, rótulo do ambiente e três booleanos de interface. Nada com segredo.
+  // VITE_ZT_OPERATIONS_SIMULATOR só libera uma ferramenta interna de homologação
+  // na tela de Serviços: é público por natureza e não habilita nada no banco.
+  assert.deepEqual([...names].sort(), ['VITE_ENABLE_GOOGLE_AUTH', 'VITE_SUPABASE_ANON_KEY', 'VITE_SUPABASE_URL', 'VITE_VERCEL_ENV', 'VITE_ZIISTEC_BETA', 'VITE_ZT_OPERATIONS_SIMULATOR']);
   assert.equal(/VITE_[A-Z0-9_]*(SECRET|SERVICE|PRIVATE|PASSWORD|TOKEN)/.test(read('vite.config.js') + JSON.stringify(vercel)), false);
+  // os booleanos são comparados como texto fixo: nenhum entra em URL, cabeçalho ou credencial
+  for (const flag of ['VITE_ZIISTEC_BETA', 'VITE_ENABLE_GOOGLE_AUTH', 'VITE_ZT_OPERATIONS_SIMULATOR']) {
+    for (const file of walk('src', (f) => /\.(jsx?|mjs)$/.test(f))) {
+      const text = read(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      if (!text.includes(flag)) continue;
+      for (const linha of text.split('\n').filter((l) => l.includes(flag))) {
+        assert.match(linha, /=== '(true|false)'|Boolean\(|!==|=== "true"/, `${flag} é só booleano em ${file}`);
+        assert.equal(/https?:|supabase\.co|Bearer|apikey/i.test(linha), false, `${flag} não entra em URL ou credencial`);
+      }
+    }
+  }
 });
 
 test('o código do navegador nunca referencia service_role nem segredos de servidor', () => {

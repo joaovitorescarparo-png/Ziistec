@@ -404,9 +404,11 @@ test('25: a Operations V1 continua inteira — regras, filtros e simulador', () 
     ['hoje', 'amanha', 'semana', 'atrasadas', 'semresponsavel', 'aguardando', 'andamento', 'concluidas']);
   assert.ok(tela.includes('Mais filtros'));
   assert.ok(tela.includes('FILTROS.map'), 'todos continuam alcançáveis');
-  // o simulador de comandos segue na mesma tela e recarrega o quadro
+  // o simulador de comandos continua ligado ao mesmo quadro, mas agora só no
+  // contexto interno: a interface normal do prestador não o mostra
   assert.ok(tela.includes('<OperationsCommandSimulator'));
   assert.match(tela, /onExecutado=\{\(\) => carregar\(true\)\}/);
+  assert.match(tela, /\{OperationsCommandSimulator \? \(/, 'e fica atrás da trava de ambiente');
   // 18: a atualização é local e imediata, sem recarregar o produto inteiro
   assert.match(tela, /setBoard\(\(b\) => \(b \? \{ \.\.\.b, cards: aplicarMovimentoLocal/);
   assert.match(tela, /if \(vivo\.current\) setBoard\(anterior\)/, 'e volta atrás se o banco recusar');
