@@ -44,8 +44,17 @@ begin
   --   zt_private: dispatch_load_work_order, dispatch_replay (both without browser EXECUTE).
   --   zt_private.wo_schedule_conflicts is invoker, and so stays
   --   zt_guard_work_order_technician_update, which 0116 only redefines to cover priority.
-  -- Cadeia: 149 (0112) -> 164 (0113-0115 corrigidas) -> 171 (0116).
-  if v_total<>171 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=171 actual=%',v_total; end if;
+  -- 0117 (Registrar serviço realizado) adds one public definer, with search_path='' and
+  --   no anon EXECUTE: zt_register_completed_work_order (owner-only, idempotent,
+  --   transactional registration of a service already performed). It reuses the official
+  --   save/complete/stock paths and redefines no existing function.
+  -- Cadeia: 149 (0112) -> 164 (0113-0115 corrigidas) -> 171 (0116) -> 172 (0117).
+  if v_total<>172 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=172 actual=%',v_total; end if;
+  if not exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+                 where n.nspname='public' and p.proname='zt_register_completed_work_order'
+                   and p.prosecdef and p.proconfig @> array['search_path=""']) then
+    raise exception 'RC1B_RETROACTIVE_DEFINER_MISSING';
+  end if;
 
   select count(*) into v_anon from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.prosecdef and n.nspname in ('public','zt_private') and has_function_privilege('anon',p.oid,'EXECUTE');
   if v_anon<>0 then raise exception 'RC1B_ANON_DEFINER_EXECUTE=%',v_anon; end if;

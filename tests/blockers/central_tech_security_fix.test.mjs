@@ -168,11 +168,12 @@ test('Gate: runner SQL/RLS, inventário de definers e verify:v2 cobrem o securit
   const runner = read('scripts/run-sql-rls-ci.sh');
   assert.ok(runner.includes('supabase/tests/v2_central_tecnica_rls_rollback.sql') && runner.includes('supabase/tests/v2_central_tecnica_golden_path_rollback.sql'));
   const definers = read('supabase/tests/v2_rc1b_security_definer_audit_rollback.sql');
-  // A cadeia cresceu com a 0116 (Operations Dispatch): 149 (0112) -> 164 com as
-  // 0113-0115 corrigidas -> 171 com a 0116. A prova por migration da Central
-  // Técnica continua exata, e o inventário precisa citar os dois catálogos.
-  assert.ok(definers.includes("if v_total<>171 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=171 actual=%',v_total; end if;"));
-  assert.ok(definers.includes('Cadeia: 149 (0112) -> 164 (0113-0115 corrigidas) -> 171 (0116).'),
+  // A cadeia cresceu de novo com a 0117 (Registrar serviço realizado): 149 (0112)
+  // -> 164 com as 0113-0115 corrigidas -> 171 com a 0116 -> 172 com a 0117. A prova
+  // por migration da Central Técnica continua exata, e o inventário precisa citar
+  // os três catálogos.
+  assert.ok(definers.includes("if v_total<>172 then raise exception 'RC1B_DEFINER_INVENTORY_DRIFT expected=172 actual=%',v_total; end if;"));
+  assert.ok(definers.includes('Cadeia: 149 (0112) -> 164 (0113-0115 corrigidas) -> 171 (0116) -> 172 (0117).'),
     'o inventário registra a cadeia inteira, não só o número final');
   for (const nome of ['zt_publish_work_order_technical_case', 'zt_unpublish_work_order_technical_case',
     'zt_eq_guard_company_immutable', 'zt_eq_guard_document_official']) {
@@ -185,6 +186,10 @@ test('Gate: runner SQL/RLS, inventário de definers e verify:v2 cobrem o securit
   const definerCount = (sql) => [...stripComments(sql).matchAll(/create or replace function [\s\S]*?as \$\$/g)].filter((match) => /security definer/.test(match[0])).length;
   assert.deepEqual([definerCount(m0113), definerCount(m0114), definerCount(m0115)], [7, 1, 7], 'definers por migration da Central Técnica: 149 + 15 = 164');
   assert.equal(definerCount(read('supabase/0116_operations_dispatch.sql')), 7, 'a 0116 soma sete definers: 164 + 7 = 171');
+  assert.equal(definerCount(read('supabase/0117_retroactive_service_registration.sql')), 1, 'a 0117 soma um definer: 171 + 1 = 172');
+  assert.ok(definers.includes('zt_register_completed_work_order'), 'o inventário nomeia o definer da 0117');
+  assert.ok(read('scripts/run-sql-rls-ci.sh').includes('supabase/tests/v2_retroactive_service_rollback.sql'),
+    'o gate SQL/RLS roda a regressão do registro retroativo');
 
   const golden = read('supabase/tests/v2_central_tecnica_golden_path_rollback.sql');
   for (const marker of ['19h_ADVERSARIAL_nenhum_valor_sensivel_bruto_na_resposta', '19m_ADVERSARIAL_busca_pelos_valores_sensiveis_nao_devolve_nada', '17b_sem_publicacao_nao_ha_caso_para_a_equipe', '10000000-0000-0000-0000-000000000005']) {
@@ -206,6 +211,7 @@ test('Gate: runner SQL/RLS, inventário de definers e verify:v2 cobrem o securit
   const migrations = readdirSync(path.join(root, 'supabase')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   assert.deepEqual(migrations.filter((f) => /^011[3-9]/.test(f)),
     ['0113_central_tecnica_foundation.sql', '0114_central_tecnica_search.sql',
-      '0115_central_tecnica_os_and_cases.sql', '0116_operations_dispatch.sql'],
-    'a Central Técnica segue em 0113-0115 e a 0116 é só o despacho');
+      '0115_central_tecnica_os_and_cases.sql', '0116_operations_dispatch.sql',
+      '0117_retroactive_service_registration.sql'],
+    'a Central Técnica segue em 0113-0115, a 0116 é só o despacho e a 0117 só o registro retroativo');
 });
