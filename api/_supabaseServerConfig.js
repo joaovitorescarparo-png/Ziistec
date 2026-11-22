@@ -12,6 +12,8 @@ const H0_BRANCHES = Object.freeze([
   'claude/central-tecnica-v1-integration',
   // Registrar serviço realizado (0117): branch do registro retroativo, homologada somente contra o H0.
   'claude/retroactive-service-v1',
+  // Serviços / Operations Simple V2: rodada de UX, homologada somente contra o H0.
+  'claude/operations-simple-v2',
 ]);
 const STAGING_BRANCH = 'product-v2-review';
 const STAGING_BRANCHES = Object.freeze([
