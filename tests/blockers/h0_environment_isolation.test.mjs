@@ -21,7 +21,10 @@ const H0_BRANCH = 'claude/blocks34-port-beta-v1';
 // Central Técnica V1: Preview da branch de integração, homologada somente contra o H0.
 const CT_HOST = 'ziistec-git-claude-central-tecnica-v1-integration-js-connect.vercel.app';
 const CT_BRANCH = 'claude/central-tecnica-v1-integration';
-const H0_PREVIEWS = [[H0_HOST, H0_BRANCH], [CT_HOST, CT_BRANCH]];
+// Registrar serviço realizado (0117): Preview da branch do registro retroativo, só contra o H0.
+const RS_HOST = 'ziistec-git-claude-retroactive-service-v1-js-connect.vercel.app';
+const RS_BRANCH = 'claude/retroactive-service-v1';
+const H0_PREVIEWS = [[H0_HOST, H0_BRANCH], [CT_HOST, CT_BRANCH], [RS_HOST, RS_BRANCH]];
 // Convenção da Vercel para o host de Preview por branch (projeto ziistec, time js-connect).
 const previewHostOf = (branch) => `ziistec-git-${branch.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-js-connect.vercel.app`;
 const BETA_HOST = 'beta.ziistec.com';
@@ -72,8 +75,8 @@ test('H0: três projetos distintos e listas de host/branch disjuntas, sem curing
   assert.equal(new Set([PROD_SUPABASE_URL, STAGING_SUPABASE_URL, H0_SUPABASE_URL]).size, 3, 'URLs dos três projetos distintas');
   assert.equal(new Set([PROD_PUBLISHABLE_KEY, STAGING_PUBLISHABLE_KEY, H0_PUBLISHABLE_KEY]).size, 3, 'chaves dos três projetos distintas');
   assert.ok(PROD_SUPABASE_URL.includes(PROD_REF) && STAGING_SUPABASE_URL.includes(BETA_REF), 'Production e Beta continuam nos refs conhecidos');
-  assert.deepEqual([...H0_SUPABASE_HOSTS], [H0_HOST, CT_HOST], 'o H0 tem exatamente os hosts de Preview previstos');
-  assert.deepEqual([...H0_BRANCHES], [H0_BRANCH, CT_BRANCH], 'o H0 tem exatamente as branches previstas');
+  assert.deepEqual([...H0_SUPABASE_HOSTS], [H0_HOST, CT_HOST, RS_HOST], 'o H0 tem exatamente os hosts de Preview previstos');
+  assert.deepEqual([...H0_BRANCHES], [H0_BRANCH, CT_BRANCH, RS_BRANCH], 'o H0 tem exatamente as branches previstas');
   assert.ok(Object.isFrozen(H0_SUPABASE_HOSTS) && Object.isFrozen(H0_BRANCHES), 'listas do H0 imutáveis em runtime');
   for (const [host, branch] of H0_PREVIEWS) {
     assert.equal(previewHostOf(branch), host, `host e branch do H0 formam um par exato (${branch})`);

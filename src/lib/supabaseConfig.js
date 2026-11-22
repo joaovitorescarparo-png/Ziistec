@@ -25,6 +25,8 @@ export const H0_SUPABASE_HOSTS = Object.freeze([
   "ziistec-git-claude-blocks34-port-beta-v1-js-connect.vercel.app",
   // Central Técnica V1 (0113–0115): Preview da branch de integração, homologada somente contra o H0.
   "ziistec-git-claude-central-tecnica-v1-integration-js-connect.vercel.app",
+  // Registrar serviço realizado (0117): Preview da branch do registro retroativo, homologada somente contra o H0.
+  "ziistec-git-claude-retroactive-service-v1-js-connect.vercel.app",
 ]);
 
 export function resolverConfigSupabase({

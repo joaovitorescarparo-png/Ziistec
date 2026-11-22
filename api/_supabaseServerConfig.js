@@ -10,6 +10,8 @@ const H0_BRANCHES = Object.freeze([
   'claude/blocks34-port-beta-v1',
   // Central Técnica V1 (0113–0115): branch de integração, homologada somente contra o H0.
   'claude/central-tecnica-v1-integration',
+  // Registrar serviço realizado (0117): branch do registro retroativo, homologada somente contra o H0.
+  'claude/retroactive-service-v1',
 ]);
 const STAGING_BRANCH = 'product-v2-review';
 const STAGING_BRANCHES = Object.freeze([
