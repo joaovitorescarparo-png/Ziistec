@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, CalendarClock, ChevronRight, Clock, Loader2, MapPin,
-  Plus, RefreshCw, SlidersHorizontal, User, UserPlus, X,
+  ArrowRight, Plus, RefreshCw, SlidersHorizontal, User, UserPlus, X,
 } from 'lucide-react';
 import {
   ATALHOS, FILTROS, PRIORIDADES, SEM_RESPONSAVEL,
@@ -9,6 +9,7 @@ import {
   estadoDoTecnico, montarColunas, movimentoValido, nomeDoResponsavel,
   pessoasParaEscolher, resumoDoDia, textoDoAtraso, textoDoQuando,
 } from '../lib/operationsBoard';
+import { avisosDePendencia, servicoAtrasado, servicoSemResponsavel } from '../lib/pendenciasOperacionais';
 import {
   agendarOSOperacoesDB, atribuirOSDB, carregarQuadroOperacoes, conflitosAgendaDB,
   definirPrioridadeOSDB,
@@ -96,7 +97,11 @@ export default function OperationsBoard({
   // Nunca o corte do toISOString(): esse é o dia em UTC e, no Brasil, vira
   // "amanhã" entre 21h e meia-noite — a tela mostraria o dia errado à noite.
   const hojeISO = hoje || diaLocalISO();
-  const [filtro, setFiltro] = useState('semana');
+  // A visão padrão mostra a semana, mas NENHUM atalho fica marcado: marcar
+  // "Próximos" sem o usuário ter tocado fazia a tela parecer filtrada, e aí um
+  // "1 Atrasados" no topo com lista vazia embaixo parecia erro do sistema.
+  const [escolha, setEscolha] = useState('');
+  const filtro = escolha || 'semana';
   const [extras, setExtras] = useState({ tecnicoId: '', prioridade: '', local: '' });
   const [maisFiltros, setMaisFiltros] = useState(false);
   const [board, setBoard] = useState(null);
@@ -146,6 +151,18 @@ export default function OperationsBoard({
   );
   const pessoas = useMemo(() => colunas.filter((c) => c.id !== SEM_RESPONSAVEL), [colunas]);
   const totalCartoes = useMemo(() => colunas.reduce((t, c) => t + c.carga, 0), [colunas]);
+
+  /* Pendência que existe mas o filtro atual não mostra. Em vez de um número no
+     topo com lista vazia embaixo, a tela diz onde ela está e oferece o toque. */
+  const avisos = useMemo(() => {
+    const visiveis = colunas.flatMap((c) => c.cartoes);
+    return avisosDePendencia({
+      atrasados: resumo.atrasados,
+      semResponsavel: resumo.semResponsavel,
+      atrasadosVisiveis: visiveis.filter((c) => servicoAtrasado(c, hojeISO)).length,
+      semResponsavelVisiveis: visiveis.filter(servicoSemResponsavel).length,
+    });
+  }, [colunas, resumo, hojeISO]);
 
   if (!real) {
     return (
@@ -261,11 +278,11 @@ export default function OperationsBoard({
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {ATALHOS.map((a) => {
           const n = resumo[a.contador] || 0;
-          const ativo = filtro === a.id;
+          const ativo = escolha === a.id;
           const alerta = a.id === 'atrasadas' && n > 0;
           const organizar = a.id === 'semresponsavel' && n > 0;
           return (
-            <button key={a.id} onClick={() => setFiltro(ativo ? 'semana' : a.id)} aria-pressed={ativo}
+            <button key={a.id} onClick={() => setEscolha(ativo ? '' : a.id)} aria-pressed={ativo}
               className={cx('flex min-h-[64px] flex-col justify-center rounded-2xl px-4 py-3 text-left transition-colors', ring,
                 ativo ? 'bg-slate-900 text-white'
                   : alerta ? 'bg-rose-50 text-rose-900 ring-1 ring-rose-200'
@@ -278,14 +295,29 @@ export default function OperationsBoard({
         })}
       </div>
 
+      {avisos.map((aviso_) => (
+        <div key={aviso_.id} role="status"
+          className={cx('mb-3 flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 ring-1',
+            aviso_.tom === 'erro' ? 'bg-rose-50 text-rose-900 ring-rose-200' : 'bg-amber-50 text-amber-900 ring-amber-200')}>
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 text-[14px] font-medium">{aviso_.texto}</span>
+          <button onClick={() => setEscolha(aviso_.filtro)}
+            className={cx('inline-flex min-h-11 items-center gap-1 rounded-xl bg-white px-3.5 text-[13.5px] font-semibold ring-1',
+              aviso_.tom === 'erro' ? 'text-rose-800 ring-rose-200 hover:bg-rose-100/50' : 'text-amber-900 ring-amber-200 hover:bg-amber-100/50', ring)}>
+            {aviso_.acao}
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <button onClick={() => setMaisFiltros((v) => !v)} aria-expanded={maisFiltros}
           className={cx('inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-white px-3 text-[13px] font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50', ring)}>
           <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
           {maisFiltros ? 'Esconder filtros' : 'Mais filtros'}
         </button>
-        {filtro !== 'semana' ? (
-          <button onClick={() => setFiltro('semana')}
+        {escolha ? (
+          <button onClick={() => setEscolha('')}
             className={cx('inline-flex min-h-11 items-center rounded-xl px-3 text-[13px] font-medium text-teal-800 hover:bg-teal-50', ring)}>
             Ver todos
           </button>
@@ -295,7 +327,7 @@ export default function OperationsBoard({
 
       {maisFiltros ? (
         <div className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl bg-white p-3 ring-1 ring-slate-200/70">
-          <select value={filtro} onChange={(e) => setFiltro(e.target.value)} aria-label="Quais serviços mostrar"
+          <select value={filtro} onChange={(e) => setEscolha(e.target.value)} aria-label="Quais serviços mostrar"
             className={cx('min-h-11 rounded-xl bg-white px-3 text-[13px] text-slate-700 ring-1 ring-slate-200', ring)}>
             {FILTROS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
           </select>
@@ -531,7 +563,7 @@ function Cartao({
         <Acao onClick={() => onAbrir?.(card.work_order_id)} icone={ChevronRight}>Abrir serviço</Acao>
         <Acao onClick={() => onAlterar(card)} disabled={movendo}>Alterar</Acao>
         {quem ? (
-          <Acao onClick={() => onEscolher(card)} disabled={movendo} icone={UserPlus}>Escolher técnico</Acao>
+          <Acao onClick={() => onEscolher(card)} disabled={movendo} icone={UserPlus}>Trocar responsável</Acao>
         ) : null}
       </div>
     </article>
@@ -659,9 +691,14 @@ function ModalAlterar({ card, board, hoje, usuarioAtualId, salvando, onClose, on
 function ModalNovoServico({
   board, hoje, clientes, CampoVoz, usuarioAtualId, onClose, onCriado, salvarOS, salvarCliente, aviso,
 }) {
+  const pessoas = board?.members || [];
+  /* Com mais de uma pessoa capaz de atender, a tela não escolhe por ninguém:
+     começar no proprietário atribuía serviço sem intenção. Com uma só, não há
+     escolha a fazer e pré-selecionar poupa um toque. */
+  const responsavelInicial = pessoas.length === 1 ? pessoas[0].user_id : '';
   const [f, setF] = useState({
     clienteId: '', descricao: '', data: hoje, horario: '',
-    responsavelId: usuarioAtualId || '', local: '', prioridade: 'normal',
+    responsavelId: responsavelInicial, endereco: '', complemento: '', prioridade: 'normal',
   });
   const [novoCliente, setNovoCliente] = useState(null);
   const [salvandoCliente, setSalvandoCliente] = useState(false);
@@ -669,6 +706,12 @@ function ModalNovoServico({
   const [erro, setErro] = useState('');
   const pedido = useRef(null);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  /* Cliente com endereço cadastrado preenche o campo; o proprietário pode
+     editar, e o que ele deixar ali é o que a rota vai usar. */
+  const escolherCliente = (id) => {
+    const cl = (clientes || []).find((c) => c.id === id);
+    setF((s) => ({ ...s, clienteId: id, endereco: cl?.endereco || s.endereco }));
+  };
   const pronto = Boolean(f.clienteId) && f.descricao.trim().length > 0;
 
   const criarCliente = async () => {
@@ -680,7 +723,7 @@ function ModalNovoServico({
         tipo: 'PF', nome, telefone: novoCliente.telefone || '', whatsapp: novoCliente.telefone || '',
         endereco: '', documento: '', fantasia: '', responsavel: '', obs: '',
       });
-      if (id) { set('clienteId', id); setNovoCliente(null); }
+      if (id) { escolherCliente(id); setNovoCliente(null); }
     } finally {
       setSalvandoCliente(false);
     }
@@ -701,7 +744,10 @@ function ModalNovoServico({
         descricaoLivre: f.descricao.trim(),
         data: f.data || '',
         hora: f.data ? (f.horario || '') : '',
-        local: f.local || '',
+        // `local` é o endereço (address) e é o que o Maps usa; o complemento vai
+        // para `localServico` (service_place) e não entra na rota.
+        local: f.endereco.trim(),
+        localServico: f.complemento.trim(),
         responsavelId: f.responsavelId || null,
         status: f.data ? 'agendada' : 'aguardando',
         itens: [], checklist: [],
@@ -741,7 +787,7 @@ function ModalNovoServico({
 
       <Campo label="Cliente">
         <div className="flex flex-wrap gap-2">
-          <select value={f.clienteId} onChange={(e) => set('clienteId', e.target.value)}
+          <select value={f.clienteId} onChange={(e) => escolherCliente(e.target.value)}
             className={cx(entrada, 'min-w-[160px] flex-1')}>
             <option value="">Escolha o cliente</option>
             {ativos.map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
@@ -795,8 +841,14 @@ function ModalNovoServico({
         </select>
       </Campo>
 
-      <Campo label="Local" dica="Opcional. Ex.: portaria, apartamento 304, loja 4.">
-        <input value={f.local} onChange={(e) => set('local', e.target.value)} placeholder="Onde é o atendimento" className={entrada} />
+      <Campo label="Endereço" dica="É por aqui que o aplicativo de mapas traça a rota.">
+        <input value={f.endereco} onChange={(e) => set('endereco', e.target.value)}
+          placeholder="Ex.: Rua 406 A, 524" className={entrada} />
+      </Campo>
+
+      <Campo label="Complemento (opcional)" dica="Onde exatamente, dentro do endereço. Ex.: Portaria, Apto 304, Loja 4, Portão da garagem.">
+        <input value={f.complemento} onChange={(e) => set('complemento', e.target.value)}
+          placeholder="Ex.: Portaria" className={entrada} />
       </Campo>
 
       <Campo label="Prioridade">

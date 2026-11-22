@@ -63,3 +63,64 @@ export function technicianDayAgenda(orders = [], { userId, day, today } = {}) {
     scheduled: [...scheduled].sort((a, b) => (a?.hora || "99:99").localeCompare(b?.hora || "99:99") || String(a?.numero || "").localeCompare(String(b?.numero || ""))),
   };
 }
+
+/* ===================================================================== V2
+   Período da Agenda — a faixa de datas e a lista têm de contar a mesma história.
+
+   O que estava errado: a faixa da semana era desenhada a partir do dia
+   selecionado, mas a lista do proprietário vinha do filtro (`proximos`), que
+   nunca olhava esse dia. Navegar semana movia a faixa e não movia a lista, e a
+   tela chegava a mostrar "30/11 → 06/12" em cima de um atendimento de 23/11.
+
+   Com isto a visão Semana passa a listar exatamente o período que ela desenha.
+*/
+
+/* Segunda-feira da semana de uma data. */
+export function inicioDaSemana(day) {
+  const base = new Date(`${String(day || '').slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(base.getTime())) return '';
+  base.setDate(base.getDate() - ((base.getDay() + 6) % 7));
+  const y = base.getFullYear();
+  const m = String(base.getMonth() + 1).padStart(2, '0');
+  const d = String(base.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+const somar = (day, n) => {
+  const base = new Date(`${String(day || '').slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(base.getTime())) return '';
+  base.setDate(base.getDate() + Number(n || 0));
+  const y = base.getFullYear();
+  const m = String(base.getMonth() + 1).padStart(2, '0');
+  const d = String(base.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+/* A semana visível: os sete dias e as pontas do período. */
+export function semanaDe(day) {
+  const from = inicioDaSemana(day);
+  if (!from) return { from: '', to: '', days: [] };
+  const days = Array.from({ length: 7 }, (_, i) => somar(from, i));
+  return { from, to: days[6], days };
+}
+
+/* Serviços dentro de um período fechado. É o que a visão Semana lista. */
+export function filterOwnerRange(orders = [], { from, to, technicianId = '' } = {}) {
+  let visible = agendaRoleScope(orders, { role: 'proprietario' });
+  if (technicianId) visible = visible.filter((order) => order?.responsavelId === technicianId);
+  const inicio = String(from || '').slice(0, 10);
+  const fim = String(to || '').slice(0, 10);
+  if (!inicio || !fim) return [];
+  return visible.filter((order) => {
+    const data = scheduledDate(order);
+    return Boolean(data) && data >= inicio && data <= fim;
+  });
+}
+
+/* Serviços de um dia só. É o que o clique no calendário do mês lista — antes
+   ele selecionava o dia e mostrava os de hoje. */
+export function filterOwnerDia(orders = [], { day, technicianId = '' } = {}) {
+  const alvo = String(day || '').slice(0, 10);
+  if (!alvo) return [];
+  return filterOwnerRange(orders, { from: alvo, to: alvo, technicianId });
+}

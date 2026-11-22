@@ -71,7 +71,8 @@ import { concluidasRecentemente, produtosComEstoqueBaixo } from "../lib/dashboar
 import RouteButton from "../components/RouteButton";
 import useRoutePreference from "../hooks/useRoutePreference";
 import { linkDeRota, resolverDestinoRota } from "../lib/routeApps";
-import { filterOwnerAgenda, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
+import { filterOwnerAgenda, filterOwnerDia, filterOwnerRange, semanaDe, groupAgendaOrders, technicianDayAgenda } from "../lib/agendaMobile";
+import { pendenciasDoInicio } from "../lib/pendenciasOperacionais";
 import { hojeISO, addMesesISO } from "../lib/dates";
 import useDiaLocal from "../hooks/useDiaLocal";
 
@@ -1341,7 +1342,7 @@ export default function ZiisTec({ contexto }) {
     { id: "inicio", label: "Início", icon: LayoutDashboard },
     { id: "agenda", label: "Agenda", icon: CalendarDays },
     { id: "clientes", label: "Clientes", icon: Users },
-    { id: "catalogo", label: "Serviços e produtos", icon: Wrench },
+    { id: "catalogo", label: "Catálogo e preços", icon: Wrench },
     { id: "orcamentos", label: "Orçamentos", icon: FileText },
     { id: "ordens", label: "Ordens de serviço", icon: ClipboardList },
     { id: "operacoes", label: "Serviços", icon: Users2 },
@@ -1772,6 +1773,14 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarSt
   const semEstoque = papel === "proprietario" ? produtosComEstoqueBaixo(produtos) : [];
 
   const pend = [];
+  /* Serviço atrasado e serviço sem responsável vêm da MESMA função que a tela
+     Serviços usa. Era aqui que o Início dizia "Tudo em dia" enquanto Serviços
+     mostrava "1 Atrasados". Vêm primeiro porque travam o dia. */
+  if (permitido("operacoes")) {
+    for (const item of pendenciasDoInicio(ordens, hojeISO())) {
+      pend.push({ ...item, ir: () => irPara("operacoes") });
+    }
+  }
   if (papel === "proprietario") {
     const revisoesPendentes = revisoesInicio.filter((r)=>r.status === "pending" && r.data <= hojeISO());
     const atrasadas = revisoesPendentes.filter((r)=>r.data < hojeISO());
@@ -1950,35 +1959,41 @@ function Inicio({ ordens, orcamentos, lancamentos, nomeCliente, cliente, mudarSt
 function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa, equipe, clientes, servicos, produtos, orcamentos, salvarOS, salvarCliente, usuarioAtual, papel, pedirConfirmacao, real }) {
   const tecnico = papel === "tecnico";
   const [dia, setDia] = useState(hojeISO());
-  const [visao, setVisao] = useState(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "lista" : "semana"));
+  /* Proprietário abre em Lista, não em Semana: a visão Semana desenha um
+     período e, antes, listava outro — quem abria no computador via a faixa de
+     uma semana com atendimento de outra. */
+  const [visao, setVisao] = useState("lista");
   const [filtro, setFiltro] = useState("proximos");
   const [tecnicoId, setTecnicoId] = useState("");
   const [busca, setBusca] = useState("");
   const [agendando, setAgendando] = useState(null);
   const [novaOS, setNovaOS] = useState(false);
 
-  const inicioSemana = (d) => {
-    const x = new Date(d + "T12:00:00");
-    const dow = x.getDay();
-    x.setDate(x.getDate() - ((dow + 6) % 7));
-    return iso(x);
-  };
+  const inicioSemana = (d) => semanaDe(d).from;
   const moverMes = (d, n) => {
     const x = new Date(d + "T12:00:00");
     x.setDate(1); x.setMonth(x.getMonth() + n);
     return iso(x);
   };
   const mesAtual = dia.slice(0, 7);
-  const inicio = inicioSemana(dia);
-  const semana = Array.from({ length: 7 }, (_, i) => addDays(inicio, i));
+  const { from: inicio, to: fimSemana, days: semana } = semanaDe(dia);
   const primeiroMes = mesAtual + "-01";
   const gradeInicio = inicioSemana(primeiroMes);
   const diasMes = Array.from({ length: 42 }, (_, i) => addDays(gradeInicio, i));
   const termo = semAcento(busca.trim());
   const bateBusca = (o) => !termo || semAcento([o.numero, nomeCliente(o.clienteId), o.local, o.localServico, resumoOS(o), o.responsavel].filter(Boolean).join(" ")).includes(termo);
   const baseBusca = ordens.filter(bateBusca);
-  const ownerLista = filterOwnerAgenda(baseBusca, { filter: filtro, today: hojeISO(), technicianId: tecnicoId });
-  const ownerGrupos = groupAgendaOrders(ownerLista, filtro);
+  /* A lista acompanha o que a tela está desenhando: na visão Semana, o período
+     da faixa; vindo do calendário do mês, o dia escolhido; nas demais, o filtro.
+     Antes, a visão Semana listava sempre "próximos" e ignorava o dia. */
+  const porPeriodo = visao === "semana";
+  const porDia = !porPeriodo && filtro === "dia";
+  const ownerLista = porPeriodo
+    ? filterOwnerRange(baseBusca, { from: inicio, to: fimSemana, technicianId: tecnicoId })
+    : porDia
+      ? filterOwnerDia(baseBusca, { day: dia, technicianId: tecnicoId })
+      : filterOwnerAgenda(baseBusca, { filter: filtro, today: hojeISO(), technicianId: tecnicoId });
+  const ownerGrupos = groupAgendaOrders(ownerLista, porPeriodo || porDia ? "proximos" : filtro);
   const meuDia = technicianDayAgenda(baseBusca, { userId: usuarioAtual?.id, day: dia, today: hojeISO() });
   const tecnicos = equipe.filter((m) => m.papel === "tecnico" && m.ativo !== false);
   const nomeTecnico = (os) => equipe.find((m) => m.usuarioId === os.responsavelId)?.usuario?.nome || os.responsavel || "Sem técnico";
@@ -1990,7 +2005,12 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
     if (data === addDays(hojeISO(), 1)) return "Amanhã";
     return `${diaSemana(data).replace("-feira", "")}, ${dataBR(data)}`;
   };
-  const rotuloFiltro = { hoje: "Hoje", proximos: "Próximos", semdata: "Sem data", concluidos: "Concluídos" }[filtro] || "Agenda";
+  const rotuloFiltro = porPeriodo
+    ? `a semana de ${dataBR(inicio)} a ${dataBR(fimSemana)}`
+    : porDia
+      ? dataBR(dia)
+      : ({ hoje: "Hoje", proximos: "Próximos", semdata: "Sem data", concluidos: "Concluídos" }[filtro] || "Agenda");
+  // "Hoje" realinha os três: dia, lista e período visual.
   const abrirHoje = () => { setDia(hojeISO()); setVisao("lista"); if (!tecnico) setFiltro("hoje"); };
   const selecionarFiltro = (id) => { setFiltro(id); setVisao("lista"); if (id === "hoje") setDia(hojeISO()); };
 
@@ -2058,6 +2078,9 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
         </div>
       </Panel>}
 
+      {!tecnico && visao === "semana" && <div className="mb-2 text-[13px] font-medium text-slate-500">
+        {dataBR(inicio)} a {dataBR(fimSemana)} · {ownerLista.length} serviço{ownerLista.length === 1 ? "" : "s"}
+      </div>}
       {!tecnico && visao === "semana" && <div className="flex items-center gap-1 sm:gap-2 mb-6">
         <button onClick={() => setDia(addDays(dia, -7))} aria-label="Semana anterior" className={cx("min-h-11 min-w-11 p-3 rounded-xl text-slate-400 hover:bg-white hover:text-slate-700 shrink-0", ring)}><ArrowLeft className="w-4 h-4" /></button>
         <div className="grid grid-cols-7 gap-1.5 sm:gap-2 flex-1 min-w-0">
@@ -2082,7 +2105,7 @@ function Agenda({ ordens, nomeCliente, abrirOS, agendarOS, desagendarOS, empresa
         </div>
         <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase font-semibold text-slate-400 mb-1">{["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((x) => <span key={x}>{x}</span>)}</div>
         <div className="grid grid-cols-7 gap-1">
-          {diasMes.map((d) => { const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length; const fora = !d.startsWith(mesAtual); return <button key={d} onClick={() => { setDia(d); setFiltro("hoje"); setVisao("lista"); }} className={cx("min-h-11 rounded-xl text-sm flex flex-col items-center justify-center", ring, d === hojeISO() ? "ring-1 ring-teal-300" : "", fora ? "text-slate-300" : "text-slate-700", qtd ? "bg-slate-50" : "hover:bg-slate-50")}><span>{Number(d.slice(8))}</span>{qtd > 0 && <span className="text-[9px] text-teal-700 font-semibold">{qtd}</span>}</button>; })}
+          {diasMes.map((d) => { const qtd = ordens.filter((o) => o.data === d && o.status !== "cancelada").length; const fora = !d.startsWith(mesAtual); return <button key={d} onClick={() => { setDia(d); setFiltro("dia"); setVisao("lista"); }} className={cx("min-h-11 rounded-xl text-sm flex flex-col items-center justify-center", ring, d === hojeISO() ? "ring-1 ring-teal-300" : "", fora ? "text-slate-300" : "text-slate-700", qtd ? "bg-slate-50" : "hover:bg-slate-50")}><span>{Number(d.slice(8))}</span>{qtd > 0 && <span className="text-[9px] text-teal-700 font-semibold">{qtd}</span>}</button>; })}
         </div>
       </Panel>}
 
@@ -2601,7 +2624,7 @@ function Catalogo({ servicos, produtos, salvarServico, salvarProduto, excluirReg
 
   return (
     <>
-      <PageHead title="Serviços e produtos" sub="O que você vende, quanto cobra e como cobra."
+      <PageHead title="Catálogo e preços" sub="O que você vende, quanto cobra e como cobra."
         action={aba === "servicos"
           ? <Btn icon={Plus} onClick={() => setFormS({ unidade: "unidade", ativo: true, preco: 0, custo: 0, categoria: "", garantiaDias: 0, retornoDias: 0 })}>Novo serviço</Btn>
           : <div className="flex flex-wrap gap-2"><RecursosV2 aba="catalogo" papel={papel} abrirV2={abrirV2} /><Btn icon={Plus} onClick={() => abrirFormProduto(null)}>Novo produto</Btn></div>} />
@@ -3333,7 +3356,7 @@ function OrcamentoEditor(p) {
           </section>
 
           <section>
-            <Rotulo>2 · Serviços e produtos</Rotulo>
+            <Rotulo>2 · Catálogo e preços</Rotulo>
             <Panel className="overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-slate-100 space-y-3">
                 <Tabs valor={abaCat} onChange={setAbaCat} opcoes={[{ id: "servicos", label: "Serviços" }, { id: "produtos", label: "Produtos" }, { id: "livre", label: "Item livre" }]} />
@@ -3540,7 +3563,7 @@ function OrcamentoCriado({ id, orcamentos, empresa, cliente, aviso, mudarStatusO
 }
 
 /* Cadastro rápido de serviço/produto sem sair do orçamento. Só o essencial;
-   o cadastro completo continua em "Serviços e produtos". */
+   o cadastro completo continua em "Catálogo e preços". */
 function CadastroRapidoCatalogo({ tipo, onClose, onSalvar, verCusto = true }) {
   const serv = tipo === "servico";
   const vazio = { nome: "", categoria: "", marca: "", modelo: "", unidade: "unidade", preco: 0, custo: 0, margemPct: "", descricao: "", temGarantia: false, prazo: 0 };
@@ -3651,7 +3674,7 @@ function CadastroRapidoCatalogo({ tipo, onClose, onSalvar, verCusto = true }) {
         <CampoVoz rows={2} valor={f.descricao} onChange={(v) => set("descricao", v)} placeholder="O que está incluso" />
       </Field>
       <p className="text-[12px] text-slate-400 leading-relaxed">
-        Retorno sugerido, estoque e demais campos continuam no cadastro completo em "Serviços e produtos".
+        Retorno sugerido, estoque e demais campos continuam no cadastro completo em "Catálogo e preços".
       </p>
     </Modal>
   );
@@ -5171,7 +5194,7 @@ function FinalizarAtendimento({ os, onClose, onFinalizar, onSalvarParcial, servi
                   })}
                   {verValores && (
                     <p className="text-[12px] text-slate-400 leading-relaxed">
-                      A mudança feita aqui vale somente para esta OS e não altera o prazo padrão em “Serviços e produtos”.
+                      A mudança feita aqui vale somente para esta OS e não altera o prazo padrão em “Catálogo e preços”.
                     </p>
                   )}
                 </div>

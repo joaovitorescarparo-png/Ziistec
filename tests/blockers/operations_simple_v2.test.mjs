@@ -112,7 +112,8 @@ test('2: o topo conta Hoje, Sem responsável, Atrasados e Próximos', () => {
     assert.ok(a.contador in r, `${a.id} tem contador derivado`);
   }
   assert.ok(tela.includes('ATALHOS.map'), 'o topo desenha os atalhos');
-  assert.match(tela, /setFiltro\(ativo \? 'semana' : a\.id\)/, 'o atalho só filtra esta tela');
+  assert.match(tela, /setEscolha\(ativo \? '' : a\.id\)/, 'o atalho só filtra esta tela, e o toque de novo desmarca');
+  assert.match(tela, /const ativo = escolha === a\.id;/, 'ativo é escolha explícita, nunca o padrão');
 });
 
 test('2b: a contagem sai do que o banco já devolveu, sem consulta por cartão', () => {
@@ -143,7 +144,9 @@ test('3: serviço sem responsável tem bloco próprio, não some em coluna', () 
 
 test('4: sem técnico, o cartão mostra uma ação — não um campo vazio', () => {
   assert.ok(tela.includes('Escolher quem vai fazer'), 'a falta de técnico é um botão');
-  assert.ok(tela.includes('Escolher técnico'), 'quando já tem técnico, dá para trocar');
+  assert.ok(tela.includes('Trocar responsável'), 'quando já tem responsável, o botão diz trocar');
+  assert.equal(tela.includes('Escolher técnico'), false,
+    '"Escolher técnico" num serviço já atribuído dava impressão de que estava sem ninguém');
   assert.equal(nomeDoResponsavel(boardDe([]), null, OWNER), '', 'sem responsável não inventa nome');
   assert.equal(nomeDoResponsavel(boardDe([]), TEC_A, OWNER), 'Carlos');
   assert.equal(nomeDoResponsavel(boardDe([]), 'quem-saiu', OWNER), 'Colaborador inativo');
@@ -290,7 +293,7 @@ test('14: "Novo serviço" é o nome do botão, e o cadastro é curto', () => {
   }
   // os campos pedidos, e só eles
   for (const campo of ['Cliente', 'O que precisa ser feito?', 'Qual dia?', 'Que horas?',
-    'Quem vai fazer?', 'Local', 'Prioridade', 'Criar serviço']) {
+    'Quem vai fazer?', 'Endereço', 'Complemento (opcional)', 'Prioridade', 'Criar serviço']) {
     assert.ok(tela.includes(campo), `o cadastro curto tem ${campo}`);
   }
 });
@@ -299,7 +302,7 @@ test('15: cliente novo é cadastrado sem sair da tela', () => {
   assert.ok(tela.includes('Novo cliente'));
   assert.ok(tela.includes('Cadastrar cliente'));
   assert.match(tela, /salvarCliente\(\{/, 'usa o mesmo salvamento de cliente do produto');
-  assert.match(tela, /if \(id\) \{ set\('clienteId', id\); setNovoCliente\(null\); \}/,
+  assert.match(tela, /if \(id\) \{ escolherCliente\(id\); setNovoCliente\(null\); \}/,
     'depois de salvar, o cliente novo já fica escolhido');
   // nada de mandar o usuário para outra página
   assert.doesNotMatch(tela, /setTela\(|irPara\(|window\.location/);
@@ -338,7 +341,7 @@ test('18: nenhuma entidade, tabela ou página nova', () => {
 
 test('19: no celular tudo funciona sem arraste', () => {
   // toda ação tem botão: escolher técnico, alterar, abrir
-  for (const acao of ['Escolher quem vai fazer', 'Escolher técnico', 'Alterar', 'Abrir serviço']) {
+  for (const acao of ['Escolher quem vai fazer', 'Trocar responsável', 'Alterar', 'Abrir serviço']) {
     assert.ok(tela.includes(acao), `${acao} é um botão`);
   }
   // o arraste continua, mas como atalho: o que decide é a mesma função
@@ -428,7 +431,7 @@ test('linguagem: a tela fala português de prestador, não de ERP', () => {
     assert.equal(visivel.includes(vago), false, `botão "${vago}" não diz o que faz`);
   }
   // e o que o usuário espera ler
-  for (const bom of ['Serviços', 'Hoje,', 'Quem vai fazer?', 'Escolher técnico', 'Alterar',
+  for (const bom of ['Serviços', 'Hoje,', 'Quem vai fazer?', 'Trocar responsável', 'Alterar',
     'Abrir serviço', 'Criar serviço', 'Precisa organizar', 'Sem responsável']) {
     assert.ok(visivel.includes(bom), `a tela diz "${bom}"`);
   }

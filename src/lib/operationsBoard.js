@@ -8,6 +8,8 @@
   não existe campo financeiro aqui, nem é possível derivá-lo.
 */
 
+import { contarPendencias } from './pendenciasOperacionais.js';
+
 export const SEM_RESPONSAVEL = '__sem_responsavel__';
 
 export const PRIORIDADES = [
@@ -214,14 +216,17 @@ export const ATALHOS = [
   { id: 'semana', label: 'Próximos', contador: 'proximos' },
 ];
 
-/* Contagens do topo. "Próximos" é o que vem depois de hoje: hoje já tem atalho. */
+/* Contagens do topo. "Próximos" é o que vem depois de hoje: hoje já tem atalho.
+   Atrasado e sem responsável vêm de contarPendencias, a MESMA função que o
+   Início usa — era aqui que as duas telas discordavam. */
 export function resumoDoDia(board, hoje) {
   const h = diaISO(hoje);
   const cards = (board?.cards || []).filter(ATIVO);
+  const { atrasados, semResponsavel } = contarPendencias(cards, h);
   return {
     hoje: cards.filter((c) => diaISO(c.scheduled_date) === h).length,
-    semResponsavel: cards.filter((c) => !c.assignee_id).length,
-    atrasados: cards.filter((c) => cartaoAtrasado(c, h)).length,
+    semResponsavel,
+    atrasados,
     proximos: cards.filter((c) => diaISO(c.scheduled_date) > h).length,
   };
 }
