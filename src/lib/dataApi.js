@@ -1,6 +1,6 @@
 import { supabase, mensagemErro } from './supabase';
 import { ensureRequestId, idempotentWrite } from './reliability';
-import { hojeISO } from './dates';
+import { hojeISO, dataLocalISO } from './dates';
 
 const n = (v) => Number(v || 0);
 const qStatusToDb = { rascunho:'draft', enviado:'sent', aprovado:'approved', recusado:'declined', vencido:'expired' };
@@ -51,7 +51,10 @@ const toItem = (x, companyId, parentKey, parentId, pos=0, workOrder=false) => ({
 
 const fromQuote = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, status:qStatusFromDb[x.status]||'rascunho', data:x.issue_date, validade:x.valid_until||'', desconto:n(x.discount), acrescimo:n(x.surcharge), condicao:x.payment_terms||'', mensagemCliente:x.customer_message||'', previsaoExecucao:x.execution_forecast_date||'', mostrarImagensProdutos:Boolean(x.show_product_images), obs:x.notes||'', local:x.address||'', localServico:x.service_place||'', itens:(x.quote_items||[]).sort((a,b)=>(a.position||0)-(b.position||0)).map(fromItem), osId:null });
 const quoteRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, status:qStatusToDb[x.status]||'draft', issue_date:x.data||hojeISO(), valid_until:x.validade||null, discount:n(x.desconto), surcharge:n(x.acrescimo), payment_terms:x.condicao||null, customer_message:String(x.mensagemCliente||'').trim()||null, execution_forecast_date:x.previsaoExecucao||null, show_product_images:Boolean(x.mostrarImagensProdutos), notes:x.obs||null, address:x.local||null, service_place:x.localServico||null, created_by:userId||null });
-const fromWorkOrder = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, orcamentoId:x.quote_id, responsavelId:x.assigned_to, status:woStatusFromDb[x.status]||'aguardando', data:x.scheduled_date||'', concluidaEm:x.completed_at?String(x.completed_at).slice(0,10):'', hora:(x.scheduled_time||'').slice(0,5), local:x.address||'', localServico:x.service_place||'', localId:x.client_location_id||null, descricaoLivre:x.request||'', obs:x.pre_notes||'', pendencia:x.pending_note||'', precisaRetorno:Boolean(x.needs_return), valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit), garantiaId:x.warranty_id, osOrigemId:x.origin_wo_id, relatoProblema:x.problem_report||'', cobrancaId:x.billing_entry_id, pendentePrecificacao:Boolean(x.pending_pricing), itens:(x.work_order_items||[]).map(fromItem), materiais:(x.work_order_materials||[]).map(fromMaterial), checklist:[], historico:[], fotos:[], adicionais:[], custosExtras:n(x.extra_cost), relato:'' });
+const fromWorkOrder = (x) => ({ id:x.id, requestId:x.client_request_id||null, empresaId:x.company_id, numero:x.number, clienteId:x.client_id, orcamentoId:x.quote_id, responsavelId:x.assigned_to, status:woStatusFromDb[x.status]||'aguardando', data:x.scheduled_date||'', concluidaEm:x.completed_at?String(x.completed_at).slice(0,10):'',
+  // Dia local em que a OS foi lançada. Comparado com a data do serviço, é o que deixa
+  // a tela dizer "registrado posteriormente" sem precisar de coluna para isso.
+  registradoEm:x.created_at?dataLocalISO(x.created_at):'', hora:(x.scheduled_time||'').slice(0,5), local:x.address||'', localServico:x.service_place||'', localId:x.client_location_id||null, descricaoLivre:x.request||'', obs:x.pre_notes||'', pendencia:x.pending_note||'', precisaRetorno:Boolean(x.needs_return), valorAdicional:0, emGarantia:Boolean(x.is_warranty_visit), garantiaId:x.warranty_id, osOrigemId:x.origin_wo_id, relatoProblema:x.problem_report||'', cobrancaId:x.billing_entry_id, pendentePrecificacao:Boolean(x.pending_pricing), itens:(x.work_order_items||[]).map(fromItem), materiais:(x.work_order_materials||[]).map(fromMaterial), checklist:[], historico:[], fotos:[], adicionais:[], custosExtras:n(x.extra_cost), relato:'' });
 const woRow = (x, companyId, userId, number) => ({ company_id:companyId, number, client_id:x.clienteId, quote_id:x.orcamentoId||null, assigned_to:x.responsavelId||userId||null, status:woStatusToDb[x.status]||'unscheduled', scheduled_date:x.data||null, scheduled_time:x.hora||null, address:x.local||null, service_place:x.localServico||null, request:x.descricaoLivre||x.solicitacao||null, pre_notes:x.obs||null, pending_note:x.pendencia||null, extra_cost:n(x.custosExtras), needs_return:Boolean(x.precisaRetorno), warranty_id:x.garantiaId||null, origin_wo_id:x.osOrigemId||null, is_warranty_visit:Boolean(x.emGarantia), problem_report:x.relatoProblema||null, created_by:userId||null,
   // Só envia o vínculo quando o fluxo conhece o local; sem a chave o banco preserva o local atual.
   ...(x.localId!==undefined?{client_location_id:x.localId||null}:{}) });
@@ -186,6 +189,41 @@ export async function salvarOSDB(x, companyId, userId){
   const req=ensureRequestId(x);
   const response=await idempotentWrite(()=>supabase.rpc('zt_save_work_order_idempotent',{p_company:companyId,p_wo:x.id||null,p_request:req,p_row:row,p_items:items}));
   const id=check(response);
+  return carregarOSPorIdDB(id);
+}
+
+/* Registra um serviço que já foi feito: a OS nasce concluída, com a data real do
+ * atendimento, pelo fluxo oficial do banco. A empresa vai no argumento validado
+ * pela RPC — nunca no corpo — e o mesmo requestId reaproveita o registro em vez
+ * de criar outro, inclusive para estoque e financeiro. */
+export async function registrarServicoRealizadoDB(x, companyId, userId){
+  const row={
+    client_id:x.clienteId,
+    client_location_id:x.localId||null,
+    assigned_to:x.responsavelId||userId||null,
+    service_date:x.data||null,
+    service_time:x.hora||null,
+    address:x.local||null,
+    service_place:x.localServico||null,
+    request:x.descricaoLivre||null,
+    report:x.relato||x.descricaoLivre||null,
+    extra_cost:n(x.custosExtras),
+  };
+  const items=(x.itens||[]).map(i=>toItem(i,companyId,'work_order_id',null,0,true));
+  const materials=(x.materiais||[]).map(m=>({
+    product_id:m.produtoId||null, name:m.nome||'Material',
+    quantity:n(m.qtd)||1, unit_cost:n(m.custo), serial_number:m.serie||null,
+  }));
+  const payment=x.pago
+    ? { status:'paid', method:x.forma||null, paid_at:x.pagoEm||x.data||null }
+    : { status:'pending', due_days:7, ...(x.vencimento?{due_date:x.vencimento}:{}) };
+  const req=ensureRequestId(x);
+  const response=await idempotentWrite(()=>supabase.rpc('zt_register_completed_work_order',{
+    p_company:companyId, p_request:req, p_row:row, p_items:items, p_materials:materials, p_payment:payment,
+  }));
+  const saida=check(response);
+  const id=saida?.work_order_id||saida;
+  if(!id) throw new Error('O registro não devolveu a ordem de serviço criada.');
   return carregarOSPorIdDB(id);
 }
 

@@ -18,6 +18,7 @@ import { mensagemErro } from "../lib/supabase";
 import {
   recarregarSeguro, salvarClienteDB, salvarServicoDB, salvarProdutoDB, salvarOrcamentoDB,
   salvarOSDB, carregarOSPorOrcamentoDB, atualizarOSDB, finalizarOSDB, resolverPrecificacaoOSDB, baixarLancamentoDB, salvarLancamentoDB, atualizarStatusOrcamentoDB,
+  registrarServicoRealizadoDB,
   excluirRegistroDB,
 } from "../lib/dataApi";
 import {
@@ -1148,6 +1149,16 @@ export default function ZiisTec({ contexto }) {
     aviso("Ordem de serviço salva");
     return salvoId;
   };
+  /* Registrar serviço realizado: a OS nasce concluída, com a data real do
+   * atendimento. Quem decide é o banco — a RPC é do proprietário, deriva a
+   * empresa do contexto confiável e é idempotente pelo requestId. Aqui só
+   * enviamos o que o formulário coletou e relemos o resultado. */
+  const registrarServicoRealizado = async (dados) => {
+    const salvo = await registrarServicoRealizadoDB(dados, empresaId, usuarioAtual?.id);
+    await recarregarDados();
+    aviso("Serviço registrado. Financeiro, estoque e garantias seguiram a data real do atendimento.");
+    return salvo?.id || null;
+  };
   const agendarOS = async (osId, { data, hora, responsavel, responsavelId }) => {
     if (!data) return false;
     if (real) {
@@ -1317,6 +1328,7 @@ export default function ZiisTec({ contexto }) {
     salvarColaborador, atualizarColaborador, reenviarAcesso, alternarColaborador, mudarAssinatura, sair,
     cliente, nomeCliente, irPara, aviso, salvarCliente, salvarServico, salvarProduto, salvarOrcamento,
     mudarStatusOrc, duplicarOrcamento, gerarOS, salvarOS, mudarStatusOS, agendarOS, desagendarOS, finalizarOS, resolverPrecificacao, baixar,
+    registrarServicoRealizado,
     salvarCompra, setLancamentos, setOrdens, setGarantias, abrirAtendimentoGarantia,
     clienteAberto, setClienteAberto, orcamentoAberto, setOrcamentoAberto, osAberta, setOsAberta,
     compraAberta, setCompraAberta, setTela, abrirOS, abrirOrc, abrirCliente, abrirCompra,
@@ -3681,10 +3693,14 @@ function FormItemLivre({ onAdicionar, rotulo = "Adicionar ao orçamento" }) {
 
 /* ====================================================== Ordens de serviço */
 function OrdensServico(p) {
-  const { ordens, nomeCliente, osAberta, setOsAberta, clientes, salvarOS, empresa, orcamentos, lancamentos, abrirOS, permitido, equipe, usuarioAtual } = p;
+  const { ordens, nomeCliente, osAberta, setOsAberta, clientes, salvarOS, empresa, orcamentos, lancamentos, abrirOS, permitido, equipe, usuarioAtual, papel, real } = p;
   const soMinhas = !permitido("todasOS");
   const [filtro, setFiltro] = useState("dia");
   const [criando, setCriando] = useState(false);
+  // Registrar um atendimento já feito é ato administrativo do proprietário, e
+  // depende do banco para valer: no simulador não há empresa real para registrar.
+  const [registrando, setRegistrando] = useState(false);
+  const podeRegistrarRealizado = real && papel === "proprietario";
   const agora = useAgora(ordens.some((o) => o.status === "andamento"));
 
   if (osAberta) {
@@ -3747,7 +3763,14 @@ function OrdensServico(p) {
   return (
     <>
       <PageHead title={soMinhas ? "Minhas ordens de serviço" : "Ordens de serviço"} sub={`${diaSemana(hojeISO())}, ${dataBR(hojeISO())}`}
-        action={permitido("todasOS") ? <Btn icon={Plus} onClick={() => setCriando(true)}>Nova OS</Btn> : null} />
+        action={permitido("todasOS") ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Btn icon={Plus} onClick={() => setCriando(true)}>Nova OS</Btn>
+            {podeRegistrarRealizado && (
+              <Btn variant="soft" icon={CalendarClock} onClick={() => setRegistrando(true)}>Registrar serviço realizado</Btn>
+            )}
+          </div>
+        ) : null} />
       <Tabs valor={filtro} onChange={setFiltro} className="mb-5"
         opcoes={[{ id: "dia", label: "Meu dia" }, { id: "abertas", label: "Todas em aberto" }, { id: "concluidas", label: "Concluídas" }]} />
 
@@ -3763,6 +3786,7 @@ function OrdensServico(p) {
       {filtro === "concluidas" && <Bloco titulo="Concluídas" itens={concluidas} vazio="Nenhuma ordem concluída ainda" />}
 
       {criando && <NovaOS {...p} onClose={() => setCriando(false)} />}
+      {registrando && podeRegistrarRealizado && <RegistrarServicoRealizado {...p} onClose={() => setRegistrando(false)} />}
     </>
   );
 }
@@ -3936,6 +3960,244 @@ function NovaOS({ onClose, clientes, servicos, produtos, orcamentos = [], empres
   );
 }
 
+/* Registrar serviço realizado: o atendimento já aconteceu e entra no sistema
+ * depois. A OS nasce concluída com a data REAL do serviço — a data do registro é
+ * o created_at, que o banco preenche e ninguém falsifica. Orçamento não é
+ * exigido: o que já foi feito não volta para aprovação. Todo o resto (número,
+ * financeiro, estoque, garantia e histórico) sai do mesmo fluxo oficial da
+ * finalização; aqui só coletamos o que aconteceu. */
+function RegistrarServicoRealizado({ onClose, clientes, servicos, produtos, empresa, registrarServicoRealizado, salvarCliente, equipe = [], usuarioAtual }) {
+  const hoje = hojeISO();
+  const [novoCliente, setNovoCliente] = useState(false);
+  const [f, setF] = useState({
+    clienteId: "", descricaoLivre: "", local: "", localServico: "", localId: "",
+    itens: [], materiais: [], data: hoje, hora: "",
+    responsavel: empresa.responsavel, responsavelId: usuarioAtual?.id || null,
+    pago: false, forma: "", pagoEm: "", vencimento: "",
+  });
+  const [catalogo, setCatalogo] = useState(false);
+  const [abaCat, setAbaCat] = useState("servicos");
+  const [erro, setErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const requestIdRef = useRef(null);
+  const { dirty } = useFormDirty(f);
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  const escolherCliente = (id) => {
+    const cl = clientes.find((x) => x.id === id);
+    // Local cadastrado pertence ao cliente: trocar o cliente sempre limpa o vínculo.
+    setF((s) => ({ ...s, clienteId: id, localId: id === s.clienteId ? s.localId : "", local: cl?.endereco || s.local }));
+  };
+
+  // Serviço realizado não acontece no futuro. O banco recusa de todo jeito; aqui
+  // o proprietário vê o motivo antes de tentar salvar.
+  const dataFutura = Boolean(f.data) && f.data > hoje;
+  const pagamentoFuturo = Boolean(f.pagoEm) && f.pagoEm > hoje;
+  const total = somaItens(f.itens);
+  const pronto = Boolean(f.clienteId) && Boolean(f.data) && !dataFutura && !pagamentoFuturo
+    && (f.descricaoLivre.trim().length > 0 || f.itens.length > 0)
+    && (!f.pago || total <= 0 || f.forma.trim().length > 0);
+
+  const addMaterial = (pr) => set("materiais", [...f.materiais, {
+    id: uid(), produtoId: pr.id, nome: pr.nome, qtd: 1, custo: pr.custo, controlaEstoque: pr.controlaEstoque,
+  }]);
+
+  const registrar = async () => {
+    if (salvando) return;
+    setSalvando(true);
+    setErro("");
+    try {
+      if (!requestIdRef.current) {
+        if (!globalThis.crypto?.randomUUID) throw new Error("Seu navegador precisa ser atualizado para registrar este serviço com segurança.");
+        // Mesmo pedido em toda tentativa: retry reaproveita o registro em vez de
+        // criar outra OS, baixar o estoque de novo ou duplicar a cobrança.
+        requestIdRef.current = globalThis.crypto.randomUUID();
+      }
+      const salvoId = await registrarServicoRealizado({
+        ...f, requestId: requestIdRef.current,
+        responsavel: f.responsavel || empresa.responsavel,
+        pagoEm: f.pago ? (f.pagoEm || f.data) : "",
+        forma: f.pago ? f.forma : "",
+      });
+      if (!salvoId) {
+        setErro("Não foi possível registrar o serviço. Os dados preenchidos foram mantidos; tente novamente.");
+        return;
+      }
+      onClose();
+    } catch (e) {
+      setErro(mensagemErro(e) || "Não foi possível registrar o serviço. Tente novamente.");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  return (
+    <>
+      <Modal open onClose={onClose} dirty={dirty} busy={salvando} wide
+        title="Registrar serviço realizado"
+        sub="Para o atendimento que já aconteceu. A ordem entra concluída, com a data real do serviço."
+        footer={(requestClose) => <><Btn variant="ghost" disabled={salvando} onClick={requestClose}>Cancelar</Btn>
+          <Btn disabled={!pronto || salvando} onClick={registrar}>{salvando ? "Registrando…" : "Registrar serviço"}</Btn></>}>
+
+        {erro && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">{erro}</div>}
+
+        <Field label="Cliente">
+          <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+            <Select value={f.clienteId} onChange={(e) => escolherCliente(e.target.value)} className="flex-1">
+              <option value="">Selecione um cliente</option>
+              {clientes.filter((c) => !c.excluidoEm).map((c) => <option key={c.id} value={c.id}>{c.fantasia || c.nome}</option>)}
+            </Select>
+            <Btn variant="soft" icon={Plus} onClick={() => setNovoCliente(true)} className="shrink-0">Cadastrar novo cliente</Btn>
+          </div>
+        </Field>
+
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Data do serviço" hint="Quando o atendimento aconteceu. Hoje ou uma data passada.">
+            <Input type="date" max={hoje} value={f.data} onChange={(e) => set("data", e.target.value)} />
+            {dataFutura && <p role="alert" className="mt-1.5 text-[12px] text-rose-700">A data do serviço não pode ser futura.</p>}
+          </Field>
+          <Field label="Horário (opcional)"><Input type="time" value={f.hora} onChange={(e) => set("hora", e.target.value)} /></Field>
+        </div>
+
+        <Field label="O que foi feito?" hint="Fale ou escreva com suas palavras. Isso vira o relato da ordem.">
+          <CampoVoz rows={4} valor={f.descricaoLivre} onChange={(v) => set("descricaoLivre", v)}
+            placeholder="Ex.: troquei a central do portão e reprogramei os controles do condomínio." />
+        </Field>
+
+        <div className="grid sm:grid-cols-2 gap-5">
+          <Field label="Endereço do atendimento"><Input value={f.local} onChange={(e) => set("local", e.target.value)} placeholder="Rua, número, bairro" /></Field>
+          <Field label="Local do serviço" hint="Ex.: Portaria, Apto 304, Loja 4."><Input value={f.localServico} onChange={(e) => set("localServico", e.target.value)} /></Field>
+        </div>
+
+        {f.clienteId && (
+          <QuoteClientLocationField clientId={f.clienteId} value={f.localId || ""}
+            onSelect={(loc) => setF((s) => ({ ...s, localId: loc?.id || "", localServico: loc ? (s.localServico || loc.name) : s.localServico, local: loc?.address || s.local }))} />
+        )}
+
+        {empresa.temEquipe && (
+          <Field label="Responsável" hint="Quem atendeu. Precisa ser alguém da equipe.">
+            <Select value={f.responsavelId || ""} onChange={(e) => {
+              const m = equipe.find((x) => x.usuarioId === e.target.value);
+              setF((st) => ({ ...st, responsavelId: e.target.value || null, responsavel: m?.usuario?.nome || st.responsavel }));
+            }}>
+              <option value="">Selecione</option>
+              {equipe.filter((m) => m.ativo).map((m) => (
+                <option key={m.usuarioId} value={m.usuarioId}>{m.usuario?.nome}{m.papel === "proprietario" ? " (proprietário)" : ""}</option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        <div>
+          <button onClick={() => setCatalogo((v) => !v)} className={cx("text-[13px] font-medium text-teal-800 hover:underline py-1", ring)}>
+            {catalogo ? "Ocultar catálogo" : "Adicionar serviços ou produtos cobrados (opcional)"}
+          </button>
+          {f.itens.length > 0 && (
+            <div className="rounded-xl ring-1 ring-slate-200 divide-y divide-slate-100 mt-3">
+              {f.itens.map((i, idx) => (
+                <div key={i.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-[14px] text-slate-800 truncate">{i.nome}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <input type="number" min="0" step="0.5" value={i.qtd} aria-label={`Quantidade de ${i.nome}`}
+                        onChange={(e) => set("itens", f.itens.map((x, k) => (k === idx ? { ...x, qtd: num(e.target.value) } : x)))}
+                        className="w-16 rounded-lg ring-1 ring-slate-200 px-2 py-1.5 text-[13px]" />
+                      <span className="text-[12px] text-slate-400">{unidadeLabel(i.unidade)} × {brl(i.preco)}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-900 tabular-nums">{brl(i.qtd * i.preco)}</span>
+                    <button onClick={() => set("itens", f.itens.filter((_, k) => k !== idx))} aria-label={`Remover ${i.nome}`}
+                      className={cx("p-2 rounded-lg text-slate-300 hover:text-rose-600", ring)}><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {catalogo && (
+            <div className="mt-3 space-y-3">
+              <Tabs valor={abaCat} onChange={setAbaCat} opcoes={[{ id: "servicos", label: "Serviços" }, { id: "produtos", label: "Produtos" }]} />
+              <div className="flex flex-wrap gap-2">
+                {(abaCat === "servicos" ? servicos : produtos).filter((x) => x.ativo).map((x) => (
+                  <button key={x.id} onClick={() => set("itens", [...f.itens, abaCat === "servicos" ? itemServico(x, 1) : itemProduto(x, 1)])}
+                    className={cx("inline-flex items-center gap-2 rounded-xl bg-slate-50 ring-1 ring-slate-200 px-3 py-2 text-[13px] text-slate-700 hover:bg-white hover:ring-teal-500", ring)}>
+                    <Plus className="w-3.5 h-3.5 text-teal-700" />{x.nome}<span className="text-slate-400">{brlCurto(x.preco)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <Field label="Materiais utilizados (opcional)" hint="Produto que controla estoque dá baixa pelo fluxo normal. Quem não controla entra só como material da ordem.">
+          {f.materiais.length > 0 && (
+            <div className="rounded-xl ring-1 ring-slate-200 divide-y divide-slate-100 mb-3">
+              {f.materiais.map((m, idx) => (
+                <div key={m.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-[14px] text-slate-800 truncate">{m.nome}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <input type="number" min="0" step="0.5" value={m.qtd} aria-label={`Quantidade de ${m.nome}`}
+                        onChange={(e) => set("materiais", f.materiais.map((x, k) => (k === idx ? { ...x, qtd: num(e.target.value) } : x)))}
+                        className="w-16 rounded-lg ring-1 ring-slate-200 px-2 py-1.5 text-[13px]" />
+                      <span className="text-[12px] text-slate-400">{m.controlaEstoque ? "dá baixa no estoque" : "sem controle de estoque"}</span>
+                    </div>
+                  </div>
+                  <button onClick={() => set("materiais", f.materiais.filter((_, k) => k !== idx))} aria-label={`Remover ${m.nome}`}
+                    className={cx("p-2 rounded-lg text-slate-300 hover:text-rose-600", ring)}><Trash2 className="w-4 h-4" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {produtos.filter((x) => x.ativo).map((x) => (
+              <button key={x.id} onClick={() => addMaterial(x)}
+                className={cx("inline-flex items-center gap-2 rounded-xl bg-slate-50 ring-1 ring-slate-200 px-3 py-2 text-[13px] text-slate-700 hover:bg-white hover:ring-teal-500", ring)}>
+                <Package className="w-3.5 h-3.5 text-teal-700" />{x.nome}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {total > 0 && (
+          <div className="rounded-xl bg-slate-50 ring-1 ring-slate-200 p-4 space-y-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-[13px] font-medium text-slate-700">Total do serviço</span>
+              <span className="text-[17px] font-semibold text-slate-900 tabular-nums">{brl(total)}</span>
+            </div>
+            <Field label="Situação do pagamento">
+              <Select value={f.pago ? "pago" : "pendente"} onChange={(e) => set("pago", e.target.value === "pago")}>
+                <option value="pendente">Pendente · entra como conta a receber</option>
+                <option value="pago">Já recebido</option>
+              </Select>
+            </Field>
+            {f.pago ? (
+              <div className="grid sm:grid-cols-2 gap-5">
+                <Field label="Forma de recebimento">
+                  <Select value={f.forma} onChange={(e) => set("forma", e.target.value)}>
+                    <option value="">Selecione</option>
+                    {FORMAS.map((x) => <option key={x} value={x}>{x}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Data do recebimento" hint="Em branco, vale a data do serviço.">
+                  <Input type="date" max={hoje} value={f.pagoEm} onChange={(e) => set("pagoEm", e.target.value)} />
+                  {pagamentoFuturo && <p role="alert" className="mt-1.5 text-[12px] text-rose-700">A data do recebimento não pode ser futura.</p>}
+                </Field>
+              </div>
+            ) : (
+              <Field label="Vencimento" hint="Em branco, conta 7 dias da data do serviço, como na finalização normal.">
+                <Input type="date" value={f.vencimento} onChange={(e) => set("vencimento", e.target.value)} />
+              </Field>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <ClienteRapido aberto={novoCliente} onClose={() => setNovoCliente(false)}
+        onSave={async (novo) => { const id = await salvarCliente(novo); if (id) escolherCliente(id); return id; }} />
+    </>
+  );
+}
+
 function OSDetalhe(p) {
   const { os, cliente, nomeCliente, setOsAberta, mudarStatusOS, setOrdens, servicos, produtos, orcamentos, setTela, setOrcamentoAberto,
     lancamentos, ordens, agendarOS, desagendarOS, empresa, pedirConfirmacao, garantias, finalizarOS, abrirGarantia, abrirOS,
@@ -4037,7 +4299,12 @@ function OSDetalhe(p) {
       <Panel className="p-4 sm:p-5 mb-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Cliente</p><p className="mt-1 font-medium text-slate-900 truncate">{c?.fantasia || c?.nome || nomeCliente(os.clienteId)}</p></div>
-          <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Data e horário</p><p className="mt-1 text-sm text-slate-700">{os.data ? `${dataBR(os.data)}${os.hora ? ` · ${os.hora}` : ""}` : "Sem agendamento"}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Data e horário</p><p className="mt-1 text-sm text-slate-700">{os.data ? `${dataBR(os.data)}${os.hora ? ` · ${os.hora}` : ""}` : "Sem agendamento"}</p>
+            {/* Derivado: serviço com data anterior ao dia em que a OS foi lançada.
+                Nenhuma coluna marca isso — a data real do registro é o created_at. */}
+            {os.registradoEm && os.data && os.registradoEm > os.data && (
+              <p className="mt-1 text-[11px] text-slate-400">Registrado posteriormente · {dataBR(os.registradoEm)}</p>
+            )}</div>
           <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Endereço</p><div className="mt-1"><Endereco valor={os.local} local={os.localServico} className="min-w-0 max-w-full [&>span]:min-w-0" /></div></div>
           <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-slate-400">Serviço</p><p className="mt-1 text-sm text-slate-700 line-clamp-2">{resumoOS(os)}</p></div>
         </div>
