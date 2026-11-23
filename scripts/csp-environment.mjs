@@ -3,14 +3,14 @@
 
   Por que existe. O cabeçalho Content-Security-Policy do `vercel.json` é
   estático: a Vercel o aplica igual em todo deploy do projeto, então ele precisa
-  citar os três projetos Supabase (Production, Beta e H0) para que cada ambiente
+  citar os dois projetos Supabase (Production e Beta) para que cada ambiente
   consiga falar com o seu. Isso significa que, só pelo cabeçalho, um Preview do
-  H0 teria permissão de rede para abrir conexão com Production.
+  Beta teria permissão de rede para abrir conexão com Production.
 
   Como esta trava funciona. O navegador aplica TODAS as políticas que recebe, e
   um pedido precisa passar em cada uma: o resultado é a interseção. Então, além
   do cabeçalho, o build injeta no HTML uma política com UM único projeto — o do
-  ambiente daquele deploy. O Preview do H0 passa a poder falar só com o H0, e
+  ambiente daquele deploy. O Preview do Beta passa a poder falar só com o Beta, e
   Production só com Production, mesmo que o cabeçalho continue mais largo.
 
   Esta política declara apenas `connect-src` e `img-src`, as duas diretivas que
@@ -28,7 +28,6 @@
 */
 
 import {
-  H0_BRANCHES, H0_SUPABASE_URL,
   PROD_SUPABASE_URL,
   STAGING_BRANCHES, STAGING_SUPABASE_URL,
 } from '../api/_supabaseServerConfig.js';
@@ -45,7 +44,6 @@ export function ambienteDoDeploy({ vercelEnv, branch } = {}) {
   if (env === 'production') return { ambiente: 'production', url: PROD_SUPABASE_URL };
   if (env === 'development') return { ambiente: 'development', url: STAGING_SUPABASE_URL };
   if (env === 'preview') {
-    if (H0_BRANCHES.includes(ref)) return { ambiente: 'h0', url: H0_SUPABASE_URL };
     if (STAGING_BRANCHES.includes(ref)) return { ambiente: 'staging', url: STAGING_SUPABASE_URL };
     // Branch fora das allowlists: sem projeto, como no resolvedor.
     return { ambiente: 'preview-sem-projeto', url: '' };

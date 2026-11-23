@@ -17,20 +17,6 @@ export const STAGING_SUPABASE_HOSTS = Object.freeze([
   "beta.ziistec.com",
 ]);
 
-// H0 (homologação isolada, projeto próprio e descartável): hosts de Preview EXATOS, nunca compartilhados com Production ou Beta.
-// Cada host é o Preview de uma branch de homologação listada em H0_BRANCHES (api/_supabaseServerConfig.js): a comparação é por
-// igualdade, sem curinga, prefixo ou substring. Só valem nessas branches; não podem seguir para a main
-// (ver docs/engineering/H0_ENVIRONMENT.md).
-export const H0_SUPABASE_HOSTS = Object.freeze([
-  "ziistec-git-claude-blocks34-port-beta-v1-js-connect.vercel.app",
-  // Central Técnica V1 (0113–0115): Preview da branch de integração, homologada somente contra o H0.
-  "ziistec-git-claude-central-tecnica-v1-integration-js-connect.vercel.app",
-  // Registrar serviço realizado (0117): Preview da branch do registro retroativo, homologada somente contra o H0.
-  "ziistec-git-claude-retroactive-service-v1-js-connect.vercel.app",
-  // Serviços / Operations Simple V2: Preview da rodada de UX, homologada somente contra o H0.
-  "ziistec-git-claude-operations-simple-v2-js-connect.vercel.app",
-]);
-
 export function resolverConfigSupabase({
   deploymentEnv = "",
   host = "",
@@ -40,8 +26,6 @@ export function resolverConfigSupabase({
   prodKey = "",
   stagingUrl = "",
   stagingKey = "",
-  h0Url = "",
-  h0Key = "",
 } = {}) {
   const cleanEnv = String(deploymentEnv || "").trim().toLowerCase();
   const cleanHost = String(host || "").trim().toLowerCase();
@@ -51,8 +35,6 @@ export function resolverConfigSupabase({
   const cleanProdKey = String(prodKey || "").trim();
   const cleanStagingUrl = String(stagingUrl || "").trim().replace(/\/+$/, "");
   const cleanStagingKey = String(stagingKey || "").trim();
-  const cleanH0Url = String(h0Url || "").trim().replace(/\/+$/, "");
-  const cleanH0Key = String(h0Key || "").trim();
 
   const temEnvUrl = Boolean(cleanEnvUrl);
   const temEnvKey = Boolean(cleanEnvKey);
@@ -60,16 +42,13 @@ export function resolverConfigSupabase({
   const envIncompleto = temEnvUrl !== temEnvKey;
   const hostProducao = PROD_SUPABASE_HOSTS.includes(cleanHost);
   const hostStaging = STAGING_SUPABASE_HOSTS.includes(cleanHost);
-  const hostH0 = H0_SUPABASE_HOSTS.includes(cleanHost);
-  const inferredEnv = hostProducao ? "production" : hostStaging || hostH0 ? "preview" : "development";
+  const inferredEnv = hostProducao ? "production" : hostStaging ? "preview" : "development";
   const effectiveEnv = cleanEnv || inferredEnv;
   const productionContext = effectiveEnv === "production" && hostProducao;
   const previewContext = effectiveEnv === "preview" && hostStaging;
-  const h0Context = effectiveEnv === "preview" && hostH0;
-  const developmentContext = effectiveEnv === "development" && !hostProducao && !hostStaging && !hostH0;
+  const developmentContext = effectiveEnv === "development" && !hostProducao && !hostStaging;
   const exactProdPair = cleanEnvUrl === cleanProdUrl && cleanEnvKey === cleanProdKey;
   const exactStagingPair = cleanEnvUrl === cleanStagingUrl && cleanEnvKey === cleanStagingKey;
-  const exactH0Pair = Boolean(cleanH0Url && cleanH0Key) && cleanEnvUrl === cleanH0Url && cleanEnvKey === cleanH0Key;
 
   const fail = (origem, incomplete = false) => ({
     url: "",
@@ -77,7 +56,6 @@ export function resolverConfigSupabase({
     configurado: false,
     hostProducao,
     hostStaging,
-    hostH0,
     envIncompleto: incomplete,
     origem,
   });
@@ -90,11 +68,6 @@ export function resolverConfigSupabase({
         ? { url: cleanProdUrl, anonKey: cleanProdKey, configurado: true, hostProducao, hostStaging, envIncompleto: false, origem: "env-production" }
         : fail("environment-project-mismatch");
     }
-    if (h0Context) {
-      return exactH0Pair
-        ? { url: cleanH0Url, anonKey: cleanH0Key, configurado: true, hostProducao, hostStaging, hostH0, envIncompleto: false, origem: "env-h0" }
-        : fail("environment-project-mismatch");
-    }
     if (previewContext || developmentContext) {
       return exactStagingPair
         ? { url: cleanStagingUrl, anonKey: cleanStagingKey, configurado: true, hostProducao, hostStaging, envIncompleto: false, origem: developmentContext ? "env-development-staging" : "env-staging" }
@@ -105,9 +78,6 @@ export function resolverConfigSupabase({
 
   if (productionContext && cleanProdUrl && cleanProdKey) {
     return { url: cleanProdUrl, anonKey: cleanProdKey, configurado: true, hostProducao, hostStaging, envIncompleto: false, origem: "production-fallback" };
-  }
-  if (h0Context && cleanH0Url && cleanH0Key) {
-    return { url: cleanH0Url, anonKey: cleanH0Key, configurado: true, hostProducao, hostStaging, hostH0, envIncompleto: false, origem: "h0-fallback" };
   }
   if (previewContext && cleanStagingUrl && cleanStagingKey) {
     return { url: cleanStagingUrl, anonKey: cleanStagingKey, configurado: true, hostProducao, hostStaging, envIncompleto: false, origem: "staging-fallback" };

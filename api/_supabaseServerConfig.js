@@ -2,19 +2,6 @@ const PROD_SUPABASE_URL = 'https://diztevlpbcfqleizswxr.supabase.co';
 const PROD_PUBLISHABLE_KEY = 'sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw';
 const STAGING_SUPABASE_URL = 'https://xadoktssibuuebzzjrhv.supabase.co';
 const STAGING_PUBLISHABLE_KEY = 'sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e';
-const H0_SUPABASE_URL = 'https://auojcljfahhpkfqqbygd.supabase.co';
-const H0_PUBLISHABLE_KEY = 'sb_publishable_SzojrPawC9GAEBHoN9caSw_aTr_3o2a';
-// Branches de homologação do H0 (projeto próprio e descartável), por nome EXATO. Ficam fora de STAGING_BRANCHES: nunca resolvem
-// para o Beta nem para Production. Cada uma tem o host de Preview correspondente em H0_SUPABASE_HOSTS (src/lib/supabaseConfig.js).
-const H0_BRANCHES = Object.freeze([
-  'claude/blocks34-port-beta-v1',
-  // Central Técnica V1 (0113–0115): branch de integração, homologada somente contra o H0.
-  'claude/central-tecnica-v1-integration',
-  // Registrar serviço realizado (0117): branch do registro retroativo, homologada somente contra o H0.
-  'claude/retroactive-service-v1',
-  // Serviços / Operations Simple V2: rodada de UX, homologada somente contra o H0.
-  'claude/operations-simple-v2',
-]);
 const STAGING_BRANCH = 'product-v2-review';
 const STAGING_BRANCHES = Object.freeze([
   STAGING_BRANCH,
@@ -36,7 +23,6 @@ export function resolverSupabaseServidor(env = process.env) {
   const gitBranch = clean(env?.VERCEL_GIT_COMMIT_REF);
   const isProduction = vercelEnv === 'production';
   const isStagingPreview = vercelEnv === 'preview' && STAGING_BRANCHES.includes(gitBranch);
-  const isH0Preview = vercelEnv === 'preview' && H0_BRANCHES.includes(gitBranch);
   const isDevelopment = vercelEnv === 'development';
   const envUrl = normalizeUrl(env?.SUPABASE_URL);
   const envKey = clean(env?.SUPABASE_PUBLISHABLE_KEY);
@@ -48,17 +34,11 @@ export function resolverSupabaseServidor(env = process.env) {
   const explicitPair = hasUrl && hasKey;
   const isExactProdPair = envUrl === PROD_SUPABASE_URL && envKey === PROD_PUBLISHABLE_KEY;
   const isExactStagingPair = envUrl === STAGING_SUPABASE_URL && envKey === STAGING_PUBLISHABLE_KEY;
-  const isExactH0Pair = envUrl === H0_SUPABASE_URL && envKey === H0_PUBLISHABLE_KEY;
 
   if (explicitPair) {
     if (isProduction) {
       return isExactProdPair
         ? { configurado: true, origem: 'env-production', url: PROD_SUPABASE_URL, publishableKey: PROD_PUBLISHABLE_KEY }
-        : fail('environment-project-mismatch');
-    }
-    if (isH0Preview) {
-      return isExactH0Pair
-        ? { configurado: true, origem: 'env-h0', url: H0_SUPABASE_URL, publishableKey: H0_PUBLISHABLE_KEY }
         : fail('environment-project-mismatch');
     }
     if (isStagingPreview || isDevelopment) {
@@ -67,10 +47,6 @@ export function resolverSupabaseServidor(env = process.env) {
         : fail('environment-project-mismatch');
     }
     return fail('environment-project-mismatch');
-  }
-
-  if (isH0Preview) {
-    return { configurado: true, origem: 'h0-fallback', url: H0_SUPABASE_URL, publishableKey: H0_PUBLISHABLE_KEY };
   }
 
   if (isStagingPreview) {
@@ -100,9 +76,6 @@ export {
   PROD_PUBLISHABLE_KEY,
   STAGING_SUPABASE_URL,
   STAGING_PUBLISHABLE_KEY,
-  H0_SUPABASE_URL,
-  H0_PUBLISHABLE_KEY,
-  H0_BRANCHES,
   STAGING_BRANCH,
   STAGING_BRANCHES,
 };

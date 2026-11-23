@@ -25,7 +25,6 @@ const pkg = JSON.parse(read('package.json'));
 
 const PROD = 'https://diztevlpbcfqleizswxr.supabase.co';
 const BETA = 'https://xadoktssibuuebzzjrhv.supabase.co';
-const H0 = 'https://auojcljfahhpkfqqbygd.supabase.co';
 
 const diretivas = (politica) => Object.fromEntries(
   politica.split(';').map((s) => s.trim()).filter(Boolean)
@@ -105,20 +104,14 @@ test('4: a trava é de ambiente, e Production não tem como ligá-la pela interf
 
 // ─────────────────────────── 5, 6, 7, 8. CSP por ambiente
 
-test('5 e 6: Preview do H0 alcança o H0 e não alcança Production nem Beta', () => {
-  const conexoes = conexoesDe('preview', 'claude/operations-simple-v2');
-  assert.ok(conexoes.includes(H0), 'o Preview do H0 fala com o H0');
-  assert.ok(conexoes.includes(H0.replace('https:', 'wss:')), 'inclusive por websocket');
-  assert.equal(conexoes.includes(PROD), false, 'e nunca com Production');
-  assert.equal(conexoes.includes(BETA), false, 'e nunca com o Beta');
-  // as imagens seguem a mesma regra
-  const img = diretivas(politicaDe('preview', 'claude/operations-simple-v2').politica)['img-src'];
-  assert.deepEqual(img, ["'self'", 'data:', 'blob:', H0]);
-  // vale para todas as branches do H0, não só esta
+test('5 e 6: as branches que eram do ambiente de homologação não alcançam projeto nenhum', () => {
+  // Aquele ambiente foi removido do código de entrega. As branches que tinham
+  // projeto próprio voltaram a ser Preview comum: fail-closed, como as outras.
   for (const branch of ['claude/blocks34-port-beta-v1', 'claude/central-tecnica-v1-integration',
     'claude/retroactive-service-v1', 'claude/operations-simple-v2']) {
-    assert.equal(ambienteDoDeploy({ vercelEnv: 'preview', branch }).ambiente, 'h0');
-    assert.equal(conexoesDe('preview', branch).includes(PROD), false, `${branch} não alcança Production`);
+    assert.equal(ambienteDoDeploy({ vercelEnv: 'preview', branch }).ambiente, 'preview-sem-projeto');
+    assert.deepEqual(conexoesDe('preview', branch), ["'self'"], `${branch} não alcança projeto nenhum`);
+    assert.deepEqual(diretivas(politicaDe('preview', branch).politica)['img-src'], ["'self'", 'data:', 'blob:']);
   }
 });
 
@@ -126,7 +119,6 @@ test('7 e 8: Production alcança Production e não alcança H0 nem Beta', () => 
   const conexoes = conexoesDe('production', 'main');
   assert.ok(conexoes.includes(PROD));
   assert.ok(conexoes.includes(PROD.replace('https:', 'wss:')));
-  assert.equal(conexoes.includes(H0), false, 'Production não alcança o H0');
   assert.equal(conexoes.includes(BETA), false, 'Production não alcança o Beta');
   assert.deepEqual(conexoes, ["'self'", PROD, PROD.replace('https:', 'wss:')],
     'só o projeto de Production e a própria origem');
@@ -136,18 +128,17 @@ test('Beta/Staging alcança só o Beta, e cada ambiente fica com um projeto', ()
   const conexoes = conexoesDe('preview', 'rc1c-mobile-ux-stabilization');
   assert.ok(conexoes.includes(BETA));
   assert.equal(conexoes.includes(PROD), false);
-  assert.equal(conexoes.includes(H0), false);
   // nenhuma política cita dois projetos ao mesmo tempo
-  for (const [env, branch] of [['production', 'main'], ['preview', 'claude/operations-simple-v2'],
+  for (const [env, branch] of [['production', 'main'],
     ['preview', 'rc1c-mobile-ux-stabilization'], ['development', '']]) {
-    const citados = [PROD, BETA, H0].filter((u) => politicaDe(env, branch).politica.includes(u));
+    const citados = [PROD, BETA].filter((u) => politicaDe(env, branch).politica.includes(u));
     assert.equal(citados.length, 1, `${env}/${branch} cita um projeto só`);
   }
 });
 
 test('CSP por ambiente é fail-closed e sem curinga', () => {
   // branch fora das allowlists não recebe projeto nenhum — igual ao resolvedor
-  for (const branch of ['main', 'feature/qualquer', 'claude/alguma-coisa', '']) {
+  for (const branch of ['main', 'feature/qualquer', 'claude/alguma-coisa', 'claude/operations-simple-v2', '']) {
     const conexoes = conexoesDe('preview', branch);
     assert.deepEqual(conexoes, ["'self'"], `preview de ${branch || '(vazio)'} não alcança projeto nenhum`);
   }
@@ -193,9 +184,9 @@ test('o build injeta a política, e o HTML não a traz fixa', () => {
   const html = read('index.html');
   assert.equal(/Content-Security-Policy/.test(html), false,
     'o HTML versionado não carrega política de ambiente');
-  for (const u of [PROD, BETA, H0]) assert.equal(html.includes(u), false, 'nem projeto Supabase');
+  for (const u of [PROD, BETA]) assert.equal(html.includes(u), false, 'nem projeto Supabase');
   // a tag sai escapada
-  const meta = metaCspDoAmbiente({ vercelEnv: 'preview', branch: 'claude/operations-simple-v2' });
+  const meta = metaCspDoAmbiente({ vercelEnv: 'preview', branch: 'rc1c-mobile-ux-stabilization' });
   assert.match(meta, /^<meta http-equiv="Content-Security-Policy" content="[^"]+" \/>$/);
   assert.equal(meta.includes("'"), false, 'aspas simples saem como entidade');
   assert.ok(meta.includes('&#39;self&#39;'));
@@ -207,21 +198,22 @@ test('9: o resolvedor continua a primeira trava, e continua fail-closed', () => 
   const cliente = (o) => resolverConfigSupabase({
     prodUrl: PROD, prodKey: 'sb_publishable_SGA5FVYLYicO1piUDRb-Rw_wNSxgqyw',
     stagingUrl: BETA, stagingKey: 'sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e',
-    h0Url: H0, h0Key: 'sb_publishable_SzojrPawC9GAEBHoN9caSw_aTr_3o2a',
     ...o,
   });
-  const H0_HOST = 'ziistec-git-claude-operations-simple-v2-js-connect.vercel.app';
+  const HOST_SEM_PROJETO = 'ziistec-git-claude-operations-simple-v2-js-connect.vercel.app';
 
-  // host do H0 resolve só o H0
-  assert.equal(cliente({ deploymentEnv: 'preview', host: H0_HOST }).url, H0);
+  // o host daquele Preview não resolve mais para projeto nenhum
+  const semProjeto = cliente({ deploymentEnv: 'preview', host: HOST_SEM_PROJETO });
+  assert.equal(semProjeto.configurado, false);
+  assert.equal(semProjeto.url, '');
   // host desconhecido não cai para Production: falha fechada
   const desconhecido = cliente({ deploymentEnv: 'preview', host: 'ziistec-qualquer-outra.vercel.app' });
   assert.equal(desconhecido.configurado, false);
   assert.equal(desconhecido.url, '');
-  // par do H0 em contexto de Production é recusado
+  // par de outro projeto em contexto de Production é recusado
   const cruzado = cliente({
     deploymentEnv: 'production', host: 'ziistec.vercel.app',
-    envUrl: H0, envKey: 'sb_publishable_SzojrPawC9GAEBHoN9caSw_aTr_3o2a',
+    envUrl: BETA, envKey: 'sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e',
   });
   assert.equal(cruzado.configurado, false);
   // servidor: main em Production continua em Production; preview da main não resolve nada
@@ -231,7 +223,6 @@ test('9: o resolvedor continua a primeira trava, e continua fail-closed', () => 
   // as duas travas concordam: onde o resolvedor leva, a CSP permite
   for (const [env, branch, esperado] of [
     ['production', 'main', PROD],
-    ['preview', 'claude/operations-simple-v2', H0],
     ['preview', 'rc1c-mobile-ux-stabilization', BETA],
   ]) {
     const servidor = resolverSupabaseServidor({ VERCEL_ENV: env, VERCEL_GIT_COMMIT_REF: branch });
@@ -245,7 +236,7 @@ test('9: o resolvedor continua a primeira trava, e continua fail-closed', () => 
 test('10: a Operations Simple V2 e as rodadas anteriores seguem no gate', () => {
   const v2 = pkg.scripts['verify:v2'];
   for (const t of ['operations_simple_v2', 'operations_board_contract', 'operations_command_engine',
-    'retroactive_service_contract', 'central_tech_security_fix', 'h0_environment_isolation',
+    'retroactive_service_contract', 'central_tech_security_fix', 'environment_isolation',
     'security_audit_v1_static', 'final_ux_environment_hardening']) {
     assert.ok(v2.includes(`tests/blockers/${t}.test.mjs`), `${t} roda no gate`);
   }
