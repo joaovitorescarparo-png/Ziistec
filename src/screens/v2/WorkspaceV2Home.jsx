@@ -1,4 +1,6 @@
 import React from 'react';
+import {ambienteSupabase} from '../../lib/supabase';
+import {iaExternaDisponivel} from '../../lib/recursosDisponiveis';
 import {
   ArrowLeft, Boxes, ChevronRight, CircleDollarSign, ClipboardList, FileText, HardHat,
   LockKeyhole, MapPin, PackageCheck, Settings, ShieldCheck, ShoppingCart, Sparkles, Wrench,
@@ -19,7 +21,9 @@ const MODULES = [
 ];
 
 export default function WorkspaceV2Home({ companyName='Sua empresa', owner=false, onOpen, onClose }) {
-  const modules=MODULES.filter(m=>owner||!m.ownerOnly);
+  // "Novo orçamento com voz e IA" só aparece onde a IA externa está ligada.
+  const ia=iaExternaDisponivel(ambienteSupabase,import.meta.env||{});
+  const modules=MODULES.filter(m=>(owner||!m.ownerOnly)&&(ia||m.id!=='orcamento-ia'));
   return <div className="min-h-[100dvh] overflow-x-hidden bg-slate-950 text-white">
     <header className="border-b border-white/10 bg-slate-950/95 backdrop-blur"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-4 sm:px-6"><div className="flex min-w-0 items-center gap-3"><button onClick={onClose} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2.5 text-slate-300 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300" aria-label="Voltar"><ArrowLeft size={19}/></button><div className="min-w-0"><div className="flex items-center gap-2"><h1 className="text-base font-bold tracking-tight">ZiisTec V2</h1><span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-bold text-emerald-300">PREVIEW</span></div><p className="mt-0.5 truncate text-xs text-slate-400">{companyName}</p></div></div><div className="hidden items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-3 py-2 text-xs font-semibold text-emerald-300 sm:flex"><LockKeyhole size={15}/>Branch segura</div></div></header>
 

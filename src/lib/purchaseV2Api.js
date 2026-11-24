@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { lerTodas } from './paginacao';
 import { salvarCompraDB } from './dataApiExtras';
 
 const n = (v) => Number(v || 0);
@@ -64,23 +65,28 @@ export async function verificarComprasV2DisponiveisDB(companyId) {
 
 export async function carregarComprasV2DB(companyId) {
   const [productsRes, purchasesRes, entriesRes] = await Promise.all([
-    supabase
+    // Total gasto e a pagar: leitura completa e sem compras excluídas (soft delete).
+    lerTodas(() => supabase
       .from('products')
       .select('id,name,brand,model,unit,cost,active,stock_qty,track_stock')
       .eq('company_id',companyId)
       .is('deleted_at',null)
-      .order('name',{ascending:true}),
-    supabase
+      .order('name',{ascending:true})
+      .order('id',{ascending:true})),
+    lerTodas(() => supabase
       .from('purchases')
       .select('id,company_id,number,supplier_name,purchase_date,payment_method,due_date,notes,entry_id,created_at,updated_at,client_request_id,purchase_items(id,product_id,name,quantity,unit_cost)')
       .eq('company_id',companyId)
+      .is('deleted_at',null)
       .order('purchase_date',{ascending:false})
-      .order('created_at',{ascending:false}),
-    supabase
+      .order('created_at',{ascending:false})
+      .order('id',{ascending:true})),
+    lerTodas(() => supabase
       .from('financial_entries')
       .select('id,paid')
       .eq('company_id',companyId)
-      .eq('kind','expense'),
+      .eq('kind','expense')
+      .order('id',{ascending:true})),
   ]);
 
   const products = check(productsRes).map(mapProduct);

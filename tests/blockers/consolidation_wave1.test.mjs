@@ -13,6 +13,13 @@ import { LOGO_BOX, encaixarNaCaixa, ajustarTextoNaLargura } from '../../src/lib/
 import { estoqueBaixo } from '../../src/lib/estoque.js';
 import { concluidasRecentemente, produtosComEstoqueBaixo } from '../../src/lib/dashboardInicio.js';
 
+// Dublê do builder do supabase-js: aguardável e encadeável com .order()/.range().
+const encadeavel = (executar) => {
+  const b = { order: () => b, range: () => b, then: (ok, erro) => executar().then(ok, erro) };
+  return b;
+};
+
+
 // Onda 1 da consolidação V2 (A1–A4): entradas V2 no app principal, textos de produto, caixa da logo nos PDFs
 // e Início. Nada aqui toca banco: Supabase é falso e os PDFs são gerados em memória.
 
@@ -250,8 +257,12 @@ function createFakeSupabase() {
   };
   const client = {
     from: (table) => query(table),
-    rpc: async (name, args) => { calls.push({ kind: 'rpc', name, args }); const configured = rpcResults.get(name); return (typeof configured === 'function' ? configured(args) : configured) ?? { data: null, error: null }; },
-    storage: { from: (bucket) => ({ createSignedUrl: async (path) => ({ data: { signedUrl: `https://files.test/${bucket}/${path}` }, error: null }) }) },
+    // Como o builder real do supabase-js: rpc aceita .order()/.range() (leitura paginada).
+    rpc: (name, args) => encadeavel(async () => { calls.push({ kind: 'rpc', name, args }); const configured = rpcResults.get(name); return (typeof configured === 'function' ? configured(args) : configured) ?? { data: null, error: null }; }),
+    storage: { from: (bucket) => ({
+      createSignedUrl: async (path) => ({ data: { signedUrl: `https://files.test/${bucket}/${path}` }, error: null }),
+      createSignedUrls: async (paths) => ({ data: paths.map((path) => ({ path, signedUrl: `https://files.test/${bucket}/${path}`, error: null })), error: null }),
+    }) },
   };
   return { client, calls, rpcResults, tableResults, reset() { calls.length = 0; rpcResults.clear(); tableResults.clear(); } };
 }

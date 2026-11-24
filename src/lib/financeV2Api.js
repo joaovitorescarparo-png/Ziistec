@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { lerTodas } from './paginacao';
 
 const check = (r) => { if (r?.error) throw r.error; return r?.data || []; };
 const n = (v) => Number(v || 0);
@@ -12,7 +13,8 @@ function ledgerPendente(error) {
 }
 
 async function carregarLedgerSeguro(table, select, companyId) {
-  const r = await supabase.from(table).select(select).eq('company_id', companyId);
+  const chave = select.split(',')[0];
+  const r = await lerTodas(() => supabase.from(table).select(select).eq('company_id', companyId).order(chave, { ascending:true }), { chave });
   if (!r.error) return { pronto:true, data:r.data || [] };
   if (ledgerPendente(r.error)) return { pronto:false, data:[] };
   throw r.error;
@@ -20,21 +22,27 @@ async function carregarLedgerSeguro(table, select, companyId) {
 
 export async function carregarFinanceiroV2DB(companyId) {
   const [entriesRes, clientsRes, ordersRes] = await Promise.all([
-    supabase
+    // Totais gerenciais: leitura completa e sem registros excluídos (soft delete), como o Financeiro principal.
+    lerTodas(() => supabase
       .from('financial_entries')
       .select('id,company_id,kind,description,amount,due_date,paid,paid_at,payment_method,category,client_id,work_order_id,purchase_id,created_at')
       .eq('company_id', companyId)
-      .order('due_date', { ascending:false }),
-    supabase
+      .is('deleted_at', null)
+      .order('due_date', { ascending:false })
+      .order('id', { ascending:true })),
+    lerTodas(() => supabase
       .from('clients')
       .select('id,name,trade_name')
       .eq('company_id', companyId)
-      .order('name', { ascending:true }),
-    supabase
+      .order('name', { ascending:true })
+      .order('id', { ascending:true })),
+    lerTodas(() => supabase
       .from('work_orders')
       .select('id,company_id,number,client_id,status,scheduled_date,completed_at,work_order_items(id,quantity,unit_price),work_order_materials(id,quantity)')
       .eq('company_id', companyId)
-      .order('created_at', { ascending:false }),
+      .is('deleted_at', null)
+      .order('created_at', { ascending:false })
+      .order('id', { ascending:true })),
   ]);
 
   const entries = check(entriesRes);

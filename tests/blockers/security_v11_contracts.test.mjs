@@ -38,7 +38,9 @@ test('outro produto ou outra quantidade é outra operação e ganha outro id; co
 
 // v2Api.js importa './supabase' (resolvido só pelo Vite): carregado de verdade, com o cliente trocado por um simulado.
 async function loadV2Api(rpc) {
-  const source = read('src/lib/v2Api.js').split("import { supabase } from './supabase';").join('const supabase = globalThis.__ztSupabase;');
+  const paginacao = new URL('../../src/lib/paginacao.js', import.meta.url).href;
+  const source = read('src/lib/v2Api.js').split("import { supabase } from './supabase';").join('const supabase = globalThis.__ztSupabase;')
+    .split("from './paginacao';").join(`from '${paginacao}';`);
   assert.ok(source.includes('globalThis.__ztSupabase'));
   globalThis.__ztSupabase = { rpc };
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#${Math.random()}`);

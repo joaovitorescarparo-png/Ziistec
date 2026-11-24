@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { reportarErro } from "./observabilidade";
 import { resolverConfigSupabase } from "./supabaseConfig";
 
 /*
@@ -90,6 +91,8 @@ export function mensagemErro(erro) {
 
 /* Detalhe técnico fica no console para diagnóstico; nunca na tela do usuário. */
 function registrarTecnico(erro) {
+  // Erro estrutural/inesperado de banco ou RPC: além do console, vai para o log do servidor.
+  reportarErro("rpc", { code: erro?.code, message: erro?.message });
   if (typeof console === "undefined") return;
   console.warn("[ZiisTec] erro técnico:", erro?.code || "sem código", erro?.message || erro);
 }

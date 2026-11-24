@@ -14,17 +14,13 @@ const selectBlock = (source, marker, label) => {
 };
 
 test('F05: clientes arquivados continuam na carga histórica', () => {
-  const start = dataApi.indexOf("supabase.from('clients')");
-  assert.notEqual(start, -1, 'consulta de clients precisa existir');
-  const end = dataApi.indexOf("supabase.from('services')", start);
-  assert.notEqual(end, -1, 'não foi possível delimitar a consulta histórica de clients');
-  const clientQuery = dataApi.slice(start, end);
-
-  assert.doesNotMatch(
-    clientQuery,
-    /deleted_at/,
-    'clientes arquivados não podem ser removidos da carga histórica global',
-  );
+  // A carga é paginada por `todas(tabela, select, ativos)`: clientes vão com ativos=false
+  // (arquivados continuam na carga histórica); o filtro de deleted_at só vale com ativos=true.
+  assert.match(dataApi, /todas\('clients','\*',false\)/, 'consulta de clients precisa existir e incluir arquivados');
+  assert.match(dataApi, /if\(ativos\) q=q\.is\('deleted_at',null\)/, 'o filtro de arquivados só se aplica quando pedido');
+  for (const tabela of ['services', 'products', 'quotes', 'work_orders', 'financial_entries', 'purchases', 'warranties']) {
+    assert.match(dataApi, new RegExp(`todas\\('${tabela}',[A-Z_']+\\*?'?\\)`), `${tabela} continua filtrando arquivados`);
+  }
 });
 
 test('F05: catálogo de IA e pickers de novos vínculos não oferecem clientes arquivados', () => {

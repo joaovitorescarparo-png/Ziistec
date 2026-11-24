@@ -1,4 +1,6 @@
 import { supabase } from './supabase';
+import { reportarErro } from './observabilidade';
+import { comprimirImagemParaUpload } from './imageCompression';
 
 export const IMAGE_MIMES=new Set(['image/jpeg','image/png','image/webp','image/heic','image/heif']);
 export const VIDEO_MIMES=new Set(['video/mp4','video/quicktime','video/webm']);
@@ -55,7 +57,7 @@ export function validateEvidenceFile(file,stage='other'){
   const isDocument=DOCUMENT_MIMES.has(mime);
   if(!isImage&&!isVideo&&!isDocument) throw new Error('Use JPG, PNG, WEBP, HEIC/HEIF, MP4, MOV, WEBM ou PDF.');
   if(isImage&&Number(file.size||0)>15*1024*1024) throw new Error('A foto deve ter no máximo 15 MB.');
-  if(isVideo&&Number(file.size||0)>30*1024*1024) throw new Error('O vídeo deve ter no máximo 30 MB.');
+  if(isVideo&&Number(file.size||0)>30*1024*1024) throw new Error('O vídeo deve ter no máximo 30 MB. Grave um trecho mais curto (cerca de 15 segundos) ou envie fotos.');
   if(isDocument&&Number(file.size||0)>20*1024*1024) throw new Error('O documento deve ter no máximo 20 MB.');
   if(stage==='video'&&!isVideo) throw new Error('Na categoria Vídeo, selecione um arquivo de vídeo.');
   if(isDocument&&stage!=='other') throw new Error('Documentos devem usar a categoria Outro / documento.');
@@ -89,8 +91,17 @@ async function cleanupIfUnreferenced(path){
   return !rm.error;
 }
 
-export async function persistWorkOrderEvidence({companyId,workOrderId,file,stage='other',caption='',category=null}){
+export async function persistWorkOrderEvidence(args){
+  try{ return await persistWorkOrderEvidenceNow(args); }
+  catch(e){ reportarErro('upload',{code:e?.code||e?.statusCode||e?.name,message:e?.message}); throw e; }
+}
+
+async function persistWorkOrderEvidenceNow({companyId,workOrderId,file:original,stage='other',caption='',category=null}){
   if(!companyId||!workOrderId) throw new Error('OS inválida para esta empresa.');
+  validateEvidenceFile(original,stage);
+  // Foto é reduzida antes do hash e do upload (vídeo e PDF seguem intactos); o mesmo
+  // arquivo sempre gera o mesmo resultado, então o retry mantém o mesmo caminho.
+  const file=await comprimirImagemParaUpload(original);
   const {mime}=validateEvidenceFile(file,stage);
   const text=String(caption||'').trim();
   if(text.length>1000) throw new Error('A legenda deve ter no máximo 1.000 caracteres.');

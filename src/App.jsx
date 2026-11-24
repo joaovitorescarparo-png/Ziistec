@@ -248,7 +248,10 @@ export default function App() {
 
   const assistantEnabled = configurado && s.sessaoAuth && contexto && !s.carregando && !s.erro &&
     !s.recuperandoSenha && !s.ehPlataforma && !s.precisaEmpresa && !s.trocandoEmpresa &&
-    s.membresiaAtual?.status === 'active' && ['owner', 'technician'].includes(s.membresiaAtual?.role);
+    s.membresiaAtual?.status === 'active' && ['owner', 'technician'].includes(s.membresiaAtual?.role) &&
+    // Em Production o servidor recusa o Assistente (api/assistant.js): o painel não aparece para
+    // não levar a erro. Mesma regra de src/lib/recursosDisponiveis.js (origem do resolvedor).
+    !/production/.test(String(ambienteSupabase || ''));
   const openAssistantRecord = (record) => {
     const targets = { client: ['clientes-locais', 'client'], product: ['produtos', 'product'],
       work_order: ['memoria-os', 'wo'], quote: ['orcamentos'], financial_entry: ['financeiro'] };

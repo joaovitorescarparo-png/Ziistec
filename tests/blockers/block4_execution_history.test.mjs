@@ -5,6 +5,13 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 
+// Dublê do builder do supabase-js: aguardável e encadeável com .order()/.range().
+const encadeavel = (executar) => {
+  const b = { order: () => b, range: () => b, then: (ok, erro) => executar().then(ok, erro) };
+  return b;
+};
+
+
 // Bloco 4 (0101–0104): execução e histórico técnico — atores da OS, relato idempotente, local cadastrado
 // na OS direta e histórico por cliente/local (somente proprietário nesta linha beta).
 // Harness portado de tests/blockers/blocks34_os_history_receipt.test.mjs (branch blocks-3-4-os-history-receipt).
@@ -40,12 +47,16 @@ function createFakeSupabase() {
   };
   const client = {
     from: (table) => query(table),
-    rpc: async (name, args) => {
+    // Como o builder real do supabase-js: rpc aceita .order()/.range() (leitura paginada).
+    rpc: (name, args) => encadeavel(async () => {
       calls.push({ kind: 'rpc', name, args });
       const configured = rpcResults.get(name);
       return (typeof configured === 'function' ? configured(args) : configured) ?? { data: null, error: null };
-    },
-    storage: { from: () => ({ createSignedUrl: async () => ({ data: null, error: { message: 'sem storage no teste' } }) }) },
+    }),
+    storage: { from: () => ({
+      createSignedUrl: async () => ({ data: null, error: { message: 'sem storage no teste' } }),
+      createSignedUrls: async () => ({ data: null, error: { message: 'sem storage no teste' } }),
+    }) },
   };
   const reset = () => { calls.length = 0; rpcResults.clear(); tableResults.clear(); };
   return { client, calls, rpcResults, tableResults, reset };

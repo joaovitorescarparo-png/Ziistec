@@ -29,7 +29,8 @@ test('team invite delivery uses native Supabase Invite and server-only privilege
 const previewOrigin='https://ziistec-git-codex-ziistec-assistant-mvp-v1-js-connect.vercel.app';
 const stagingOrigin='https://ziistec-git-hardening-v2-staging-js-connect.vercel.app';
 const rc1dOrigin='https://ziistec-git-rc1d-stabilization-js-connect.vercel.app';
-const hostedOrigins=[stagingOrigin,rc1dOrigin,previewOrigin];
+const productionOrigins=['https://ziistec.vercel.app','https://ziistec-js-connect.vercel.app','https://ziistec-git-main-js-connect.vercel.app'];
+const hostedOrigins=[...productionOrigins,stagingOrigin,rc1dOrigin,previewOrigin];
 const acceptedOrigins=[...hostedOrigins,'http://localhost:5173','http://127.0.0.1:5173'];
 const rejectedOrigins=[
   'https://unknown.example',
@@ -67,7 +68,8 @@ test('team invite redirect allows only exact approved origins and root redirects
     assert.equal(normalizeRedirect(`${origin}/`),`${origin}/`,origin);
   }
   for(const origin of rejectedOrigins) assert.equal(normalizeRedirect(origin),'',origin);
-  assert.doesNotMatch(edge,/\*\.vercel|\*\*|ziistec\.vercel\.app/);
+  // Curinga nunca. Production entra por igualdade exata (lista PROD_SUPABASE_HOSTS do app).
+  assert.doesNotMatch(edge,/\*\.vercel|\*\*/);
   assert.match(edge,/invalid_redirect/);
 });
 
@@ -118,4 +120,10 @@ test('database invitation survives mail failure while F11 remains membership aut
   assert.match(client,/emailDelivery=\{ok:false,sent:false,reason:'delivery_failed'\}/);
   assert.match(edge,/existing_user/);
   assert.match(f11,/email_confirmed_at is not null/i);
+});
+
+test('team invite aceita exatamente os domínios de Production que o app aceita', async () => {
+  const { PROD_SUPABASE_HOSTS } = await import('../../src/lib/supabaseConfig.js');
+  const fonte = readFileSync(new URL('../../supabase/functions/team-invite-email/index.ts', import.meta.url), 'utf8');
+  for (const host of PROD_SUPABASE_HOSTS) assert.ok(fonte.includes(`"https://${host}"`), `Production ${host} fora da função de convite`);
 });

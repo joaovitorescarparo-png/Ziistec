@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { lerTodas } from './paginacao';
 
 const check = (r) => { if (r?.error) throw r.error; return r?.data; };
 const n = (v) => Number(v || 0);
@@ -34,11 +35,13 @@ const fromOwnerProduct = (p) => ({
 });
 
 export async function carregarProdutosEstoqueDB(companyId) {
-  const r = await supabase
+  // Valor de estoque somado na tela: leitura completa, não só a primeira página.
+  const r = await lerTodas(() => supabase
     .from('products')
     .select('id,company_id,name,brand,model,sku,barcode,description,unit,cost,price,warranty_months,active,image_path,sale_enabled,track_stock,stock_qty,low_stock_threshold')
     .eq('company_id', companyId)
-    .order('name', { ascending:true });
+    .order('name', { ascending:true })
+    .order('id', { ascending:true }));
   return (check(r) || []).map(fromOwnerProduct);
 }
 

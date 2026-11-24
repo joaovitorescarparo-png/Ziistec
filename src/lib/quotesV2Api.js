@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { lerTodas } from './paginacao';
 import { atualizarStatusOrcamentoDB } from './dataApi';
 import { carregarEquipeDB, duplicarOrcamentoDB } from './dataApiExtras';
 import { hojeISO, addDiasISO as addDays } from './dates';
@@ -64,10 +65,11 @@ const mapQuote=(x,clientMap,woMap)=>{
 };
 
 export async function carregarOrcamentosV2DB(companyId){
+  // Indicadores da gestão de orçamentos: leitura completa e sem orçamentos excluídos.
   const [quotesRes,clientsRes,workOrdersRes]=await Promise.all([
-    supabase.from('quotes').select('id,company_id,number,client_id,status,issue_date,valid_until,discount,surcharge,payment_terms,customer_message,execution_forecast_date,show_product_images,notes,address,service_place,created_at,updated_at,client_request_id,quote_items(id,kind,service_id,product_id,name,unit,quantity,unit_price,unit_cost,notes,position)').eq('company_id',companyId).order('updated_at',{ascending:false}),
-    supabase.from('clients').select('id,name,trade_name,phone,whatsapp').eq('company_id',companyId),
-    supabase.from('work_orders').select('id,number,quote_id,status,scheduled_date,scheduled_time,assigned_to,created_at').eq('company_id',companyId).not('quote_id','is',null).order('created_at',{ascending:true}),
+    lerTodas(()=>supabase.from('quotes').select('id,company_id,number,client_id,status,issue_date,valid_until,discount,surcharge,payment_terms,customer_message,execution_forecast_date,show_product_images,notes,address,service_place,created_at,updated_at,client_request_id,quote_items(id,kind,service_id,product_id,name,unit,quantity,unit_price,unit_cost,notes,position)').eq('company_id',companyId).is('deleted_at',null).order('updated_at',{ascending:false}).order('id',{ascending:true})),
+    lerTodas(()=>supabase.from('clients').select('id,name,trade_name,phone,whatsapp').eq('company_id',companyId).order('id',{ascending:true})),
+    lerTodas(()=>supabase.from('work_orders').select('id,number,quote_id,status,scheduled_date,scheduled_time,assigned_to,created_at').eq('company_id',companyId).not('quote_id','is',null).order('created_at',{ascending:true}).order('id',{ascending:true})),
   ]);
   const first=[quotesRes,clientsRes,workOrdersRes].find(r=>r.error)?.error;if(first)throw first;
   const clientMap=new Map(check(clientsRes).map(c=>[c.id,c]));

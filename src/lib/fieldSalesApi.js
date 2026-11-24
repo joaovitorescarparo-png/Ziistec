@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { lerTodas } from './paginacao';
 import { brl } from './money';
 
 const check = (r) => { if (r?.error) throw r.error; return r?.data; };
@@ -98,9 +99,17 @@ export async function salvarConfiguracaoVendaCampoDB(companyId, x) {
 }
 
 export async function carregarVendasCampoDB(companyId) {
-  const rows = check(await supabase.from('field_sales')
+  const vendas = () => supabase.from('field_sales')
     .select('id,company_id,sold_by,product_id,quantity,unit_price,total,payment_method,notes,client_id,service_place,origin,work_order_id,work_order_item_id,financial_entry_id,created_at,products(name,brand,model),clients(name,trade_name)')
-    .eq('company_id',companyId).order('created_at',{ascending:false}).limit(150));
+    .eq('company_id',companyId);
+  // A lista mostra as 150 mais recentes, mas o "total de hoje" precisa de TODAS as vendas de hoje.
+  const inicioHoje = new Date(new Date().setHours(0,0,0,0)).toISOString();
+  const [recentes, hoje] = await Promise.all([
+    vendas().order('created_at',{ascending:false}).limit(150),
+    lerTodas(() => vendas().gte('created_at', inicioHoje).order('created_at',{ascending:false}).order('id',{ascending:true})),
+  ]);
+  const porId = new Map([...(check(hoje) || []), ...(check(recentes) || [])].map((x) => [x.id, x]));
+  const rows = [...porId.values()].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
 
   const sellerIds = [...new Set((rows || []).map((x) => x.sold_by).filter(Boolean))];
   const workOrderIds = [...new Set((rows || []).map((x) => x.work_order_id).filter(Boolean))];

@@ -200,7 +200,8 @@ test('contratos de código do fechamento técnico', () => {
   const relogio = legacy.slice(legacy.indexOf('function useAgora('), legacy.indexOf('function CartaoMeuDia('));
   assert.doesNotMatch(relogio, /mudarStatusOS|finalizarOS|atualizarOSDB|setOrdens|started_at|completed_at/);
   assert.doesNotMatch(dataApi, /started_at/, 'WO_COLUMNS não pede started_at: o app novo funciona em banco sem a 0101 (Beta Live)');
-  assert.match(runtimeApi, /\.eq\('status','in_progress'\)\.is\('deleted_at',null\)\.then\(\(r\)=>r,\(\)=>null\)/, 'leitura tolerante do started_at');
+  assert.match(runtimeApi, /\.eq\('status','in_progress'\)\.is\('deleted_at',null\)\.order\('id',\{ascending:true\}\)\)\.catch\(\(\)=>null\)/, 'leitura tolerante do started_at');
+  assert.match(runtimeApi, /iniciadas:st&&!st\.error\?st\.data:\[\]/, 'erro do started_at nunca derruba a lista');
   assert.doesNotMatch(runtimeApi, /check\(st\)/);
 
   // Painel do técnico: nada de prioridade nem valores nos cartões.

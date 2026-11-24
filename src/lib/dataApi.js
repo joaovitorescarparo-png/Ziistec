@@ -1,6 +1,7 @@
 import { supabase, mensagemErro } from './supabase';
 import { ensureRequestId, idempotentWrite } from './reliability';
 import { hojeISO, dataLocalISO } from './dates';
+import { lerTodas } from './paginacao';
 
 const n = (v) => Number(v || 0);
 const qStatusToDb = { rascunho:'draft', enviado:'sent', aprovado:'approved', recusado:'declined', vencido:'expired' };
@@ -95,15 +96,17 @@ const dadosLedgerOuCompat = (result) => {
 };
 
 async function carregarCustosPrivados(companyId, workOrderId=null) {
-  let itemQuery=supabase.from('work_order_item_costs').select('work_order_item_id,unit_cost').eq('company_id',companyId);
-  let materialQuery=supabase.from('work_order_material_costs').select('work_order_material_id,unit_cost').eq('company_id',companyId);
-  let workOrderQuery=supabase.from('work_order_private_costs').select('work_order_id,extra_cost').eq('company_id',companyId);
-  if(workOrderId){
-    itemQuery=itemQuery.eq('work_order_id',workOrderId);
-    materialQuery=materialQuery.eq('work_order_id',workOrderId);
-    workOrderQuery=workOrderQuery.eq('work_order_id',workOrderId);
-  }
-  const [itemCosts,materialCosts,workOrderCosts]=await Promise.all([itemQuery,materialQuery,workOrderQuery]);
+  // Custos privados alimentam margem e totais: leitura completa, nunca a primeira página só.
+  const montar=(table,select,key)=>()=>{
+    let q=supabase.from(table).select(select).eq('company_id',companyId);
+    if(workOrderId) q=q.eq('work_order_id',workOrderId);
+    return q.order(key,{ascending:true});
+  };
+  const [itemCosts,materialCosts,workOrderCosts]=await Promise.all([
+    lerTodas(montar('work_order_item_costs','work_order_item_id,unit_cost','work_order_item_id'),{chave:'work_order_item_id'}),
+    lerTodas(montar('work_order_material_costs','work_order_material_id,unit_cost','work_order_material_id'),{chave:'work_order_material_id'}),
+    lerTodas(montar('work_order_private_costs','work_order_id,extra_cost','work_order_id'),{chave:'work_order_id'}),
+  ]);
   return {
     itemCosts:dadosLedgerOuCompat(itemCosts),
     materialCosts:dadosLedgerOuCompat(materialCosts),
@@ -116,7 +119,7 @@ async function carregarCustosPrivados(companyId, workOrderId=null) {
 const rpcAusente=(error,nome)=>String(error?.code||'')==='PGRST202'||(String(error?.message||'').includes(nome)&&/(schema cache|does not exist|could not find)/i.test(String(error?.message||'')));
 
 async function carregarItensCampo(companyId, workOrderId=null) {
-  const r=await supabase.rpc('zt_field_work_order_items',{p_company:companyId,p_wo:workOrderId});
+  const r=await lerTodas(()=>supabase.rpc('zt_field_work_order_items',{p_company:companyId,p_wo:workOrderId}).order('id',{ascending:true}));
   if(!r.error) return r.data||[];
   if(rpcAusente(r.error,'zt_field_work_order_items')) return [];
   throw r.error;
@@ -152,15 +155,22 @@ export async function carregarOSPorOrcamentoDB(quoteId, companyId) {
 }
 
 export async function carregarDadosEmpresa(companyId) {
+  // Leitura completa (paginada): o corte silencioso em 1000 linhas da Data API deixava
+  // listas, históricos e totais financeiros calculados sobre parte dos registros.
+  const todas=(table,select,ativos=true)=>lerTodas(()=>{
+    let q=supabase.from(table).select(select).eq('company_id',companyId);
+    if(ativos) q=q.is('deleted_at',null);
+    return q.order('created_at',{ascending:false}).order('id',{ascending:true});
+  });
   const reqs = await Promise.all([
-    supabase.from('clients').select('*').eq('company_id',companyId).order('created_at',{ascending:false}),
-    supabase.from('services').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
-    supabase.from('products').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
-    supabase.from('quotes').select(QUOTE_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
-    supabase.from('work_orders').select(WO_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
-    supabase.from('financial_entries').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
-    supabase.from('purchases').select(PURCHASE_SELECT).eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
-    supabase.from('warranties').select('*').eq('company_id',companyId).is('deleted_at',null).order('created_at',{ascending:false}),
+    todas('clients','*',false),
+    todas('services','*'),
+    todas('products','*'),
+    todas('quotes',QUOTE_SELECT),
+    todas('work_orders',WO_SELECT),
+    todas('financial_entries','*'),
+    todas('purchases',PURCHASE_SELECT),
+    todas('warranties','*'),
   ]);
   const firstError=reqs.find(r=>r.error)?.error; if(firstError) throw firstError;
   const [{itemCosts,materialCosts,workOrderCosts},itensCampo]=await Promise.all([carregarCustosPrivados(companyId),carregarItensCampo(companyId)]);

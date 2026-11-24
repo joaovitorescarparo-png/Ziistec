@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { reportarErro } from './observabilidade';
 import { carregarOSPorIdDB, salvarOSDB, salvarOrcamentoDB } from './dataApi';
 import { ensureRequestId, idempotentWrite } from './reliability';
 import { hojeISO } from './dates';
@@ -77,6 +78,8 @@ export async function convidarColaboradorDB(x,companyId,userId){
       }
     }else if(delivery.data) emailDelivery=delivery.data;
   }catch{}
+  // Convite gravado mas e-mail não enviado: a tela já avisa; o operador precisa saber também.
+  if(!emailDelivery?.sent) reportarErro('convite',{code:emailDelivery?.reason||'delivery_failed',message:'Convite gravado sem envio de e-mail'});
   const equipe=await carregarEquipeDB(companyId);
   return {...equipe,emailDelivery};
 }

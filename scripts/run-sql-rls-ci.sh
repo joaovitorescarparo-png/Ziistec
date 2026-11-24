@@ -170,4 +170,14 @@ fi
 printf '%s\n' "$out"
 node --test tests/blockers/f03_quote_to_wo_authority.test.mjs
 
+# Integração real: o código do app (dataApi/runtimeApi/financeV2Api) contra a Data API
+# deste Supabase descartável — corte de 1000 linhas, checklist e relato.
+echo "CI_SQL_RLS integration: tests/integration"
+if ! out="$(DB_URL="$DB_URL" node --test --test-concurrency=1 tests/integration/*.test.mjs 2>&1)"; then
+  printf '%s\n' "$out"
+  annotate_failure "App integration against local Data API failed" "$out"
+  exit 3
+fi
+printf '%s\n' "$out"
+
 echo 'CI_SQL_RLS: OK'

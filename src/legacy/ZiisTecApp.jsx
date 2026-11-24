@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { iaExternaDisponivel } from "../lib/recursosDisponiveis";
 import { baixarOrcamentoPDF, compartilharOrcamentoPDF, suportaCompartilharArquivo } from "../lib/quotePdf";
 import { baixarReciboPDF, compartilharReciboPDF, suportaCompartilharRecibo } from "../lib/reciboPdf";
 import { carregarRevisoesDB, atualizarRevisaoDB } from "../lib/followupApi";
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import GlobalSearchModal from "../components/GlobalSearchModal";
 import BarcodeScanner from "../components/BarcodeScanner";
-import { mensagemErro } from "../lib/supabase";
+import { mensagemErro, ambienteSupabase as ambienteSupabaseLegado } from "../lib/supabase";
 import {
   recarregarSeguro, salvarClienteDB, salvarServicoDB, salvarProdutoDB, salvarOrcamentoDB,
   salvarOSDB, carregarOSPorOrcamentoDB, atualizarOSDB, finalizarOSDB, resolverPrecificacaoOSDB, baixarLancamentoDB, salvarLancamentoDB, atualizarStatusOrcamentoDB,
@@ -28,6 +29,7 @@ import {
 import { atualizarColaboradorDB } from "../lib/teamApi";
 import {
   hidratarComplementosDB, persistirEdicaoOSDB, prepararFinalizacaoOSDB, lerInicioAtendimentoDB,
+  carregarComplementosOSDB, mesclarComplementosOS,
   uploadDocumentosCompraDB, uploadLogoEmpresaDB,
 } from "../lib/runtimeApi";
 import {
@@ -680,6 +682,9 @@ function CampoVoz({ valor = "", onChange, placeholder, rows = 4, destaque, dica,
     </div>
   );
 }
+
+// Em Production a IA externa está desligada no servidor: os botões que dependem dela não aparecem.
+const IA_EXTERNA_DISPONIVEL = iaExternaDisponivel(ambienteSupabaseLegado, import.meta.env || {});
 
 async function chamarIA(prompt) {
   return chamarIAReal(prompt);
@@ -3286,11 +3291,11 @@ function OrcamentoEditor(p) {
         <ArrowLeft className="w-4 h-4" /> Voltar
       </button>
       <PageHead title={d.id ? `Editar ${d.numero}` : "Novo orçamento"} sub="Cliente, itens, quantidade. O resto o ZiisTec preenche."
-        action={
+        action={IA_EXTERNA_DISPONIVEL ? (
           <Btn variant="soft" icon={Sparkles} onClick={() => setIaAberta((v) => !v)}>
             {iaAberta ? "Fechar assistente" : "Preencher com IA / voz"}
           </Btn>
-        } />
+        ) : null} />
 
       {iaAberta && (
         <Panel className="p-5 mb-6">
@@ -4252,12 +4257,30 @@ function OSDetalhe(p) {
   const osOrigem = os.osOrigemId ? ordens.find((o) => o.id === os.osOrigemId) : null;
 
   const persistTimer = useRef(null);
-  const up = (patch) => {
+  // Edições feitas dentro do intervalo de salvamento se acumulam: antes, só o último patch
+  // era gravado e uma marcação de checklist seguida de outra edição se perdia.
+  const patchPendente = useRef({});
+  // Complementos desta OS (checklist, fotos, relato, materiais) relidos por inteiro ao abrir.
+  useEffect(() => {
+    if (!real || !empresaId || !os?.id) return undefined;
+    let ativo = true;
+    carregarComplementosOSDB(os, empresaId)
+      .then((completa) => {
+        if (!ativo || !completa) return;
+        setOrdens((l) => l.map((x) => (x.id === os.id ? mesclarComplementosOS(x, completa, { preservarRelato: "relato" in patchPendente.current }) : x)));
+      })
+      .catch((e) => { if (ativo) aviso(mensagemErro(e)); });
+    return () => { ativo = false; };
+  }, [real, empresaId, os?.id]);
+  const up = (patchNovo) => {
+    patchPendente.current = { ...patchPendente.current, ...patchNovo };
+    const patch = patchPendente.current;
     const next = { ...os, ...patch };
-    setOrdens((l) => l.map((x) => (x.id === os.id ? { ...x, ...patch } : x)));
+    setOrdens((l) => l.map((x) => (x.id === os.id ? { ...x, ...patchNovo } : x)));
     if (real) {
       clearTimeout(persistTimer.current);
       persistTimer.current = setTimeout(async () => {
+        patchPendente.current = {};
         try {
           const { fotos: fotosPatch, ...patchSemFotos } = patch;
           const tarefas = [];
@@ -4755,7 +4778,7 @@ function BlocoRelato({ valor, onChange, placeholder, destaque = true, rows = 5 }
     <div>
       <CampoVoz rows={rows} destaque={destaque} valor={valor} onChange={onChange} placeholder={placeholder}
         dica="Fale, revise e corrija à vontade antes de salvar." />
-      {valor.trim() && (
+      {IA_EXTERNA_DISPONIVEL && valor.trim() && (
         <Btn size="sm" variant="soft" className="mt-2" icon={organizando ? Loader2 : Sparkles} disabled={organizando} onClick={organizar}>
           {organizando ? "Organizando…" : "Organizar relato"}
         </Btn>
@@ -6429,8 +6452,20 @@ function Config({ empresa, setEmpresa, aviso, assinatura, empresaId, mudarAssina
 /* =============================================================== Garantias
    Consulta e acionamento. As garantias não são cadastradas aqui: elas nascem
    da OS concluída, a partir do prazo configurado em cada serviço.           */
-function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, excluirRegistro, papel, abrirV2 }) {
+function Garantias({ garantias, ordens, clientes, nomeCliente, garantiaAberta, setGarantiaAberta, abrirOS, abrirCliente, abrirAtendimentoGarantia, produtos, empresaId, real, aviso, excluirRegistro, papel, abrirV2, setOrdens }) {
   const [filtro, setFiltro] = useState("ativas");
+  // A OS de origem pode ser antiga e não ter vindo no login: relê fotos e relato dela.
+  useEffect(() => {
+    if (!real || !empresaId || !garantiaAberta || typeof setOrdens !== "function") return undefined;
+    const g = garantias.find((x) => x.id === garantiaAberta);
+    const origem = g?.osId ? ordens.find((o) => o.id === g.osId) : null;
+    if (!origem || origem.complementosCarregados) return undefined;
+    let ativo = true;
+    carregarComplementosOSDB(origem, empresaId)
+      .then((completa) => { if (ativo && completa) setOrdens((l) => l.map((x) => (x.id === origem.id ? mesclarComplementosOS(x, completa) : x))); })
+      .catch(() => {});
+    return () => { ativo = false; };
+  }, [real, empresaId, garantiaAberta]);
   const [busca, setBusca] = useState("");
   const [acionando, setAcionando] = useState(false);
   const [relatoProblema, setRelatoProblema] = useState("");

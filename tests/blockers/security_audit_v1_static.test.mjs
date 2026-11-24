@@ -155,10 +155,11 @@ test('variáveis VITE_* são públicas: o cliente só lê o par URL/chave anon, 
   // Par URL/anon do banco, rótulo do ambiente e três booleanos de interface. Nada com segredo.
   // VITE_ZT_OPERATIONS_SIMULATOR só libera uma ferramenta interna de homologação
   // na tela de Serviços: é público por natureza e não habilita nada no banco.
-  assert.deepEqual([...names].sort(), ['VITE_ENABLE_GOOGLE_AUTH', 'VITE_SUPABASE_ANON_KEY', 'VITE_SUPABASE_URL', 'VITE_VERCEL_ENV', 'VITE_ZIISTEC_BETA', 'VITE_ZT_OPERATIONS_SIMULATOR']);
+  // VITE_ENABLE_EXTERNAL_AI só decide se a tela mostra os botões de IA em Production (o servidor continua sendo a trava).
+  assert.deepEqual([...names].sort(), ['VITE_ENABLE_EXTERNAL_AI', 'VITE_ENABLE_GOOGLE_AUTH', 'VITE_SUPABASE_ANON_KEY', 'VITE_SUPABASE_URL', 'VITE_VERCEL_ENV', 'VITE_ZIISTEC_BETA', 'VITE_ZT_OPERATIONS_SIMULATOR']);
   assert.equal(/VITE_[A-Z0-9_]*(SECRET|SERVICE|PRIVATE|PASSWORD|TOKEN)/.test(read('vite.config.js') + JSON.stringify(vercel)), false);
   // os booleanos são comparados como texto fixo: nenhum entra em URL, cabeçalho ou credencial
-  for (const flag of ['VITE_ZIISTEC_BETA', 'VITE_ENABLE_GOOGLE_AUTH', 'VITE_ZT_OPERATIONS_SIMULATOR']) {
+  for (const flag of ['VITE_ZIISTEC_BETA', 'VITE_ENABLE_GOOGLE_AUTH', 'VITE_ZT_OPERATIONS_SIMULATOR', 'VITE_ENABLE_EXTERNAL_AI']) {
     for (const file of walk('src', (f) => /\.(jsx?|mjs)$/.test(f))) {
       const text = read(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
       if (!text.includes(flag)) continue;
