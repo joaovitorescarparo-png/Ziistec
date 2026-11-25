@@ -143,31 +143,46 @@ test('CSP por ambiente é fail-closed e sem curinga', () => {
     assert.deepEqual(conexoes, ["'self'"], `preview de ${branch || '(vazio)'} não alcança projeto nenhum`);
   }
   assert.equal(ambienteDoDeploy({ vercelEnv: 'preview', branch: 'main' }).ambiente, 'preview-sem-projeto');
-  // build local não injeta política: o cabeçalho da Vercel nem se aplica fora dela
-  assert.equal(politicaCspDoAmbiente({}), null);
-  assert.equal(metaCspDoAmbiente({}), '');
+  // só o servidor de desenvolvimento fica sem política; build fora da Vercel (Hostinger) é Production
+  assert.equal(politicaCspDoAmbiente({ servidorDev: true }), null);
+  assert.equal(metaCspDoAmbiente({ servidorDev: true }), '');
+  assert.equal(politicaCspDoAmbiente({}).ambiente, 'production-static');
   // nada de curinga, em nenhum ambiente
   for (const [env, branch] of [['production', 'main'], ['preview', 'claude/operations-simple-v2'],
     ['preview', 'rc1c-mobile-ux-stabilization'], ['preview', 'outra'], ['development', '']]) {
     const p = politicaDe(env, branch).politica;
     assert.equal(/\*/.test(p), false, `${env}/${branch} sem curinga`);
-    assert.equal(/unsafe-inline|unsafe-eval/.test(p), false, `${env}/${branch} sem unsafe`);
+    assert.equal(/unsafe-eval/.test(p), false, `${env}/${branch} sem unsafe-eval`);
+    // Production declara a política inteira (site estático da Hostinger): o único 'unsafe-inline'
+    // permitido é o de style-src, igual ao cabeçalho do vercel.json. Script nunca.
+    const d = diretivas(p);
+    for (const [nome, valores] of Object.entries(d)) {
+      if (nome !== 'style-src') assert.equal(valores.some((v) => /unsafe/.test(v)), false, `${env}/${branch} ${nome} sem unsafe`);
+    }
+    if (env !== 'production') assert.equal(/unsafe-inline/.test(p), false, `${env}/${branch} sem unsafe`);
     assert.equal(/\bhttp:\/\//.test(p), false, `${env}/${branch} só https e wss`);
   }
 });
 
-test('a política injetada declara só as duas diretivas que nomeiam projeto', () => {
-  // as outras ficam de fora de propósito: diretiva ausente numa política não
-  // restringe por ela, então script-src, frame-ancestors e companhia continuam
-  // governadas pelo cabeçalho do vercel.json, sem risco de afrouxar nada.
-  const d = diretivas(politicaDe('production', 'main').politica);
-  assert.deepEqual(Object.keys(d).sort(), ['connect-src', 'img-src']);
-  for (const proibida of ['script-src', 'default-src', 'style-src', 'frame-ancestors', 'object-src']) {
-    assert.equal(proibida in d, false, `${proibida} não é redefinida pela política do ambiente`);
+test('preview/development declaram só as duas diretivas que nomeiam projeto; Production, a política inteira', () => {
+  // Preview e development: as outras ficam de fora de propósito; diretiva ausente
+  // numa política não restringe por ela, então script-src, frame-ancestors e
+  // companhia continuam governadas pelo cabeçalho do vercel.json.
+  for (const [env, branch] of [['preview', 'rc1c-mobile-ux-stabilization'], ['preview', 'outra'], ['development', '']]) {
+    const d = diretivas(politicaDe(env, branch).politica);
+    assert.deepEqual(Object.keys(d).sort(), ['connect-src', 'img-src'], `${env}/${branch}`);
   }
-  // e o cabeçalho continua existindo, com as diretivas fortes
+  // Production: o mesmo build vai para a Hostinger, onde o cabeçalho não existe. A <meta> traz
+  // a política inteira, e na Vercel nada afrouxa: cada diretiva cabe na do cabeçalho.
   const cabecalho = vercel.headers.flatMap((h) => h.headers).find((h) => h.key === 'Content-Security-Policy').value;
   const dc = diretivas(cabecalho);
+  const d = diretivas(politicaDe('production', 'main').politica);
+  assert.deepEqual(Object.keys(d).sort(), Object.keys(dc).filter((k) => k !== 'frame-ancestors').sort());
+  assert.equal('frame-ancestors' in d, false, 'frame-ancestors é ignorada em <meta>: fica no cabeçalho');
+  for (const [nome, valores] of Object.entries(d)) {
+    for (const v of valores) assert.ok(dc[nome].includes(v), `${nome}: ${v} já estava no cabeçalho`);
+  }
+  // e o cabeçalho continua existindo, com as diretivas fortes
   assert.deepEqual(dc['script-src'], ["'self'"]);
   assert.deepEqual(dc['object-src'], ["'none'"]);
   assert.deepEqual(dc['frame-ancestors'], ["'none'"]);

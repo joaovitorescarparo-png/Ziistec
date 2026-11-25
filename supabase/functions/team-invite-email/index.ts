@@ -2,12 +2,14 @@ import { createClient } from "npm:@supabase/supabase-js@2.112.3";
 
 const STAGING_APP = "https://ziistec-git-hardening-v2-staging-js-connect.vercel.app";
 const LOCAL_APPS = new Set(["http://localhost:5173", "http://127.0.0.1:5173"]);
-// Production: os mesmos três domínios da main aceitos pelo app (PROD_SUPABASE_HOSTS em
+// Production: os mesmos domínios da main aceitos pelo app (PROD_SUPABASE_HOSTS em
 // src/lib/supabaseConfig.js). Sem eles a função publicada em Production recusaria todo convite.
 const PRODUCTION_APPS = [
   "https://ziistec.vercel.app",
   "https://ziistec-js-connect.vercel.app",
   "https://ziistec-git-main-js-connect.vercel.app",
+  "https://ziistec.com",
+  "https://www.ziistec.com",
 ];
 const ALLOWED_ORIGINS = new Set([
   ...PRODUCTION_APPS,

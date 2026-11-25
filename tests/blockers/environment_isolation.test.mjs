@@ -261,10 +261,14 @@ test('Development segue o contrato atual, e o build local não injeta política'
   mustFailClosed(server({ vercelEnv: 'development', url: PROD_SUPABASE_URL, key: PROD_PUBLISHABLE_KEY }), 'development com par de Production');
   assert.equal(ambienteDoDeploy({ vercelEnv: 'development', branch: '' }).ambiente, 'development');
   assert.deepEqual(conexoesDe('development', ''), ["'self'", STAGING_SUPABASE_URL, wss(STAGING_SUPABASE_URL)]);
-  // build fora da Vercel: sem VERCEL_ENV não há política a injetar
-  assert.equal(politicaCspDoAmbiente({}), null);
-  assert.equal(metaCspDoAmbiente({}), '');
-  assert.equal(ambienteDoDeploy({}).ambiente, 'local');
+  // servidor de desenvolvimento do Vite: sem VERCEL_ENV não há política a injetar
+  assert.equal(politicaCspDoAmbiente({ servidorDev: true }), null);
+  assert.equal(metaCspDoAmbiente({ servidorDev: true }), '');
+  assert.equal(ambienteDoDeploy({ servidorDev: true }).ambiente, 'local');
+  // build fora da Vercel (Hostinger) é o site publicado: fail-closed para Production e só Production
+  assert.equal(ambienteDoDeploy({}).ambiente, 'production-static');
+  assert.deepEqual(diretivas(politicaCspDoAmbiente({}).politica)['connect-src'], ["'self'", PROD_SUPABASE_URL, wss(PROD_SUPABASE_URL)]);
+  assert.equal(politicaCspDoAmbiente({}).politica.includes(BETA_REF), false);
 });
 
 // ─────────────────────────── 6. comparação por igualdade, sem curinga

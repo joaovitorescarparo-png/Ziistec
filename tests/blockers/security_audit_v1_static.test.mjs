@@ -219,7 +219,7 @@ test('scanDist percorre js/css/html/map do bundle, falha em pasta ausente e apon
 
 test('o build roda a varredura do bundle em postbuild e o verify:v2 inclui os testes de segurança', () => {
   const pkg = JSON.parse(read('package.json'));
-  assert.equal(pkg.scripts.postbuild, 'node scripts/verify-dist-secrets.mjs');
+  assert.equal(pkg.scripts.postbuild, 'node scripts/verify-dist-secrets.mjs && node scripts/verify-dist-csp.mjs');
   for (const file of ['security_audit_v1_api.test.mjs', 'security_audit_v1_static.test.mjs']) assert.ok(pkg.scripts['verify:v2'].includes(`tests/blockers/${file}`), file);
   assert.ok(read('scripts/run-sql-rls-ci.sh').includes('supabase/tests/v2_security_audit_v1_rollback.sql'));
 });

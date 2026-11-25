@@ -106,6 +106,8 @@
 
 - First customers fixes (2026-11-24, sem migration): a Data API corta toda resposta em 1000 linhas e devolve **HTTP 206 sem erro**. Lista que alimenta total, checklist ou histórico usa `lerTodas`/`lerTodasPorIds` (`src/lib/paginacao.js`, falha em vez de truncar). **Ausência na tela nunca é exclusão**: `persistirChecklist` só atualiza ids recebidos e insere item novo com id estável (OS + id local, `ignoreDuplicates`); relato só atualiza a linha que a tela carregou — a policy só deixa o autor editar o próprio relato, então texto de outra pessoa vira relato novo. Login hidrata complementos só das OS abertas e concluídas há 30 dias; a OS e a garantia relêem a OS inteira ao abrir. Regressão real contra a Data API local em `tests/integration/` (rodada pelo `run-sql-rls-ci.sh`). Fotos são reduzidas no aparelho (`src/lib/imageCompression.js`, 1920 px, JPEG). Em Production a tela esconde Assistente e IA (mesma origem do resolvedor). Platform admin é roteado só para o console: nunca promover a conta de quem opera uma empresa.
 
+- Production estática na Hostinger (`docs/engineering/HOSTINGER_STATIC_PRODUCTION.md`): `ziistec.com` e `www.ziistec.com` são hosts de Production por igualdade exata (mesmo Supabase). **Build sem `VERCEL_ENV` é `production-static`**, não "local": recebe a CSP de Production inteira na `<meta>` e um `.htaccess` gerado; a guarda `verify-dist-csp` (postbuild) reprova `dist/` sem a CSP do ambiente. Só o servidor de dev do Vite fica sem política. Fora da Vercel não existe `/api`: `quote-pdf` precisa de outro destino antes de clientes usarem `ziistec.com`.
+
 ## Direção de produto aprovada
 
 - Histórico técnico deve evoluir para Cliente → Local → Ativos → Histórico de serviços.

@@ -19,7 +19,15 @@ async function fetchPdf(quoteId,companyId){
       body:JSON.stringify({quoteId,companyId}),
       signal:controller.signal,
     });
-    if(!r.ok){const body=await r.json().catch(()=>({}));throw new Error(body?.error||'Não foi possível gerar o PDF.');}
+    if(!r.ok){
+      const body=await r.json().catch(()=>({}));
+      if(body?.error) throw new Error(body.error);
+      // Sem resposta da API: o site estático (Hostinger) não tem as Vercel Functions.
+      if(r.status===404||r.status===405||r.status===501) throw new Error('A geração do PDF ainda não está disponível neste endereço.');
+      throw new Error('Não foi possível gerar o PDF.');
+    }
+    // Hospedagem que devolve o index.html (200) no lugar da API não pode virar "orcamento.pdf" com HTML dentro.
+    if(!/application\/pdf/i.test(r.headers?.get?.('content-type')||'')) throw new Error('A geração do PDF ainda não está disponível neste endereço.');
     return await r.blob();
   }catch(e){
     if(e?.name==='AbortError') throw new Error('A geração do PDF demorou demais. Tente novamente.');

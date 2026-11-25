@@ -37,7 +37,7 @@ function* walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) yield* walk(full);
-    else if (/\.(js|mjs|css|html|json|map|txt|webmanifest)$/i.test(entry.name)) yield full;
+    else if (/\.(js|mjs|css|html|json|map|txt|webmanifest)$/i.test(entry.name) || entry.name === '.htaccess') yield full;
   }
 }
 

@@ -2,6 +2,10 @@ export const PROD_SUPABASE_HOSTS = Object.freeze([
   "ziistec.vercel.app",
   "ziistec-js-connect.vercel.app",
   "ziistec-git-main-js-connect.vercel.app",
+  // Domínio próprio servido como site estático fora da Vercel (Hostinger). Lá não existe
+  // VITE_VERCEL_ENV: o ambiente é inferido do host, por igualdade exata, como Production.
+  "ziistec.com",
+  "www.ziistec.com",
 ]);
 
 export const STAGING_SUPABASE_HOSTS = Object.freeze([

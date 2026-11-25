@@ -285,7 +285,8 @@ test('F08 beta.ziistec.com: domínio beta usa somente Staging; Production isolad
   assert.equal(STAGING_SUPABASE_HOSTS.filter((host) => host === BETA_HOST).length, 1, 'domínio beta exato na allowlist de staging');
   // Comparações exatas (sem busca por substring de host).
   assert.equal(PROD_SUPABASE_HOSTS.some((host) => host === BETA_HOST), false, 'domínio beta nunca na allowlist de produção');
-  assert.equal(PROD_SUPABASE_HOSTS.some((host) => host.split('.').slice(-2).join('.') === 'ziistec.com'), false, 'nenhum domínio próprio aponta para produção');
+  // Domínio próprio em Production: só a raiz e o www, por igualdade exata (site estático da Hostinger).
+  assert.deepEqual(PROD_SUPABASE_HOSTS.filter((host) => host.split('.').slice(-2).join('.') === 'ziistec.com'), ['ziistec.com', 'www.ziistec.com'], 'só ziistec.com e www.ziistec.com apontam para produção');
   assert.equal([...PROD_SUPABASE_HOSTS, ...STAGING_SUPABASE_HOSTS].some((host) => host.includes('*')), false, 'allowlists sem wildcard');
 
   for (const deploymentEnv of ['preview', '']) {
@@ -314,7 +315,7 @@ test('F08 beta.ziistec.com: domínio beta usa somente Staging; Production isolad
   mustConfigure(server({ vercelEnv: 'preview', branch: OWNER_V1_BRANCH }), STAGING_SUPABASE_URL, 'servidor da branch do domínio beta');
   mustFailClosed(server({ vercelEnv: 'preview', branch: OWNER_V1_BRANCH, url: PROD_SUPABASE_URL, key: PROD_KEY }), 'servidor beta recusa produção');
 
-  for (const host of ['ziistec.com', 'www.ziistec.com', 'app.ziistec.com', 'beta2.ziistec.com', 'beta.ziistec.com.br', 'beta.ziistec.co',
+  for (const host of ['app.ziistec.com', 'beta2.ziistec.com', 'beta.ziistec.com.br', 'beta.ziistec.co',
     `${BETA_HOST}.evil.com`, `evil.${BETA_HOST}`, 'beta-ziistec.com', `${BETA_HOST}.vercel.app`]) {
     mustFailClosed(client({ deploymentEnv: 'preview', host, envUrl: STAGING_SUPABASE_URL, envKey: STAGING_KEY }), `host desconhecido ${host} com staging`);
     mustFailClosed(client({ deploymentEnv: 'preview', host }), `host desconhecido ${host} sem env`);
@@ -326,5 +327,7 @@ test('F08 beta.ziistec.com: domínio beta usa somente Staging; Production isolad
   assert.equal(resolverRedirectAuth({ origin: `https://${BETA_HOST}`, hostname: BETA_HOST }), `https://${BETA_HOST}/`);
   assert.equal(resolverRedirectAuth({ origin: `http://${BETA_HOST}`, hostname: BETA_HOST }), '');
   assert.equal(resolverRedirectAuth({ origin: `https://${BETA_HOST}.evil.com`, hostname: `${BETA_HOST}.evil.com` }), '');
-  assert.equal(resolverRedirectAuth({ origin: 'https://www.ziistec.com', hostname: 'www.ziistec.com' }), '');
+  // www.ziistec.com é Production (Hostinger): volta para a própria raiz, só em HTTPS.
+  assert.equal(resolverRedirectAuth({ origin: 'https://www.ziistec.com', hostname: 'www.ziistec.com' }), 'https://www.ziistec.com/');
+  assert.equal(resolverRedirectAuth({ origin: 'http://www.ziistec.com', hostname: 'www.ziistec.com' }), '');
 });
