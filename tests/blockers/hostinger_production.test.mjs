@@ -311,12 +311,16 @@ test('Observabilidade: sem /api/client-error o envio para na primeira resposta 4
   }
 });
 
-test('PDF do orçamento: sem a API (404 ou index.html no lugar) a mensagem é clara e nunca baixa HTML como PDF', async () => {
-  const fonte = read('src/lib/quotePdf.js').replace("import { supabase } from './supabase';", 'const supabase = { get auth() { return globalThis.__ztSupabaseStub.auth; } };');
+test('PDF do orçamento pelo caminho /api: sem a API (404 ou index.html no lugar) a mensagem é clara e nunca baixa HTML como PDF', async () => {
+  const fonte = read('src/lib/quotePdf.js')
+    .replace("import { supabase } from './supabase';", 'const supabase = { get auth() { return globalThis.__ztSupabaseStub.auth; } };')
+    .replace("from './supabaseConfig.js'", `from '${new URL('../../src/lib/supabaseConfig.js', import.meta.url).href}'`);
   const mod = await import(`data:text/javascript;base64,${Buffer.from(fonte).toString('base64')}`);
-  const antes = { fetch: globalThis.fetch, document: globalThis.document };
+  const antes = { fetch: globalThis.fetch, document: globalThis.document, window: globalThis.window };
   const baixados = [];
   try {
+    // Host da Vercel: o caminho continua /api/quote-pdf (na Hostinger o PDF vai pela Edge Function).
+    globalThis.window = { location: { hostname: 'ziistec.vercel.app' } };
     globalThis.__ztSupabaseStub = { auth: { getSession: async () => ({ data: { session: { access_token: 't' } }, error: null }) } };
     globalThis.document = { createElement: () => ({ click() { baixados.push(this.download); }, remove() {} }), body: { appendChild() {} } };
     const resposta = ({ ok, status, tipo = '', json }) => ({
@@ -341,6 +345,7 @@ test('PDF do orçamento: sem a API (404 ou index.html no lugar) a mensagem é cl
   } finally {
     globalThis.fetch = antes.fetch;
     globalThis.document = antes.document;
+    globalThis.window = antes.window;
     delete globalThis.__ztSupabaseStub;
   }
 });

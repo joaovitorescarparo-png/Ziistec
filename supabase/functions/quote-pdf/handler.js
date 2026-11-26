@@ -1,0 +1,556 @@
+/*
+  PDF do orçamento fora da Vercel — o mesmo documento de `api/quote-pdf.js`.
+
+  Por que existe. O site estático da Hostinger (`ziistec.com`) não tem as Vercel
+  Functions. Esta é a mesma rota, portada para rodar como Supabase Edge Function
+  (`quote-pdf`), no mesmo projeto de Production. O código é JavaScript puro, sem
+  API do Deno nem do Node: o `pdf-lib`, o endereço do Supabase e o `fetch` chegam
+  por injeção. Assim o mesmo arquivo roda no Deno (index.ts) e nos testes em Node,
+  e o teste compara byte a byte o PDF daqui com o da Vercel.
+
+  Regras (idênticas às da Vercel; nada novo foi inventado):
+  - sessão obrigatória: Bearer do usuário, conferido no Auth (`/auth/v1/user`),
+    além do `verify_jwt` do gateway; sessão inválida → 401 (a Vercel devolvia 403);
+  - toda leitura usa o token do PRÓPRIO usuário: a RLS do banco decide o que ele
+    vê. Nenhuma service role: a função não tem segredo nenhum;
+  - só o proprietário gera: `zt_is_owner(empresa)` no banco; técnico recebe 403;
+  - `companyId` do pedido nunca é confiado: o banco confirma que o usuário é
+    proprietário dessa empresa, e o orçamento só é lido se for DESSA empresa
+    (outra empresa → 404, sem revelar nada);
+  - cota/rate limit no banco (`zt_consume_quote_pdf_quota`: assinatura ativa,
+    30 por minuto e 300 por dia). É a única escrita: um evento de uso, como na Vercel;
+  - itens sem custo (`unit_cost` nunca é lido): o documento do cliente não leva
+    custo nem margem;
+  - erro sempre em JSON com frase fixa; detalhe técnico só no log, cortado;
+  - CORS só para as origens exatas de Production, nunca `*`.
+
+  Os trechos de texto e desenho abaixo são cópia literal de `api/quote-pdf.js`
+  (o teste confere). Alterou lá, altere aqui.
+*/
+import { quotaUserMessage } from './apiErrors.js';
+import { shouldBreakPdfBlock, canKeepClosingTogether } from './quotePdfLayout.js';
+import { LOGO_BOX, desenharLogoNaCaixa } from './pdfLogoBox.js';
+
+/* Production, por igualdade exata: os hosts da Vercel e os da Hostinger
+   (PROD_SUPABASE_HOSTS em src/lib/supabaseConfig.js; o teste compara). */
+export const ORIGENS_PERMITIDAS = Object.freeze([
+  'https://ziistec.vercel.app',
+  'https://ziistec-js-connect.vercel.app',
+  'https://ziistec-git-main-js-connect.vercel.app',
+  'https://ziistec.com',
+  'https://www.ziistec.com',
+]);
+const ORIGENS = new Set(ORIGENS_PERMITIDAS);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_BODY_BYTES = 8 * 1024;
+
+const clean = (v = '') => String(v ?? '')
+  .replace(/[\u2018\u2019]/g, "'")
+  .replace(/[\u201C\u201D]/g, '"')
+  .replace(/[\u2022]/g, '-')
+  .replace(/[\u2013\u2014]/g, '-')
+  .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '?');
+const money = (n) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const dateBR = (s) => s ? String(s).split('-').reverse().join('/') : '-';
+const safeFile = (s) => clean(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-').slice(0, 80) || 'orcamento';
+
+async function sbFetch(path, auth, init = {}) {
+  const headers = { apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: auth, ...(init.headers || {}) };
+  const r = await fetch(`${SUPABASE_URL}${path}`, { ...init, headers, signal: init.signal || AbortSignal.timeout(8000) });
+  if (!r.ok) {
+    const detail = await r.text().catch(() => '');
+    const e = new Error(detail || `Supabase ${r.status}`);
+    e.status = r.status;
+    throw e;
+  }
+  return r;
+}
+const sbJson = async (path, auth) => (await sbFetch(path, auth)).json();
+
+function wrapText(text, font, size, maxWidth) {
+  const out = [];
+  for (const paragraph of clean(text).split(/\r?\n/)) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (!words.length) { out.push(''); continue; }
+    let line = '';
+    for (const word of words) {
+      const test = line ? `${line} ${word}` : word;
+      if (font.widthOfTextAtSize(test, size) <= maxWidth) line = test;
+      else { if (line) out.push(line); line = word; }
+    }
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+function fitText(text, font, size, maxWidth) {
+  const original = clean(text);
+  if (font.widthOfTextAtSize(original, size) <= maxWidth) return original;
+  let value = original;
+  while (value.length > 3 && font.widthOfTextAtSize(`${value}...`, size) > maxWidth) value = value.slice(0, -1);
+  return `${value.trim()}...`;
+}
+
+
+const limparLog = (valor) => String(valor ?? '').replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [removido]').replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[jwt removido]').slice(0, 200);
+
+export function criarHandlerPdfOrcamento({
+  pdfLib,
+  supabaseUrl = '',
+  apiKey = '',
+  fetchImpl = (...args) => fetch(...args),
+  registrarErro = (mensagem) => console.error('quote-pdf', mensagem),
+} = {}) {
+  const { PDFDocument, StandardFonts, rgb } = pdfLib || {};
+  const SUPABASE_URL = String(supabaseUrl || '').trim().replace(/\/+$/, '');
+  const SUPABASE_PUBLISHABLE_KEY = String(apiKey || '').trim();
+  const configurado = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && PDFDocument);
+
+  const cabecalhos = (origin) => ({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'X-Content-Type-Options': 'nosniff',
+    'Vary': 'Origin',
+    ...(ORIGENS.has(origin) ? { 'Access-Control-Allow-Origin': origin } : {}),
+  });
+  const json = (status, body, origin = '') => new Response(JSON.stringify(body), {
+    status,
+    headers: { ...cabecalhos(origin), 'Content-Type': 'application/json; charset=utf-8' },
+  });
+
+  async function sbFetch(path, auth, init = {}) {
+    const headers = { apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: auth, ...(init.headers || {}) };
+    const r = await fetchImpl(`${SUPABASE_URL}${path}`, { ...init, headers, signal: init.signal || AbortSignal.timeout(8000) });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      const e = new Error(detail || `Supabase ${r.status}`);
+      e.status = r.status;
+      throw e;
+    }
+    return r;
+  }
+  const sbJson = async (path, auth) => (await sbFetch(path, auth)).json();
+
+  async function carregarImagemProduto(path,auth,pdf){
+    if(!path)return {image:null,note:''};
+    const encoded=String(path).split('/').map(encodeURIComponent).join('/');
+    for(const bucket of ['zt-product-images','zt-branding']){
+      try{
+        const r=await sbFetch(`/storage/v1/object/authenticated/${bucket}/${encoded}`,auth);
+        const bytes=new Uint8Array(await r.arrayBuffer());
+        if(bytes.byteLength>2*1024*1024)continue;
+        const ct=String(r.headers.get('content-type')||'').toLowerCase();
+        if(ct.includes('png')) return {image:await pdf.embedPng(bytes),note:''};
+        if(ct.includes('jpeg')||ct.includes('jpg')) return {image:await pdf.embedJpg(bytes),note:''};
+        if(ct.includes('webp')) return {image:null,note:'Imagem do produto em WEBP não pode ser incorporada diretamente; use JPG ou PNG para exibi-la no PDF.'};
+      }catch{}
+    }
+    return {image:null,note:''};
+  }
+
+  async function carregarLogo(company, auth, pdf) {
+    if (!company?.logo_path) return null;
+    try {
+      const encoded = String(company.logo_path).split('/').map(encodeURIComponent).join('/');
+      const r = await sbFetch(`/storage/v1/object/authenticated/zt-branding/${encoded}`, auth);
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      if (bytes.byteLength > 3 * 1024 * 1024) return null;
+      const ct = String(r.headers.get('content-type') || '').toLowerCase();
+      if (ct.includes('png')) return await pdf.embedPng(bytes);
+      if (ct.includes('jpeg') || ct.includes('jpg')) return await pdf.embedJpg(bytes);
+    } catch {}
+    return null;
+  }
+
+  return async function handler(req) {
+    const origin = req.headers.get('origin') || '';
+    if (req.method === 'OPTIONS') {
+      if (!ORIGENS.has(origin)) return json(403, { error: 'Origem não permitida.' });
+      return new Response(null, {
+        status: 204,
+        headers: {
+          ...cabecalhos(origin),
+          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Max-Age': '600',
+        },
+      });
+    }
+    // Navegador sempre manda Origin em POST entre origens: origem fora da lista é recusada.
+    if (origin && !ORIGENS.has(origin)) return json(403, { error: 'Origem não permitida.' });
+    if (req.method !== 'POST') return json(405, { error: 'Método não permitido.' }, origin);
+    if (!String(req.headers.get('content-type') || '').toLowerCase().includes('application/json')) return json(415, { error: 'Conteúdo inválido.' }, origin);
+    const declaredLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) return json(413, { error: 'Solicitação grande demais.' }, origin);
+    let texto = '';
+    try { texto = await req.text(); } catch { return json(400, { error: 'Solicitação inválida.' }, origin); }
+    if (new TextEncoder().encode(texto).byteLength > MAX_BODY_BYTES) return json(413, { error: 'Solicitação grande demais.' }, origin);
+    let body = null;
+    try { body = JSON.parse(texto); } catch { body = null; }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return json(400, { error: 'Solicitação inválida.' }, origin);
+    const auth = req.headers.get('authorization') || '';
+    if (!auth.startsWith('Bearer ')) return json(401, { error: 'Sessão necessária.' }, origin);
+    if (!configurado) return json(503, { error: 'Serviço de PDF não configurado.' }, origin);
+    if (typeof body.quoteId !== 'string' || typeof body.companyId !== 'string') return json(400, { error: 'Orçamento ou empresa inválidos.' }, origin);
+    const quoteId = body.quoteId.trim();
+    const companyId = body.companyId.trim();
+    if (!UUID_RE.test(quoteId) || !UUID_RE.test(companyId)) return json(400, { error: 'Orçamento ou empresa inválidos.' }, origin);
+
+    try {
+      // Sessão conferida no Auth. Token inválido, expirado ou de sessão encerrada → 401 (o gateway com
+      // verify_jwt também devolve 401). Única diferença deliberada da rota da Vercel, que aqui devolvia 403.
+      const sessaoValida = await sbFetch('/auth/v1/user', auth).then(() => true, (e) => {
+        if (e?.status === 401 || e?.status === 403) return false;
+        throw e;
+      });
+      if (!sessaoValida) return json(401, { error: 'Sessão inválida ou expirada.' }, origin);
+      const ownerResp = await sbFetch('/rest/v1/rpc/zt_is_owner', auth, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target: companyId }),
+      });
+      if (await ownerResp.json() !== true) return json(403, { error: 'Somente o proprietário pode gerar este PDF.' }, origin);
+
+      const quota = await fetchImpl(`${SUPABASE_URL}/rest/v1/rpc/zt_consume_quote_pdf_quota`, {
+        method: 'POST',
+        headers: { Authorization: auth, apikey: SUPABASE_PUBLISHABLE_KEY, 'content-type': 'application/json' },
+        body: JSON.stringify({ p_company: companyId }),
+        signal: AbortSignal.timeout(8000),
+      }).catch(() => null);
+      if (!quota?.ok) {
+        const detail = quota ? await quota.json().catch(() => ({})) : {};
+        const msg = quotaUserMessage(detail, 'Limite de geração de PDF atingido.');
+        const status = quota?.status === 401 ? 401 : quota?.status === 403 ? 403 : quota ? 429 : 502;
+        return json(status, { error: msg }, origin);
+      }
+
+      const [companies, quotes, items] = await Promise.all([
+        sbJson(`/rest/v1/companies?id=eq.${companyId}&select=id,name,trade_name,tax_id,phone,whatsapp,email,address,logo_path,owner_name`, auth),
+        sbJson(`/rest/v1/quotes?id=eq.${quoteId}&company_id=eq.${companyId}&deleted_at=is.null&select=*`, auth),
+        // Sem unit_cost: o documento comercial do cliente nunca recebe custo ou margem.
+        sbJson(`/rest/v1/quote_items?quote_id=eq.${quoteId}&company_id=eq.${companyId}&select=id,kind,service_id,product_id,name,unit,quantity,unit_price,notes,position&order=position.asc`, auth),
+      ]);
+      const company = companies?.[0];
+      const quote = quotes?.[0];
+      if (!company || !quote) return json(404, { error: 'Orçamento não encontrado.' }, origin);
+      const clients = quote.client_id
+        ? await sbJson(`/rest/v1/clients?id=eq.${quote.client_id}&company_id=eq.${companyId}&select=id,name,trade_name,tax_id,contact_name,phone,whatsapp,address`, auth)
+        : [];
+      const client = clients?.[0] || {};
+      const productIds=[...new Set((items||[]).map(i=>i.product_id).filter(Boolean))];
+      const serviceIds=[...new Set((items||[]).map(i=>i.service_id).filter(Boolean))];
+      const productRows=productIds.length ? await sbJson(`/rest/v1/products?id=in.(${productIds.join(',')})&company_id=eq.${companyId}&select=id,image_path,warranty_months`,auth) : [];
+      const serviceRows=serviceIds.length ? await sbJson(`/rest/v1/services?id=in.(${serviceIds.join(',')})&company_id=eq.${companyId}&select=id,warranty_days`,auth) : [];
+      const productById=new Map((productRows||[]).map(p=>[p.id,p]));
+      const serviceById=new Map((serviceRows||[]).map(s=>[s.id,s]));
+      const warrantyLines=(items||[]).flatMap(item=>{
+        const product=item.product_id?productById.get(item.product_id):null;
+        const service=item.service_id?serviceById.get(item.service_id):null;
+        if(product&&Number(product.warranty_months||0)>0)return [`${item.name}: ${Number(product.warranty_months)} mes(es) de garantia de produto`];
+        if(service&&Number(service.warranty_days||0)>0)return [`${item.name}: ${Number(service.warranty_days)} dia(s) de garantia de serviço`];
+        return [];
+      });
+      const nomeCliente = client.trade_name || client.name || 'Cliente não informado';
+      const companyName = company.trade_name || company.name || 'Empresa';
+
+      const pdf = await PDFDocument.create();
+      pdf.setTitle(`Orçamento ${quote.number} - ${nomeCliente}`);
+      pdf.setAuthor(companyName);
+      pdf.setSubject('Proposta comercial');
+      pdf.setCreator('ZiisTec');
+      const normal = await pdf.embedFont(StandardFonts.Helvetica);
+      const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+      const logo = await carregarLogo(company, auth, pdf);
+
+      const A4 = [595.28, 841.89];
+      const margin = 38;
+      const contentW = A4[0] - margin * 2;
+      const FOOTER_H = 34;
+      const SAFE_BOTTOM = 72;
+      const navy = rgb(0.035, 0.075, 0.13);
+      const teal = rgb(0.04, 0.52, 0.46);
+      const ink = rgb(0.10, 0.13, 0.17);
+      const muted = rgb(0.38, 0.42, 0.47);
+      const line = rgb(0.84, 0.86, 0.88);
+      const soft = rgb(0.965, 0.972, 0.976);
+      const white = rgb(1, 1, 1);
+
+      let page;
+      let y;
+      const pg = () => page;
+      const txt = (t, x, yy, size = 9, font = normal, color = ink) => pg().drawText(clean(t), { x, y: yy, size, font, color });
+      const txtRight = (t, right, yy, size = 9, font = normal, color = ink) => {
+        const value = clean(t);
+        const width = font.widthOfTextAtSize(value, size);
+        pg().drawText(value, { x: Math.max(margin, right - width), y: yy, size, font, color });
+      };
+      const drawLogoFit = (targetPage, img, x, yy, boxW, boxH, opacity = 1) => {
+        if (!img) return;
+        const scale = Math.min(boxW / img.width, boxH / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        targetPage.drawImage(img, { x: x + (boxW - w) / 2, y: yy + (boxH - h) / 2, width: w, height: h, opacity });
+      };
+
+      // Marca-d'água ampla e suave por trás do conteúdo.
+      // Depois que a logo é normalizada no frontend, o JPG/PNG antigo vira uma PNG recortada e transparente.
+      const drawPageWatermark = () => {
+        if (!logo) return;
+        const wmW = 390;
+        const wmH = 280;
+        const wmX = (A4[0] - wmW) / 2 + 42;
+        const wmY = 128;
+        drawLogoFit(page, logo, wmX, wmY, wmW, wmH, 0.05);
+      };
+
+      const newPage = (continuacao = false) => {
+        page = pdf.addPage(A4);
+        drawPageWatermark();
+        if (continuacao) {
+          page.drawRectangle({ x: 0, y: A4[1] - 62, width: A4[0], height: 62, color: navy });
+          txt(`${companyName} · ${quote.number}`, margin, A4[1] - 38, 10, bold, white);
+          txtRight('ORÇAMENTO · CONTINUAÇÃO', A4[0] - margin, A4[1] - 38, 9, bold, rgb(0.70, 0.95, 0.90));
+          y = A4[1] - 88;
+        } else {
+          y = A4[1] - 40;
+        }
+      };
+      const ensure = (height) => {
+        if (y - height < SAFE_BOTTOM) newPage(true);
+      };
+
+      newPage(false);
+
+      // Cabeçalho premium com logo direta, sem caixa branca rígida.
+      const headerH = 126;
+      page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: headerH, color: navy });
+      page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: 4, color: teal });
+      const companyTextX = logo ? margin + LOGO_BOX.textoX : margin;
+      if (logo) desenharLogoNaCaixa(page, logo, { x: margin, yBase: A4[1] - headerH / 2 - LOGO_BOX.height / 2 });
+      const companyLines = wrapText(companyName, bold, logo ? 12.5 : 18, logo ? 170 : 290).slice(0, 2);
+      let companyY = A4[1] - 54;
+      for (const l of companyLines) { txt(l, companyTextX, companyY, logo ? 12.5 : 18, bold, white); companyY -= logo ? 15 : 20; }
+      if (company.owner_name) txt(fitText(company.owner_name, normal, 8.2, 195), companyTextX, companyY - 1, 8.2, normal, rgb(0.72, 0.78, 0.84));
+      txtRight('ORÇAMENTO', A4[0] - margin, A4[1] - 58, 24, bold, white);
+      txtRight(quote.number, A4[0] - margin, A4[1] - 78, 10.5, bold, rgb(0.40, 0.95, 0.85));
+      txtRight(`Emissão ${dateBR(quote.issue_date)}`, A4[0] - margin, A4[1] - 96, 8.5, normal, rgb(0.78, 0.82, 0.86));
+      if (quote.valid_until) txtRight(`Validade ${dateBR(quote.valid_until)}`, A4[0] - margin, A4[1] - 110, 8.5, normal, rgb(0.78, 0.82, 0.86));
+      y = A4[1] - headerH - 24;
+
+      // Bloco do cliente e local com altura realmente calculada.
+      const clientLines = wrapText(nomeCliente, bold, 13.5, 238).slice(0, 2);
+      const clientMeta = [
+        client.tax_id && `Documento: ${client.tax_id}`,
+        client.contact_name && `Contato: ${client.contact_name}`,
+        client.phone && `Tel.: ${client.phone}`,
+        client.whatsapp && `WhatsApp: ${client.whatsapp}`,
+      ].filter(Boolean);
+      const local = [quote.service_place, quote.address || client.address].filter(Boolean).join(' · ') || 'Não informado';
+      const localLines = wrapText(local, normal, 8.8, 235).slice(0, 5);
+      const leftContentH = 34 + clientLines.length * 16 + clientMeta.length * 11 + 10;
+      const rightContentH = 34 + Math.max(1, localLines.length) * 12 + 10;
+      const clientBlockH = Math.max(78, leftContentH, rightContentH);
+      page.drawRectangle({ x: margin, y: y - clientBlockH, width: contentW, height: clientBlockH, color: soft, borderColor: line, borderWidth: 0.6 });
+      txt('CLIENTE', margin + 12, y - 18, 8, bold, teal);
+      txt('LOCAL / REFERÊNCIA', margin + 292, y - 18, 8, bold, teal);
+      let clientY = y - 38;
+      for (const l of clientLines) { txt(l, margin + 12, clientY, 13.5, bold, ink); clientY -= 16; }
+      for (const m of clientMeta) { txt(m, margin + 12, clientY, 8.2, normal, muted); clientY -= 11; }
+      let localY = y - 38;
+      for (const l of localLines) { txt(l, margin + 292, localY, 8.8, normal, ink); localY -= 12; }
+      page.drawLine({ start: { x: margin + 278, y: y - 12 }, end: { x: margin + 278, y: y - clientBlockH + 12 }, thickness: 0.5, color: line });
+      y -= clientBlockH + 18;
+
+      if(quote.customer_message){
+        const proposalLines=wrapText(quote.customer_message,normal,9.2,contentW-24);
+        let remaining=[...proposalLines];
+        let continuation=false;
+        while(remaining.length){
+          const availableLines=Math.floor((y-SAFE_BOTTOM-48)/12);
+          if(availableLines<1){newPage(true);continuation=true;continue;}
+          const chunk=remaining.splice(0,Math.max(1,availableLines));
+          const proposalH=34+chunk.length*12;
+          page.drawRectangle({x:margin,y:y-proposalH,width:contentW,height:proposalH,color:soft,borderColor:line,borderWidth:0.6});
+          txt(continuation?'SOBRE ESTA PROPOSTA · CONTINUAÇÃO':'SOBRE ESTA PROPOSTA',margin+12,y-18,8.5,bold,teal);
+          let proposalY=y-38;for(const l of chunk){txt(l,margin+12,proposalY,9.2,normal,ink);proposalY-=12;}
+          y-=proposalH+14;
+          if(remaining.length){newPage(true);continuation=true;}
+        }
+      }
+      if(quote.execution_forecast_date){
+        ensure(46);
+        txt('PREVISÃO DE EXECUÇÃO',margin,y-4,8.5,bold,teal);
+        txt(dateBR(quote.execution_forecast_date),margin,y-22,10,bold,ink);
+        y-=42;
+      }
+      ensure(42);
+      txt('PRODUTOS E SERVIÇOS',margin,y,9,bold,ink);
+      y-=18;
+
+      // Tabela com grade visual consistente e números alinhados pela direita.
+      const tableRight = A4[0] - margin;
+      const col = { desc: margin + 8, qtyRight: margin + 350, unitRight: margin + 438, totalRight: tableRight - 8 };
+      const drawTableHeader = () => {
+        page.drawRectangle({ x: margin, y: y - 23, width: contentW, height: 28, color: navy });
+        txt('DESCRIÇÃO', col.desc, y - 14, 8.5, bold, white);
+        txtRight('QTD', col.qtyRight, y - 14, 8.5, bold, white);
+        txtRight('PREÇO UNI.', col.unitRight, y - 14, 8.5, bold, white);
+        txtRight('TOTAL', col.totalRight, y - 14, 8.5, bold, white);
+        y -= 38;
+      };
+      drawTableHeader();
+
+      let subtotal = 0;
+      let rowIndex = 0;
+      for (const item of items || []) {
+        const qty = Number(item.quantity || 0);
+        const unit = Number(item.unit_price || 0);
+        const total = qty * unit;
+        subtotal += total;
+        const productMeta=item.product_id?productById.get(item.product_id):null;
+        const productImageResult=quote.show_product_images&&productMeta?.image_path ? await carregarImagemProduto(productMeta.image_path,auth,pdf) : {image:null,note:''};
+        const productImage=productImageResult.image;
+        const textW=productImage?218:270;
+        const desc = wrapText(item.name || 'Item', normal, 9.2, textW);
+        const notes = [
+          ...(item.notes ? wrapText(item.notes, normal, 7.5, textW) : []),
+          ...(productImageResult.note ? wrapText(productImageResult.note, normal, 7.5, textW) : []),
+        ];
+        const rowH = Math.max(productImage?58:40, desc.length * 12 + notes.length * 9 + 15);
+        if (shouldBreakPdfBlock(y,rowH,SAFE_BOTTOM,12)) {
+          newPage(true);
+          drawTableHeader();
+        }
+        if (rowIndex % 2 === 1) page.drawRectangle({ x: margin, y: y - rowH + 8, width: contentW, height: rowH + 2, color: soft });
+        const descX=productImage?col.desc+50:col.desc;
+        if(productImage) drawLogoFit(page,productImage,col.desc,y-rowH+12,42,42,1);
+        let rowY = y;
+        for (const l of desc) { txt(l, descX, rowY, 9.2, normal, ink); rowY -= 12; }
+        for (const l of notes) { txt(l, descX, rowY, 7.5, normal, muted); rowY -= 9; }
+        const qtdTxt = (qty.toLocaleString('pt-BR') + ' ' + clean(item.unit || '')).trim();
+        txtRight(qtdTxt, col.qtyRight, y, 8.5, normal, muted);
+        txtRight(money(unit), col.unitRight, y, 8.5, normal, ink);
+        txtRight(money(total), col.totalRight, y, 8.5, bold, ink);
+        y -= rowH;
+        page.drawLine({ start: { x: margin, y: y + 7 }, end: { x: tableRight, y: y + 7 }, thickness: 0.45, color: line });
+        rowIndex += 1;
+      }
+
+      // Calcula o bloco inferior antes de desenhar: total, informações e assinaturas ficam juntos.
+      const payment = quote.payment_terms || 'A combinar com o cliente.';
+      const paymentLines = wrapText(payment, normal, 8.4, 285);
+      const noteLines = quote.notes ? wrapText(quote.notes, normal, 8.3, contentW - 24) : [];
+      const leftInfoH = 31 + Math.max(1, paymentLines.length) * 11;
+      const rightInfoH = 68;
+      const notesH = noteLines.length ? 24 + noteLines.length * 11 : 0;
+      const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 12;
+      const discount = Number(quote.discount || 0);
+      const surcharge = Number(quote.surcharge || 0);
+      // Subtotal, desconto e acréscimo: 14pt por linha e folga até a faixa do TOTAL.
+      const adjustmentsH = discount > 0 || surcharge > 0 ? 14 * (1 + (discount > 0) + (surcharge > 0)) + 13 : 0;
+      const totalBoxH = 44;
+      const totalBlockH = totalBoxH + adjustmentsH;
+      const warrantyH=warrantyLines.length?26+warrantyLines.length*11:0;
+      const signatureH = 58;
+      const closingGapH = 20;
+      const lowerBlockH = totalBlockH + warrantyH + infoCardH + closingGapH + signatureH;
+      y -= 4;
+      if (shouldBreakPdfBlock(y,lowerBlockH,SAFE_BOTTOM) && canKeepClosingTogether(lowerBlockH,A4[1]-88,SAFE_BOTTOM)) newPage(true);
+      else if (shouldBreakPdfBlock(y,totalBlockH,SAFE_BOTTOM)) newPage(true);
+
+      const grand = Math.max(0, subtotal - discount + surcharge);
+      const totalX = A4[0] - margin - 230;
+      if (discount > 0 || surcharge > 0) {
+        txt('Subtotal', totalX, y, 8.5, normal, muted); txtRight(money(subtotal), A4[0] - margin, y, 8.5, normal, ink); y -= 14;
+        if (discount > 0) { txt('Desconto', totalX, y, 8.5, normal, muted); txtRight(`- ${money(discount)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 14; }
+        if (surcharge > 0) { txt('Acréscimo', totalX, y, 8.5, normal, muted); txtRight(`+ ${money(surcharge)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 14; }
+        // A faixa do TOTAL ocupa de y-17 a y+21: começa abaixo da última linha de ajuste.
+        y -= 13;
+      }
+      page.drawRectangle({ x: totalX - 10, y: y - 17, width: A4[0] - margin - totalX + 10, height: 38, color: navy });
+      txt('TOTAL', totalX + 3, y - 2, 11, bold, white);
+      txtRight(money(grand), A4[0] - margin - 14, y - 4, 15, bold, white);
+      y -= totalBoxH;
+
+      if(warrantyLines.length){
+        ensure(30);
+        txt('GARANTIA',margin,y,8.5,bold,teal);y-=16;
+        for(const lineText of warrantyLines){
+          ensure(15);
+          for(const warrantyLine of wrapText(lineText,normal,8.2,contentW)){ensure(15);txt(warrantyLine,margin,y,8.2,normal,muted);y-=11;}
+        }
+        y-=6;
+      }
+
+      ensure(infoCardH+closingGapH+signatureH);
+      // Card inferior com altura dinâmica e sem cruzar a área de assinatura.
+      const cardTop = y;
+      const cardBottom = cardTop - infoCardH;
+      page.drawRectangle({ x: margin, y: cardBottom, width: contentW, height: infoCardH, color: soft, borderColor: line, borderWidth: 0.6 });
+      txt('CONDIÇÕES DE PAGAMENTO', margin + 12, cardTop - 18, 9, bold, ink);
+      let paymentY = cardTop - 36;
+      for (const l of paymentLines) { txt(l, margin + 12, paymentY, 8.4, normal, muted); paymentY -= 11; }
+
+      const infoX = margin + 330;
+      txt('DADOS DO ORÇAMENTO', infoX, cardTop - 18, 9, bold, ink);
+      txt('Número', infoX, cardTop - 38, 7.5, normal, muted);
+      txtRight(quote.number, A4[0] - margin - 12, cardTop - 38, 8.2, bold, ink);
+      txt('Emissão', infoX, cardTop - 52, 7.5, normal, muted);
+      txtRight(dateBR(quote.issue_date), A4[0] - margin - 12, cardTop - 52, 8.2, normal, ink);
+      txt('Validade da proposta', infoX, cardTop - 66, 7.5, normal, muted);
+      txtRight(quote.valid_until ? dateBR(quote.valid_until) : 'A combinar', A4[0] - margin - 12, cardTop - 66, 8.2, normal, ink);
+      page.drawLine({ start: { x: margin + 314, y: cardTop - 12 }, end: { x: margin + 314, y: cardTop - Math.max(leftInfoH, rightInfoH) - 4 }, thickness: 0.5, color: line });
+
+      if (noteLines.length) {
+        const dividerY = cardTop - Math.max(leftInfoH, rightInfoH) - 2;
+        page.drawLine({ start: { x: margin + 12, y: dividerY }, end: { x: A4[0] - margin - 12, y: dividerY }, thickness: 0.5, color: line });
+        txt('OBSERVAÇÕES', margin + 12, dividerY - 18, 8.5, bold, ink);
+        let noteY = dividerY - 34;
+        for (const l of noteLines) { txt(l, margin + 12, noteY, 8.3, normal, muted); noteY -= 11; }
+      }
+      y = cardBottom - closingGapH;
+
+      // Assinaturas com rótulo e nome em área própria; nunca invadem rodapé ou card.
+      if (shouldBreakPdfBlock(y,signatureH,SAFE_BOTTOM)) newPage(true);
+      const sigW = 190;
+      const sigY = y - 8;
+      page.drawLine({ start: { x: margin + 8, y: sigY }, end: { x: margin + 8 + sigW, y: sigY }, thickness: 0.8, color: ink });
+      page.drawLine({ start: { x: A4[0] - margin - sigW - 8, y: sigY }, end: { x: A4[0] - margin - 8, y: sigY }, thickness: 0.8, color: ink });
+      txt('Responsável', margin + 8, sigY - 14, 7.2, normal, muted);
+      txt('Cliente', A4[0] - margin - sigW - 8, sigY - 14, 7.2, normal, muted);
+      const ownerSigLines = wrapText(company.owner_name || companyName, bold, 8.1, sigW).slice(0, 2);
+      const clientSigLines = wrapText(nomeCliente, bold, 8.1, sigW).slice(0, 2);
+      let ownerSigY = sigY - 28;
+      for (const l of ownerSigLines) { txt(l, margin + 8, ownerSigY, 8.1, bold, ink); ownerSigY -= 10; }
+      let clientSigY = sigY - 28;
+      for (const l of clientSigLines) { txt(l, A4[0] - margin - sigW - 8, clientSigY, 8.1, bold, ink); clientSigY -= 10; }
+
+      // Rodapé é desenhado por último e mantém largura reservada para paginação.
+      const pages = pdf.getPages();
+      pages.forEach((targetPage, index) => {
+        targetPage.drawRectangle({ x: 0, y: 0, width: A4[0], height: FOOTER_H, color: navy });
+        const footerRight = `ZiisTec · ${index + 1}/${pages.length}`;
+        const footerWidth = normal.widthOfTextAtSize(footerRight, 6.8);
+        const infoMaxW = contentW - footerWidth - 24;
+        const info = fitText([company.tax_id, company.phone, company.whatsapp, company.email].filter(Boolean).join(' · '), normal, 6.8, infoMaxW);
+        targetPage.drawText(info, { x: margin, y: 13, size: 6.8, font: normal, color: rgb(0.78, 0.82, 0.86) });
+        targetPage.drawText(footerRight, { x: A4[0] - margin - footerWidth, y: 13, size: 6.8, font: normal, color: rgb(0.50, 0.58, 0.64) });
+      });
+
+
+      const bytes = await pdf.save();
+      const filename = `${safeFile(quote.number)} - ${safeFile(nomeCliente)}.pdf`;
+      return new Response(bytes, {
+        status: 200,
+        headers: {
+          ...cabecalhos(origin),
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Content-Length': String(bytes.length),
+        },
+      });
+    } catch (error) {
+      registrarErro(limparLog(error instanceof Error ? error.message : 'unknown'));
+      const status = error?.status === 401 ? 401 : error?.status === 403 ? 403 : 500;
+      return json(status, { error: status === 500 ? 'Não foi possível gerar o PDF.' : 'Sem permissão para gerar o PDF.' }, origin);
+    }
+  };
+}

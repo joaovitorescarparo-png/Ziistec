@@ -50,3 +50,6 @@ content_path = "./supabase/templates/password_changed_notification.html"
 
 [functions.team-invite-email]
 verify_jwt = true
+
+[functions.quote-pdf]
+verify_jwt = true

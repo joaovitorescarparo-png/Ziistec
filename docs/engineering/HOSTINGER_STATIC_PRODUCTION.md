@@ -28,10 +28,23 @@ O mesmo frontend da `main` roda em dois lugares, os dois apontando para o **mesm
 | Endpoint | Production hoje | Na Hostinger |
 | --- | --- | --- |
 | `client-error` | log de erro do navegador | indisponível; o envio para na 1ª resposta 404 (sem efeito na tela) |
-| `quote-pdf` | **PDF do orçamento (usado)** | indisponível: aviso "ainda não está disponível neste endereço". Destino: Supabase Edge Function |
+| `quote-pdf` | **PDF do orçamento (usado)** | **Edge Function `quote-pdf`** do Supabase de Production (abaixo) |
 | `work-order-report`, `ai`, `finance-ai`, `assistant` | desligados em Production (IA externa/Assistente) | indisponíveis; telas já escondidas |
 
-Antes de colocar clientes em `ziistec.com`, o PDF do orçamento precisa de um destino fora da Vercel (Edge Function `quote-pdf` no mesmo projeto: a CSP já permite o domínio do Supabase de Production).
+## PDF do orçamento: Vercel × Hostinger
+
+- `src/lib/quotePdf.js` escolhe pelo host exato: hosts da Vercel (Production, previews de homologação, localhost) → `/api/quote-pdf`, sem mudança; `ziistec.com`/`www.ziistec.com` → `supabase.functions.invoke('quote-pdf')` com o JWT da sessão; qualquer outro host → nenhuma chamada. Sem fallback entre os dois.
+- O arquivo só é baixado se for `application/pdf`, tiver bytes e começar com `%PDF-`. Toque duplo reaproveita o pedido em andamento.
+- `supabase/functions/quote-pdf/handler.js` é a rota da Vercel portada (mesmo código de consulta, autorização, cota e desenho; o teste compara linha a linha e o PDF byte a byte). Os helpers são cópias idênticas de `api/quotePdfLayout.js`, `src/lib/pdfLogoBox.js` e `api/_apiErrors.js`. **Alterou o PDF na Vercel, altere aqui** — o teste falha se divergir.
+- Regras: `verify_jwt = true`; sessão conferida no Auth (inválida → 401); só proprietário (`zt_is_owner`); orçamento só da empresa confirmada; cota `zt_consume_quote_pdf_quota` (30/min, 300/dia, assinatura ativa) — a única escrita é esse evento de uso, como na Vercel; sem `unit_cost`; sem service role; CORS só para as 5 origens de Production.
+
+### Publicar a função (quando autorizado)
+
+1. Nenhum segredo novo: a função usa `SUPABASE_URL` e a chave pública (`SUPABASE_ANON_KEY` ou `SUPABASE_PUBLISHABLE_KEYS`) que o Supabase já injeta.
+2. `supabase functions deploy quote-pdf --project-ref diztevlpbcfqleizswxr` a partir da `main` (lê `verify_jwt = true` do `config.toml`).
+3. Conferir: `OPTIONS` com `Origin: https://ziistec.com` → 204 com `Access-Control-Allow-Origin` exato; sem `Authorization` → 401; com origem desconhecida → 403.
+4. Teste humano em `ziistec.com`: proprietário gera PDF; técnico não vê/gera.
+- **Rollback:** a Vercel não usa a função. Para desligar o PDF na Hostinger: `supabase functions delete quote-pdf` (o cliente mostra "ainda não está disponível neste endereço") ou voltar o commit do cliente. Nada no banco muda.
 
 ## Supabase Auth (fazer na hora da virada, não antes)
 
