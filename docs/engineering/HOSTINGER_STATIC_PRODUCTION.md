@@ -40,7 +40,7 @@ O mesmo frontend da `main` roda em dois lugares, os dois apontando para o **mesm
 
 ### Publicar a função (quando autorizado)
 
-1. Nenhum segredo novo: a função usa `SUPABASE_URL` e a chave pública (`SUPABASE_ANON_KEY` ou `SUPABASE_PUBLISHABLE_KEYS`) que o Supabase já injeta.
+1. Nenhum segredo novo: a função usa `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEYS["default"]` (só no `apikey`), que o Supabase já injeta. Nada de anon legada, secret key ou service role; sem a publishable key ela responde 503.
 2. `supabase functions deploy quote-pdf --project-ref diztevlpbcfqleizswxr` a partir da `main` (lê `verify_jwt = true` do `config.toml`).
 3. Conferir: `OPTIONS` com `Origin: https://ziistec.com` → 204 com `Access-Control-Allow-Origin` exato; sem `Authorization` → 401; com origem desconhecida → 403.
 4. Teste humano em `ziistec.com`: proprietário gera PDF; técnico não vê/gera.

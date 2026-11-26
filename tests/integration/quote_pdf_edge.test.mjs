@@ -13,6 +13,9 @@ const DB_URL = process.env.DB_URL || 'postgresql://postgres:postgres@127.0.0.1:5
 const LOCAL = process.env.ZT_TEST_SUPABASE_URL || 'http://127.0.0.1:54321';
 const ANON = process.env.ZT_TEST_ANON_KEY
   || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+// A função usa a publishable key moderna (SUPABASE_PUBLISHABLE_KEYS["default"]), como em Production.
+// Esta é a chave pública padrão do Supabase local da CLI.
+const PUBLISHABLE = process.env.ZT_TEST_PUBLISHABLE_KEY || 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
 
 const A = 'd1a00000-0000-4000-8000-00000000000a';
 const B = 'd1a00000-0000-4000-8000-00000000000b';
@@ -28,7 +31,7 @@ const SESSAO = { [DONO_A]: 'd1a00000-0000-4000-8000-0000000005a1', [TEC_A]: 'd1a
 
 globalThis.__ZT_TEST_USER = DONO_A; // o stub exige um usuário; aqui só o tokenDe é usado
 const { tokenDe } = await import('./support/supabase-stub.mjs');
-const { criarHandlerPdfOrcamento } = await import('../../supabase/functions/quote-pdf/handler.js');
+const { criarHandlerPdfOrcamento, chavePublicavel } = await import('../../supabase/functions/quote-pdf/handler.js');
 
 // A rota da Vercel resolve o Supabase pelo ambiente na importação; o fetch abaixo troca o
 // endereço do Beta pelo Supabase local e a chave pública pela local.
@@ -89,7 +92,7 @@ before(() => {
 after(() => limpar());
 
 // fetch da Edge Function: igual ao do Deno, apontado para o Supabase local.
-const edge = criarHandlerPdfOrcamento({ pdfLib, supabaseUrl: LOCAL, apiKey: ANON, registrarErro: () => {} });
+const edge = criarHandlerPdfOrcamento({ pdfLib, supabaseUrl: LOCAL, apiKey: chavePublicavel(JSON.stringify({ default: PUBLISHABLE })), registrarErro: () => {} });
 const pedirEdge = async ({ usuario = DONO_A, token, quoteId = Q_A, companyId = A, origin = 'https://ziistec.com' } = {}) => {
   const jwt = token ?? tokenDe(usuario, { sessionId: SESSAO[usuario] });
   const r = await edge(new Request('http://localhost/functions/v1/quote-pdf', {

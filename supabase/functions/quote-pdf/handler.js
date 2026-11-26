@@ -95,6 +95,19 @@ function fitText(text, font, size, maxWidth) {
 
 const limparLog = (valor) => String(valor ?? '').replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [removido]').replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[jwt removido]').slice(0, 200);
 
+/* Chave de baixa permissão para o cabeçalho `apikey`: a publishable key moderna que o Supabase injeta
+   em SUPABASE_PUBLISHABLE_KEYS (JSON por nome; usamos "default"). Só aceita `sb_publishable_`:
+   anon JWT legada, secret key ou valor estranho viram '' e a função responde 503 (falha fechada).
+   O `Authorization` de cada chamada continua sendo o JWT do usuário, para a RLS valer no contexto dele. */
+export function chavePublicavel(bruto) {
+  try {
+    const valor = JSON.parse(String(bruto ?? '') || '{}')?.default;
+    return typeof valor === 'string' && /^sb_publishable_[A-Za-z0-9_-]+$/.test(valor) ? valor : '';
+  } catch {
+    return '';
+  }
+}
+
 export function criarHandlerPdfOrcamento({
   pdfLib,
   supabaseUrl = '',

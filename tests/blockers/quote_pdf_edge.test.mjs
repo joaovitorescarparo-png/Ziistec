@@ -291,6 +291,40 @@ test('A geração só lê: nenhuma escrita além do evento de cota, sempre com o
   assert.match(read('supabase/config.toml'), /\[functions\.quote-pdf\]\s*\nverify_jwt = true/);
 });
 
+test('Chave da função: só SUPABASE_PUBLISHABLE_KEYS["default"] no apikey; sem anon legada, secret ou service role', async () => {
+  const index = read(`${FN}/index.ts`);
+  assert.match(index, /apiKey: chavePublicavel\(Deno\.env\.get\("SUPABASE_PUBLISHABLE_KEYS"\)\)/);
+  const fontes = index + read(`${FN}/handler.js`);
+  for (const proibido of ['SUPABASE_ANON_KEY', 'SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_DB_URL', 'sb_secret_']) {
+    assert.equal(fontes.includes(proibido), false, `a função não usa ${proibido}`);
+  }
+  const { chavePublicavel } = await import(`../../${FN}/handler.js`);
+  const pub = 'sb_publishable_AbC123_def-456';
+  assert.equal(chavePublicavel(JSON.stringify({ default: pub })), pub);
+  assert.equal(chavePublicavel(JSON.stringify({ web: 'sb_publishable_outra', default: pub })), pub, 'sempre a "default"');
+  for (const bruto of [undefined, null, '', '{}', 'não é json', JSON.stringify({ web: pub }), JSON.stringify([pub]),
+    JSON.stringify({ default: 'sb_secret_N7UND0UgjKTVK' }), JSON.stringify({ default: 'eyJhbGciOiJIUzI1NiJ9.e30.assinatura' }),
+    JSON.stringify({ default: 42 }), JSON.stringify({ default: 'sb_publishable_com espaço' })]) {
+    assert.equal(chavePublicavel(bruto), '', `recusa ${String(bruto)}`);
+  }
+  // Sem a chave publicável: falha fechada (503) antes de qualquer consulta.
+  pedidos = [];
+  const semChave = criarHandlerPdfOrcamento({ pdfLib, supabaseUrl: 'https://projeto.supabase.co', apiKey: chavePublicavel(undefined), fetchImpl: fetchFalso });
+  const r = await semChave(pedido());
+  assert.equal(r.status, 503);
+  assert.deepEqual(pedidos, []);
+  // Com a chave: ela vai só no apikey; o Authorization é sempre o JWT do usuário.
+  cenario({ quote: base(QA, A, CLA), itens: [{ id: 'i1', kind: 'free', service_id: null, product_id: null, name: 'Item', unit: 'un', quantity: 1, unit_price: 10, unit_cost: 1, notes: null, position: 1 }] });
+  pedidos = [];
+  const comChave = criarHandlerPdfOrcamento({ pdfLib, supabaseUrl: 'https://projeto.supabase.co', apiKey: chavePublicavel(JSON.stringify({ default: pub })), fetchImpl: fetchFalso });
+  assert.equal((await comChave(pedido())).status, 200);
+  assert.ok(pedidos.length > 3);
+  for (const p of pedidos) {
+    assert.equal(p.apikey, pub);
+    assert.equal(p.auth, 'Bearer tok-donoA');
+  }
+});
+
 // ─────────────────────────── 2. autorização
 
 test('Autorização igual à da Vercel: dono A gera A; nunca B; técnico não gera; sem sessão 401', async () => {
