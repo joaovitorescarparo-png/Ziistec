@@ -4,9 +4,9 @@
 import zlib from 'node:zlib';
 import * as pdfLib from 'pdf-lib';
 
-process.env.VERCEL_ENV ||= 'development';
-process.env.SUPABASE_URL ||= 'https://xadoktssibuuebzzjrhv.supabase.co';
-process.env.SUPABASE_PUBLISHABLE_KEY ||= 'sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e';
+process.env.VERCEL_ENV = 'development';
+process.env.SUPABASE_URL = 'https://xadoktssibuuebzzjrhv.supabase.co';
+process.env.SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_AIJvagsmB3vknIW9ykFERQ_T7aCkl5e';
 const { default: handler } = await import('../../../api/quote-pdf.js');
 
 export const A4 = [595.28, 841.89];
