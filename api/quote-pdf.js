@@ -2,7 +2,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { supabaseServidor } from './_supabaseServerConfig.js';
 import { quotaUserMessage } from './_apiErrors.js';
 import { shouldBreakPdfBlock, canKeepClosingTogether } from './quotePdfLayout.js';
-import { LOGO_BOX, desenharLogoNaCaixa } from '../src/lib/pdfLogoBox.js';
+import { encaixarNaCaixa } from '../src/lib/pdfLogoBox.js';
 
 const { url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY } = supabaseServidor;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -60,6 +60,21 @@ function fitText(text, font, size, maxWidth) {
   return `${value.trim()}...`;
 }
 
+// Tipo real da imagem pelos primeiros bytes (o content-type do Storage pode mentir).
+const assinaturaImagem = (bytes) => {
+  if (bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'png';
+  if (bytes.length > 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return 'jpg';
+  if (bytes.length > 12 && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF' && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP') return 'webp';
+  return '';
+};
+// Quantidade sem rótulo genérico ("1 un", "1 serviço"): só o número; unidade de medida aparece ("2,5 m").
+const UNIDADES_SEM_ROTULO = new Set(['', 'un', 'un.', 'und', 'und.', 'unid', 'unid.', 'uni', 'unidade', 'unidades', 'serviço', 'servico', 'serviços', 'servicos', 'serv', 'serv.', 'sv']);
+const quantidadeTexto = (qty, unidade) => {
+  const numero = Number(qty || 0).toLocaleString('pt-BR');
+  const rotulo = clean(unidade || '').trim();
+  return UNIDADES_SEM_ROTULO.has(rotulo.toLowerCase()) ? numero : `${numero} ${rotulo}`;
+};
+
 async function carregarImagemProduto(path,auth,pdf){
   if(!path)return {image:null,note:''};
   const encoded=String(path).split('/').map(encodeURIComponent).join('/');
@@ -69,24 +84,28 @@ async function carregarImagemProduto(path,auth,pdf){
       const bytes=new Uint8Array(await r.arrayBuffer());
       if(bytes.byteLength>2*1024*1024)continue;
       const ct=String(r.headers.get('content-type')||'').toLowerCase();
-      if(ct.includes('png')) return {image:await pdf.embedPng(bytes),note:''};
-      if(ct.includes('jpeg')||ct.includes('jpg')) return {image:await pdf.embedJpg(bytes),note:''};
-      if(ct.includes('webp')) return {image:null,note:'Imagem do produto em WEBP não pode ser incorporada diretamente; use JPG ou PNG para exibi-la no PDF.'};
+      const tipo=assinaturaImagem(bytes);
+      if(tipo==='png') return {image:await pdf.embedPng(bytes),note:''};
+      if(tipo==='jpg') return {image:await pdf.embedJpg(bytes),note:''};
+      if(tipo==='webp'||ct.includes('webp')) return {image:null,note:'Imagem do produto em WEBP não pode ser incorporada diretamente; use JPG ou PNG para exibi-la no PDF.'};
     }catch{}
   }
   return {image:null,note:''};
 }
 
+// Logo da empresa: só PNG/JPG de verdade e até 1,5 MB. Qualquer outra coisa (WEBP, arquivo
+// corrompido, dimensão inválida, foto enorme) vira "sem logo": o cabeçalho mostra só o nome.
 async function carregarLogo(company, auth, pdf) {
   if (!company?.logo_path) return null;
   try {
     const encoded = String(company.logo_path).split('/').map(encodeURIComponent).join('/');
     const r = await sbFetch(`/storage/v1/object/authenticated/zt-branding/${encoded}`, auth);
     const bytes = new Uint8Array(await r.arrayBuffer());
-    if (bytes.byteLength > 3 * 1024 * 1024) return null;
-    const ct = String(r.headers.get('content-type') || '').toLowerCase();
-    if (ct.includes('png')) return await pdf.embedPng(bytes);
-    if (ct.includes('jpeg') || ct.includes('jpg')) return await pdf.embedJpg(bytes);
+    if (bytes.byteLength > 1.5 * 1024 * 1024) return null;
+    const tipo = assinaturaImagem(bytes);
+    const imagem = tipo === 'png' ? await pdf.embedPng(bytes) : tipo === 'jpg' ? await pdf.embedJpg(bytes) : null;
+    if (!imagem || !(imagem.width > 0) || !(imagem.height > 0)) return null;
+    return imagem;
   } catch {}
   return null;
 }
@@ -148,8 +167,10 @@ export default async function handler(req, res) {
     const warrantyLines=(items||[]).flatMap(item=>{
       const product=item.product_id?productById.get(item.product_id):null;
       const service=item.service_id?serviceById.get(item.service_id):null;
-      if(product&&Number(product.warranty_months||0)>0)return [`${item.name}: ${Number(product.warranty_months)} mes(es) de garantia de produto`];
-      if(service&&Number(service.warranty_days||0)>0)return [`${item.name}: ${Number(service.warranty_days)} dia(s) de garantia de serviço`];
+      const meses=Number(product?.warranty_months||0);
+      const dias=Number(service?.warranty_days||0);
+      if(product&&meses>0)return [{titulo:item.name||'Item',detalhe:`${meses} ${meses===1?'mês':'meses'} de garantia do produto`}];
+      if(service&&dias>0)return [{titulo:item.name||'Item',detalhe:`${dias} ${dias===1?'dia':'dias'} de garantia de serviço`}];
       return [];
     });
     const nomeCliente = client.trade_name || client.name || 'Cliente não informado';
@@ -165,56 +186,55 @@ export default async function handler(req, res) {
     const logo = await carregarLogo(company, auth, pdf);
 
     const A4 = [595.28, 841.89];
-    const margin = 38;
+    const margin = 40;
     const contentW = A4[0] - margin * 2;
-    const FOOTER_H = 34;
+    const right = A4[0] - margin;
     const SAFE_BOTTOM = 72;
-    const navy = rgb(0.035, 0.075, 0.13);
-    const teal = rgb(0.04, 0.52, 0.46);
-    const ink = rgb(0.10, 0.13, 0.17);
-    const muted = rgb(0.38, 0.42, 0.47);
-    const line = rgb(0.84, 0.86, 0.88);
-    const soft = rgb(0.965, 0.972, 0.976);
+    // Fundo branco, azul-marinho no texto e no destaque do total, turquesa só como detalhe.
+    const navy = rgb(0.059, 0.102, 0.176);
+    const ink = rgb(0.13, 0.16, 0.21);
+    const muted = rgb(0.40, 0.44, 0.50);
+    const teal = rgb(0.03, 0.51, 0.45);
+    const line = rgb(0.86, 0.88, 0.91);
+    const soft = rgb(0.962, 0.969, 0.976);
     const white = rgb(1, 1, 1);
+    // A logo aparece SÓ no cabeçalho, contida nesta caixa: proporção preservada, nunca esticada,
+    // nunca no tamanho natural e nunca como fundo/marca-d'água.
+    const LOGO_CAIXA = { width: 112, height: 52 };
+    const MINIATURA = { width: 34, height: 34 };
 
     let page;
     let y;
     const pg = () => page;
     const txt = (t, x, yy, size = 9, font = normal, color = ink) => pg().drawText(clean(t), { x, y: yy, size, font, color });
-    const txtRight = (t, right, yy, size = 9, font = normal, color = ink) => {
+    const txtRight = (t, rightX, yy, size = 9, font = normal, color = ink) => {
       const value = clean(t);
-      const width = font.widthOfTextAtSize(value, size);
-      pg().drawText(value, { x: Math.max(margin, right - width), y: yy, size, font, color });
+      pg().drawText(value, { x: Math.max(margin, rightX - font.widthOfTextAtSize(value, size)), y: yy, size, font, color });
     };
-    const drawLogoFit = (targetPage, img, x, yy, boxW, boxH, opacity = 1) => {
-      if (!img) return;
-      const scale = Math.min(boxW / img.width, boxH / img.height);
-      const w = img.width * scale;
-      const h = img.height * scale;
-      targetPage.drawImage(img, { x: x + (boxW - w) / 2, y: yy + (boxH - h) / 2, width: w, height: h, opacity });
+    const txtCenter = (t, centerX, yy, size = 9, font = normal, color = ink) => {
+      const value = clean(t);
+      pg().drawText(value, { x: centerX - font.widthOfTextAtSize(value, size) / 2, y: yy, size, font, color });
     };
-
-    // Marca-d'água ampla e suave por trás do conteúdo.
-    // Depois que a logo é normalizada no frontend, o JPG/PNG antigo vira uma PNG recortada e transparente.
-    const drawPageWatermark = () => {
-      if (!logo) return;
-      const wmW = 390;
-      const wmH = 280;
-      const wmX = (A4[0] - wmW) / 2 + 42;
-      const wmY = 128;
-      drawLogoFit(page, logo, wmX, wmY, wmW, wmH, 0.05);
+    const rotulo = (t, x, yy) => txt(t, x, yy, 7.5, bold, teal);
+    // Desenha a imagem inteira dentro da caixa (contain). Devolve o retângulo realmente ocupado.
+    const desenharContida = (img, x, yBase, caixa, centralizarX = true) => {
+      const encaixe = encaixarNaCaixa(img?.width, img?.height, caixa);
+      if (!encaixe) return null;
+      const area = { x: x + (centralizarX ? encaixe.offsetX : 0), y: yBase + encaixe.offsetY, width: encaixe.width, height: encaixe.height };
+      pg().drawImage(img, area);
+      return area;
     };
 
     const newPage = (continuacao = false) => {
       page = pdf.addPage(A4);
-      drawPageWatermark();
       if (continuacao) {
-        page.drawRectangle({ x: 0, y: A4[1] - 62, width: A4[0], height: 62, color: navy });
-        txt(`${companyName} · ${quote.number}`, margin, A4[1] - 38, 10, bold, white);
-        txtRight('ORÇAMENTO · CONTINUAÇÃO', A4[0] - margin, A4[1] - 38, 9, bold, rgb(0.70, 0.95, 0.90));
-        y = A4[1] - 88;
+        // Páginas seguintes: cabeçalho simplificado, sem logo.
+        txt(fitText(companyName, bold, 9.5, contentW - 220), margin, A4[1] - 50, 9.5, bold, navy);
+        txtRight(`ORÇAMENTO ${quote.number} · CONTINUAÇÃO`, right, A4[1] - 50, 8, bold, muted);
+        page.drawLine({ start: { x: margin, y: A4[1] - 58 }, end: { x: right, y: A4[1] - 58 }, thickness: 0.6, color: line });
+        y = A4[1] - 74;
       } else {
-        y = A4[1] - 40;
+        y = A4[1] - margin;
       }
     };
     const ensure = (height) => {
@@ -223,87 +243,107 @@ export default async function handler(req, res) {
 
     newPage(false);
 
-    // Cabeçalho premium com logo direta, sem caixa branca rígida.
-    const headerH = 126;
-    page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: headerH, color: navy });
-    page.drawRectangle({ x: 0, y: A4[1] - headerH, width: A4[0], height: 4, color: teal });
-    const companyTextX = logo ? margin + LOGO_BOX.textoX : margin;
-    if (logo) desenharLogoNaCaixa(page, logo, { x: margin, yBase: A4[1] - headerH / 2 - LOGO_BOX.height / 2 });
-    const companyLines = wrapText(companyName, bold, logo ? 12.5 : 18, logo ? 170 : 290).slice(0, 2);
-    let companyY = A4[1] - 54;
-    for (const l of companyLines) { txt(l, companyTextX, companyY, logo ? 12.5 : 18, bold, white); companyY -= logo ? 15 : 20; }
-    if (company.owner_name) txt(fitText(company.owner_name, normal, 8.2, 195), companyTextX, companyY - 1, 8.2, normal, rgb(0.72, 0.78, 0.84));
-    txtRight('ORÇAMENTO', A4[0] - margin, A4[1] - 58, 24, bold, white);
-    txtRight(quote.number, A4[0] - margin, A4[1] - 78, 10.5, bold, rgb(0.40, 0.95, 0.85));
-    txtRight(`Emissão ${dateBR(quote.issue_date)}`, A4[0] - margin, A4[1] - 96, 8.5, normal, rgb(0.78, 0.82, 0.86));
-    if (quote.valid_until) txtRight(`Validade ${dateBR(quote.valid_until)}`, A4[0] - margin, A4[1] - 110, 8.5, normal, rgb(0.78, 0.82, 0.86));
-    y = A4[1] - headerH - 24;
+    // Cabeçalho: logo + empresa à esquerda; ORÇAMENTO, número e datas à direita. Compacto e branco.
+    const topo = A4[1] - margin;
+    const blocoDireita = [
+      ['ORÇAMENTO', 17, bold, navy, 17],
+      [`Nº ${quote.number}`, 10, bold, teal, 13],
+      [`Emissão ${dateBR(quote.issue_date)}`, 8.5, normal, muted, 12],
+      ...(quote.valid_until ? [[`Validade ${dateBR(quote.valid_until)}`, 8.5, normal, muted, 12]] : []),
+    ];
+    const larguraDireita = Math.max(...blocoDireita.map(([t, size, font]) => font.widthOfTextAtSize(clean(t), size)));
+    let yDireita = topo - 14;
+    for (const [t, size, font, color, passo] of blocoDireita) { txtRight(t, right, yDireita, size, font, color); yDireita -= passo; }
+    let xEmpresa = margin;
+    const areaLogo = logo ? desenharContida(logo, margin, topo - LOGO_CAIXA.height, LOGO_CAIXA, false) : null;
+    if (areaLogo) xEmpresa = areaLogo.x + areaLogo.width + 14;
+    const larguraEmpresa = Math.max(90, right - larguraDireita - 28 - xEmpresa);
+    const nomeEmpresa = wrapText(companyName, bold, 13, larguraEmpresa);
+    const linhasEmpresa = nomeEmpresa.length > 2 ? [nomeEmpresa[0], fitText(nomeEmpresa.slice(1).join(' '), bold, 13, larguraEmpresa)] : nomeEmpresa;
+    // Contato quebra entre os itens (documento · telefone · WhatsApp · e-mail), nunca no meio de um.
+    const linhasContato = [];
+    for (const parte of [company.tax_id, company.phone, company.whatsapp, company.email].filter(Boolean).map(clean)) {
+      const atual = linhasContato[linhasContato.length - 1];
+      if (atual && normal.widthOfTextAtSize(`${atual} · ${parte}`, 8) <= larguraEmpresa) linhasContato[linhasContato.length - 1] = `${atual} · ${parte}`;
+      else linhasContato.push(fitText(parte, normal, 8, larguraEmpresa));
+    }
+    linhasContato.splice(2);
+    const alturaTextoEmpresa = linhasEmpresa.length * 15 + linhasContato.length * 10.5;
+    let yEmpresa = topo - (areaLogo ? Math.max(0, (LOGO_CAIXA.height - alturaTextoEmpresa) / 2) : 0) - 12;
+    for (const l of linhasEmpresa) { txt(l, xEmpresa, yEmpresa, 13, bold, navy); yEmpresa -= 15; }
+    yEmpresa -= 1;
+    for (const l of linhasContato) { txt(l, xEmpresa, yEmpresa, 8, normal, muted); yEmpresa -= 10.5; }
+    const baseCabecalho = Math.min(topo - (areaLogo ? LOGO_CAIXA.height : 0), yEmpresa + 4, yDireita + 6) - 10;
+    page.drawLine({ start: { x: margin, y: baseCabecalho }, end: { x: right, y: baseCabecalho }, thickness: 0.8, color: line });
+    page.drawLine({ start: { x: margin, y: baseCabecalho }, end: { x: margin + 56, y: baseCabecalho }, thickness: 2, color: teal });
+    y = baseCabecalho - 20;
 
-    // Bloco do cliente e local com altura realmente calculada.
-    const clientLines = wrapText(nomeCliente, bold, 13.5, 238).slice(0, 2);
+    // Cliente e local: só o que foi preenchido, num bloco claro sem bordas pesadas.
+    const colunaLocal = margin + Math.round(contentW * 0.56);
+    const larguraCliente = colunaLocal - margin - 34;
+    const larguraLocal = right - colunaLocal - 14;
+    const clientLines = wrapText(nomeCliente, bold, 11, larguraCliente).slice(0, 2);
     const clientMeta = [
       client.tax_id && `Documento: ${client.tax_id}`,
       client.contact_name && `Contato: ${client.contact_name}`,
-      client.phone && `Tel.: ${client.phone}`,
+      client.phone && `Telefone: ${client.phone}`,
       client.whatsapp && `WhatsApp: ${client.whatsapp}`,
-    ].filter(Boolean);
-    const local = [quote.service_place, quote.address || client.address].filter(Boolean).join(' · ') || 'Não informado';
-    const localLines = wrapText(local, normal, 8.8, 235).slice(0, 5);
-    const leftContentH = 34 + clientLines.length * 16 + clientMeta.length * 11 + 10;
-    const rightContentH = 34 + Math.max(1, localLines.length) * 12 + 10;
-    const clientBlockH = Math.max(78, leftContentH, rightContentH);
-    page.drawRectangle({ x: margin, y: y - clientBlockH, width: contentW, height: clientBlockH, color: soft, borderColor: line, borderWidth: 0.6 });
-    txt('CLIENTE', margin + 12, y - 18, 8, bold, teal);
-    txt('LOCAL / REFERÊNCIA', margin + 292, y - 18, 8, bold, teal);
-    let clientY = y - 38;
-    for (const l of clientLines) { txt(l, margin + 12, clientY, 13.5, bold, ink); clientY -= 16; }
-    for (const m of clientMeta) { txt(m, margin + 12, clientY, 8.2, normal, muted); clientY -= 11; }
-    let localY = y - 38;
-    for (const l of localLines) { txt(l, margin + 292, localY, 8.8, normal, ink); localY -= 12; }
-    page.drawLine({ start: { x: margin + 278, y: y - 12 }, end: { x: margin + 278, y: y - clientBlockH + 12 }, thickness: 0.5, color: line });
-    y -= clientBlockH + 18;
+    ].filter(Boolean).flatMap((m) => wrapText(m, normal, 8.5, larguraCliente).slice(0, 2));
+    const localLines = [quote.service_place, quote.address || client.address].filter(Boolean)
+      .flatMap((parte) => wrapText(parte, normal, 9, larguraLocal)).slice(0, 6);
+    const alturaCliente = 20 + clientLines.length * 14 + clientMeta.length * 11.5;
+    const alturaLocal = localLines.length ? 20 + localLines.length * 12 : 0;
+    const clientBlockH = Math.max(alturaCliente, alturaLocal) + 16;
+    page.drawRectangle({ x: margin, y: y - clientBlockH, width: contentW, height: clientBlockH, color: soft });
+    rotulo('CLIENTE', margin + 14, y - 18);
+    let clientY = y - 34;
+    for (const l of clientLines) { txt(l, margin + 14, clientY, 11, bold, navy); clientY -= 14; }
+    for (const m of clientMeta) { txt(m, margin + 14, clientY, 8.5, normal, muted); clientY -= 11.5; }
+    if (localLines.length) {
+      rotulo('LOCAL / REFERÊNCIA', colunaLocal, y - 18);
+      let localY = y - 34;
+      for (const l of localLines) { txt(l, colunaLocal, localY, 9, normal, ink); localY -= 12; }
+    }
+    y -= clientBlockH + 22;
 
     if(quote.customer_message){
-      const proposalLines=wrapText(quote.customer_message,normal,9.2,contentW-24);
+      const proposalLines=wrapText(quote.customer_message,normal,9.5,contentW);
       let remaining=[...proposalLines];
       let continuation=false;
+      ensure(18 + 13 * Math.min(3, remaining.length));
       while(remaining.length){
-        const availableLines=Math.floor((y-SAFE_BOTTOM-48)/12);
-        if(availableLines<1){newPage(true);continuation=true;continue;}
+        const availableLines=Math.floor((y-SAFE_BOTTOM-18)/13);
+        if(availableLines<Math.min(2,remaining.length)){newPage(true);continue;}
         const chunk=remaining.splice(0,Math.max(1,availableLines));
-        const proposalH=34+chunk.length*12;
-        page.drawRectangle({x:margin,y:y-proposalH,width:contentW,height:proposalH,color:soft,borderColor:line,borderWidth:0.6});
-        txt(continuation?'SOBRE ESTA PROPOSTA · CONTINUAÇÃO':'SOBRE ESTA PROPOSTA',margin+12,y-18,8.5,bold,teal);
-        let proposalY=y-38;for(const l of chunk){txt(l,margin+12,proposalY,9.2,normal,ink);proposalY-=12;}
-        y-=proposalH+14;
+        rotulo(continuation?'SOBRE ESTA PROPOSTA · CONTINUAÇÃO':'SOBRE ESTA PROPOSTA',margin,y-4);
+        let proposalY=y-20;for(const l of chunk){txt(l,margin,proposalY,9.5,normal,ink);proposalY-=13;}
+        y=proposalY-9;
         if(remaining.length){newPage(true);continuation=true;}
       }
     }
     if(quote.execution_forecast_date){
-      ensure(46);
-      txt('PREVISÃO DE EXECUÇÃO',margin,y-4,8.5,bold,teal);
-      txt(dateBR(quote.execution_forecast_date),margin,y-22,10,bold,ink);
-      y-=42;
+      ensure(38);
+      rotulo('PREVISÃO DE EXECUÇÃO',margin,y-4);
+      txt(dateBR(quote.execution_forecast_date),margin,y-19,10,bold,ink);
+      y-=38;
     }
-    ensure(42);
-    txt('PRODUTOS E SERVIÇOS',margin,y,9,bold,ink);
-    y-=18;
 
-    // Tabela com grade visual consistente e números alinhados pela direita.
-    const tableRight = A4[0] - margin;
-    const col = { desc: margin + 8, qtyRight: margin + 350, unitRight: margin + 438, totalRight: tableRight - 8 };
+    // Tabela com grade visual consistente e números alinhados pela direita: a descrição quebra em
+    // várias linhas sem empurrar as colunas; quantidade centralizada; linha nunca cortada entre páginas.
+    const col = { desc: margin + 10, qtyCenter: margin + 330, unitRight: margin + 430, totalRight: right - 10 };
+    const larguraDescricao = col.qtyCenter - 40 - col.desc;
     const drawTableHeader = () => {
-      page.drawRectangle({ x: margin, y: y - 23, width: contentW, height: 28, color: navy });
-      txt('DESCRIÇÃO', col.desc, y - 14, 8.5, bold, white);
-      txtRight('QTD', col.qtyRight, y - 14, 8.5, bold, white);
-      txtRight('PREÇO UNI.', col.unitRight, y - 14, 8.5, bold, white);
-      txtRight('TOTAL', col.totalRight, y - 14, 8.5, bold, white);
-      y -= 38;
+      page.drawRectangle({ x: margin, y: y - 22, width: contentW, height: 22, color: soft });
+      page.drawLine({ start: { x: margin, y: y - 22 }, end: { x: right, y: y - 22 }, thickness: 0.8, color: navy });
+      txt('DESCRIÇÃO', col.desc, y - 14.5, 7.5, bold, navy);
+      txtCenter('QTD', col.qtyCenter, y - 14.5, 7.5, bold, navy);
+      txtRight('PREÇO UNIT.', col.unitRight, y - 14.5, 7.5, bold, navy);
+      txtRight('TOTAL', col.totalRight, y - 14.5, 7.5, bold, navy);
+      y -= 22;
     };
-    drawTableHeader();
 
     let subtotal = 0;
-    let rowIndex = 0;
+    const tableRows = [];
     for (const item of items || []) {
       const qty = Number(item.quantity || 0);
       const unit = Number(item.unit_price || 0);
@@ -312,131 +352,136 @@ export default async function handler(req, res) {
       const productMeta=item.product_id?productById.get(item.product_id):null;
       const productImageResult=quote.show_product_images&&productMeta?.image_path ? await carregarImagemProduto(productMeta.image_path,auth,pdf) : {image:null,note:''};
       const productImage=productImageResult.image;
-      const textW=productImage?218:270;
-      const desc = wrapText(item.name || 'Item', normal, 9.2, textW);
+      const textW=productImage?larguraDescricao-MINIATURA.width-10:larguraDescricao;
+      const desc = wrapText(item.name || 'Item', normal, 9.5, textW);
       const notes = [
         ...(item.notes ? wrapText(item.notes, normal, 7.5, textW) : []),
         ...(productImageResult.note ? wrapText(productImageResult.note, normal, 7.5, textW) : []),
       ];
-      const rowH = Math.max(productImage?58:40, desc.length * 12 + notes.length * 9 + 15);
+      const rowH = Math.max(productImage ? MINIATURA.height + 14 : 30, desc.length * 12 + notes.length * 10 + 16);
+      tableRows.push({ qty, unit, total, unidade: item.unit, productImage, desc, notes, rowH });
+    }
+
+    // Título, cabeçalho da tabela e a primeira linha sempre juntos: nada de título sozinho no fim da página.
+    ensure(14 + 22 + (tableRows[0]?.rowH || 30));
+    txt('PRODUTOS E SERVIÇOS',margin,y-4,9,bold,navy);
+    y-=14;
+    drawTableHeader();
+    for (const row of tableRows) {
+      const rowH = row.rowH;
       if (shouldBreakPdfBlock(y,rowH,SAFE_BOTTOM,12)) {
         newPage(true);
         drawTableHeader();
       }
-      if (rowIndex % 2 === 1) page.drawRectangle({ x: margin, y: y - rowH + 8, width: contentW, height: rowH + 2, color: soft });
-      const descX=productImage?col.desc+50:col.desc;
-      if(productImage) drawLogoFit(page,productImage,col.desc,y-rowH+12,42,42,1);
-      let rowY = y;
-      for (const l of desc) { txt(l, descX, rowY, 9.2, normal, ink); rowY -= 12; }
-      for (const l of notes) { txt(l, descX, rowY, 7.5, normal, muted); rowY -= 9; }
-      const qtdTxt = (qty.toLocaleString('pt-BR') + ' ' + clean(item.unit || '')).trim();
-      txtRight(qtdTxt, col.qtyRight, y, 8.5, normal, muted);
-      txtRight(money(unit), col.unitRight, y, 8.5, normal, ink);
-      txtRight(money(total), col.totalRight, y, 8.5, bold, ink);
+      const descX = row.productImage ? col.desc + MINIATURA.width + 10 : col.desc;
+      if (row.productImage) desenharContida(row.productImage, col.desc, y - 7 - MINIATURA.height, MINIATURA);
+      let rowY = y - 15;
+      for (const l of row.desc) { txt(l, descX, rowY, 9.5, normal, ink); rowY -= 12; }
+      for (const l of row.notes) { txt(l, descX, rowY + 1, 7.5, normal, muted); rowY -= 10; }
+      txtCenter(quantidadeTexto(row.qty, row.unidade), col.qtyCenter, y - 15, 9, normal, ink);
+      txtRight(money(row.unit), col.unitRight, y - 15, 9, normal, ink);
+      txtRight(money(row.total), col.totalRight, y - 15, 9, bold, navy);
       y -= rowH;
-      page.drawLine({ start: { x: margin, y: y + 7 }, end: { x: tableRight, y: y + 7 }, thickness: 0.45, color: line });
-      rowIndex += 1;
+      page.drawLine({ start: { x: margin, y }, end: { x: right, y }, thickness: 0.5, color: line });
     }
 
-    // Calcula o bloco inferior antes de desenhar: total, informações e assinaturas ficam juntos.
-    const payment = quote.payment_terms || 'A combinar com o cliente.';
-    const paymentLines = wrapText(payment, normal, 8.4, 285);
-    const noteLines = quote.notes ? wrapText(quote.notes, normal, 8.3, contentW - 24) : [];
-    const leftInfoH = 31 + Math.max(1, paymentLines.length) * 11;
-    const rightInfoH = 68;
-    const notesH = noteLines.length ? 24 + noteLines.length * 11 : 0;
-    const infoCardH = Math.max(leftInfoH, rightInfoH) + notesH + 12;
+    // Bloco final medido antes de desenhar: resumo, garantia, condições e aceite ficam juntos quando cabem.
     const discount = Number(quote.discount || 0);
     const surcharge = Number(quote.surcharge || 0);
-    // Subtotal, desconto e acréscimo: 14pt por linha e folga até a faixa do TOTAL.
-    const adjustmentsH = discount > 0 || surcharge > 0 ? 14 * (1 + (discount > 0) + (surcharge > 0)) + 13 : 0;
-    const totalBoxH = 44;
-    const totalBlockH = totalBoxH + adjustmentsH;
-    const warrantyH=warrantyLines.length?26+warrantyLines.length*11:0;
-    const signatureH = 58;
-    const closingGapH = 20;
-    const lowerBlockH = totalBlockH + warrantyH + infoCardH + closingGapH + signatureH;
-    y -= 4;
-    if (shouldBreakPdfBlock(y,lowerBlockH,SAFE_BOTTOM) && canKeepClosingTogether(lowerBlockH,A4[1]-88,SAFE_BOTTOM)) newPage(true);
-    else if (shouldBreakPdfBlock(y,totalBlockH,SAFE_BOTTOM)) newPage(true);
-
     const grand = Math.max(0, subtotal - discount + surcharge);
-    const totalX = A4[0] - margin - 230;
-    if (discount > 0 || surcharge > 0) {
-      txt('Subtotal', totalX, y, 8.5, normal, muted); txtRight(money(subtotal), A4[0] - margin, y, 8.5, normal, ink); y -= 14;
-      if (discount > 0) { txt('Desconto', totalX, y, 8.5, normal, muted); txtRight(`- ${money(discount)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 14; }
-      if (surcharge > 0) { txt('Acréscimo', totalX, y, 8.5, normal, muted); txtRight(`+ ${money(surcharge)}`, A4[0] - margin, y, 8.5, normal, ink); y -= 14; }
-      // A faixa do TOTAL ocupa de y-17 a y+21: começa abaixo da última linha de ajuste.
-      y -= 13;
-    }
-    page.drawRectangle({ x: totalX - 10, y: y - 17, width: A4[0] - margin - totalX + 10, height: 38, color: navy });
-    txt('TOTAL', totalX + 3, y - 2, 11, bold, white);
-    txtRight(money(grand), A4[0] - margin - 14, y - 4, 15, bold, white);
-    y -= totalBoxH;
+    const ajustes = [
+      ...(discount > 0 || surcharge > 0 ? [['Subtotal', money(subtotal)]] : []),
+      ...(discount > 0 ? [['Desconto', `- ${money(discount)}`]] : []),
+      ...(surcharge > 0 ? [['Acréscimo', `+ ${money(surcharge)}`]] : []),
+    ];
+    const resumoW = 236;
+    const resumoX = right - resumoW;
+    const TOTAL_H = 36;
+    const totalBlockH = 16 + ajustes.length * 17 + (ajustes.length ? 6 : 0) + TOTAL_H + 24;
+    const garantias = warrantyLines.map((g) => ({ titulo: wrapText(g.titulo, bold, 9, contentW), detalhe: g.detalhe }));
+    const warrantyH = garantias.length ? 20 + garantias.reduce((soma, g) => soma + g.titulo.length * 12 + 18, 0) + 8 : 0;
+    const secoesTexto = [
+      ...(quote.payment_terms ? [['CONDIÇÕES DE PAGAMENTO', wrapText(quote.payment_terms, normal, 9, contentW)]] : []),
+      ...(quote.notes ? [['OBSERVAÇÕES', wrapText(quote.notes, normal, 9, contentW)]] : []),
+    ];
+    const textosH = secoesTexto.reduce((soma, [, linhas]) => soma + 18 + linhas.length * 12 + 14, 0);
+    const responsavel = company.owner_name || companyName;
+    const sigW = 210;
+    const linhasResponsavel = wrapText(responsavel, bold, 8.5, sigW).slice(0, 2);
+    const linhasAceite = wrapText(nomeCliente, bold, 8.5, sigW).slice(0, 2);
+    const signatureH = 24 + (quote.valid_until ? 14 : 0) + 14 + 36 + 24 + Math.max(linhasResponsavel.length, linhasAceite.length) * 11;
+    // Cabe tudo: fica junto. Não cabe: o TOTAL fica logo após o último item (quando há espaço) e
+    // garantia, condições e aceite seguem juntos para a próxima página, sem meia página em branco.
+    const restanteH = warrantyH + textosH + signatureH;
 
-    if(warrantyLines.length){
-      ensure(30);
-      txt('GARANTIA',margin,y,8.5,bold,teal);y-=16;
-      for(const lineText of warrantyLines){
-        ensure(15);
-        for(const warrantyLine of wrapText(lineText,normal,8.2,contentW)){ensure(15);txt(warrantyLine,margin,y,8.2,normal,muted);y-=11;}
+    // Resumo financeiro à direita; o TOTAL é o maior destaque. Mesmo cálculo de sempre.
+    ensure(totalBlockH);
+    y -= 16;
+    for (const [rotuloAjuste, valor] of ajustes) {
+      txt(rotuloAjuste, resumoX + 14, y - 11, 9, normal, muted);
+      txtRight(valor, right - 14, y - 11, 9, normal, ink);
+      y -= 17;
+    }
+    if (ajustes.length) y -= 6;
+    page.drawRectangle({ x: resumoX, y: y - TOTAL_H, width: resumoW, height: TOTAL_H, color: navy });
+    txt('TOTAL', resumoX + 14, y - TOTAL_H / 2 - 3.5, 10, bold, white);
+    txtRight(money(grand), right - 14, y - TOTAL_H / 2 - 5, 15, bold, white);
+    y -= TOTAL_H + 24;
+    if (restanteH > 0 && shouldBreakPdfBlock(y,restanteH,SAFE_BOTTOM) && canKeepClosingTogether(restanteH,A4[1]-74,SAFE_BOTTOM)) newPage(true);
+
+    if(garantias.length){
+      ensure(20 + garantias[0].titulo.length * 12 + 18);
+      rotulo('GARANTIA',margin,y-4);
+      y-=20;
+      for(const garantia of garantias){
+        const entradaH = garantia.titulo.length * 12 + 18;
+        if (y - entradaH < SAFE_BOTTOM) { newPage(true); rotulo('GARANTIA · CONTINUAÇÃO', margin, y - 4); y -= 20; }
+        for (const l of garantia.titulo) { txt(l, margin, y - 9, 9, bold, ink); y -= 12; }
+        txt(garantia.detalhe, margin, y - 9, 8.5, normal, muted);
+        y -= 18;
       }
-      y-=6;
+      y-=8;
     }
 
-    ensure(infoCardH+closingGapH+signatureH);
-    // Card inferior com altura dinâmica e sem cruzar a área de assinatura.
-    const cardTop = y;
-    const cardBottom = cardTop - infoCardH;
-    page.drawRectangle({ x: margin, y: cardBottom, width: contentW, height: infoCardH, color: soft, borderColor: line, borderWidth: 0.6 });
-    txt('CONDIÇÕES DE PAGAMENTO', margin + 12, cardTop - 18, 9, bold, ink);
-    let paymentY = cardTop - 36;
-    for (const l of paymentLines) { txt(l, margin + 12, paymentY, 8.4, normal, muted); paymentY -= 11; }
-
-    const infoX = margin + 330;
-    txt('DADOS DO ORÇAMENTO', infoX, cardTop - 18, 9, bold, ink);
-    txt('Número', infoX, cardTop - 38, 7.5, normal, muted);
-    txtRight(quote.number, A4[0] - margin - 12, cardTop - 38, 8.2, bold, ink);
-    txt('Emissão', infoX, cardTop - 52, 7.5, normal, muted);
-    txtRight(dateBR(quote.issue_date), A4[0] - margin - 12, cardTop - 52, 8.2, normal, ink);
-    txt('Validade da proposta', infoX, cardTop - 66, 7.5, normal, muted);
-    txtRight(quote.valid_until ? dateBR(quote.valid_until) : 'A combinar', A4[0] - margin - 12, cardTop - 66, 8.2, normal, ink);
-    page.drawLine({ start: { x: margin + 314, y: cardTop - 12 }, end: { x: margin + 314, y: cardTop - Math.max(leftInfoH, rightInfoH) - 4 }, thickness: 0.5, color: line });
-
-    if (noteLines.length) {
-      const dividerY = cardTop - Math.max(leftInfoH, rightInfoH) - 2;
-      page.drawLine({ start: { x: margin + 12, y: dividerY }, end: { x: A4[0] - margin - 12, y: dividerY }, thickness: 0.5, color: line });
-      txt('OBSERVAÇÕES', margin + 12, dividerY - 18, 8.5, bold, ink);
-      let noteY = dividerY - 34;
-      for (const l of noteLines) { txt(l, margin + 12, noteY, 8.3, normal, muted); noteY -= 11; }
+    for (const [titulo, linhas] of secoesTexto) {
+      ensure(18 + 12 * Math.min(2, linhas.length));
+      rotulo(titulo, margin, y - 4);
+      y -= 18;
+      for (const l of linhas) {
+        if (y - 12 < SAFE_BOTTOM) { newPage(true); rotulo(`${titulo} · CONTINUAÇÃO`, margin, y - 4); y -= 18; }
+        txt(l, margin, y - 9, 9, normal, ink);
+        y -= 12;
+      }
+      y -= 14;
     }
-    y = cardBottom - closingGapH;
 
-    // Assinaturas com rótulo e nome em área própria; nunca invadem rodapé ou card.
-    if (shouldBreakPdfBlock(y,signatureH,SAFE_BOTTOM)) newPage(true);
-    const sigW = 190;
-    const sigY = y - 8;
-    page.drawLine({ start: { x: margin + 8, y: sigY }, end: { x: margin + 8 + sigW, y: sigY }, thickness: 0.8, color: ink });
-    page.drawLine({ start: { x: A4[0] - margin - sigW - 8, y: sigY }, end: { x: A4[0] - margin - 8, y: sigY }, thickness: 0.8, color: ink });
-    txt('Responsável', margin + 8, sigY - 14, 7.2, normal, muted);
-    txt('Cliente', A4[0] - margin - sigW - 8, sigY - 14, 7.2, normal, muted);
-    const ownerSigLines = wrapText(company.owner_name || companyName, bold, 8.1, sigW).slice(0, 2);
-    const clientSigLines = wrapText(nomeCliente, bold, 8.1, sigW).slice(0, 2);
-    let ownerSigY = sigY - 28;
-    for (const l of ownerSigLines) { txt(l, margin + 8, ownerSigY, 8.1, bold, ink); ownerSigY -= 10; }
-    let clientSigY = sigY - 28;
-    for (const l of clientSigLines) { txt(l, A4[0] - margin - sigW - 8, clientSigY, 8.1, bold, ink); clientSigY -= 10; }
+    // Aceite: validade, responsável e duas linhas discretas, sempre na mesma página.
+    ensure(signatureH);
+    y -= 6;
+    page.drawLine({ start: { x: margin, y }, end: { x: right, y }, thickness: 0.6, color: line });
+    y -= 18;
+    if (quote.valid_until) { txt(`Validade da proposta: ${dateBR(quote.valid_until)}`, margin, y, 8.5, normal, muted); y -= 14; }
+    txt(fitText(`Responsável pela proposta: ${responsavel}`, normal, 8.5, contentW), margin, y, 8.5, normal, muted);
+    y -= 36;
+    const sigY = y;
+    page.drawLine({ start: { x: margin, y: sigY }, end: { x: margin + sigW, y: sigY }, thickness: 0.7, color: muted });
+    page.drawLine({ start: { x: right - sigW, y: sigY }, end: { x: right, y: sigY }, thickness: 0.7, color: muted });
+    txt('Responsável / empresa', margin, sigY - 12, 7.5, normal, muted);
+    txt('Cliente / aceite', right - sigW, sigY - 12, 7.5, normal, muted);
+    let ownerSigY = sigY - 24;
+    for (const l of linhasResponsavel) { txt(l, margin, ownerSigY, 8.5, bold, ink); ownerSigY -= 11; }
+    let clientSigY = sigY - 24;
+    for (const l of linhasAceite) { txt(l, right - sigW, clientSigY, 8.5, bold, ink); clientSigY -= 11; }
 
-    // Rodapé é desenhado por último e mantém largura reservada para paginação.
+    // Rodapé de todas as páginas: empresa e número à esquerda, paginação à direita. Sem logo.
     const pages = pdf.getPages();
     pages.forEach((targetPage, index) => {
-      targetPage.drawRectangle({ x: 0, y: 0, width: A4[0], height: FOOTER_H, color: navy });
-      const footerRight = `ZiisTec · ${index + 1}/${pages.length}`;
-      const footerWidth = normal.widthOfTextAtSize(footerRight, 6.8);
-      const infoMaxW = contentW - footerWidth - 24;
-      const info = fitText([company.tax_id, company.phone, company.whatsapp, company.email].filter(Boolean).join(' · '), normal, 6.8, infoMaxW);
-      targetPage.drawText(info, { x: margin, y: 13, size: 6.8, font: normal, color: rgb(0.78, 0.82, 0.86) });
-      targetPage.drawText(footerRight, { x: A4[0] - margin - footerWidth, y: 13, size: 6.8, font: normal, color: rgb(0.50, 0.58, 0.64) });
+      targetPage.drawLine({ start: { x: margin, y: 46 }, end: { x: right, y: 46 }, thickness: 0.5, color: line });
+      const footerRight = `Página ${index + 1} de ${pages.length}`;
+      const footerWidth = normal.widthOfTextAtSize(footerRight, 7);
+      const info = fitText(`${companyName} · Orçamento ${quote.number}`, normal, 7, contentW - footerWidth - 24);
+      targetPage.drawText(info, { x: margin, y: 32, size: 7, font: normal, color: muted });
+      targetPage.drawText(footerRight, { x: right - footerWidth, y: 32, size: 7, font: normal, color: muted });
     });
 
     const bytes = await pdf.save();

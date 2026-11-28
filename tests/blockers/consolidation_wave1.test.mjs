@@ -459,10 +459,15 @@ test('A3 · logo transparente continua PNG no relatório e no comprovante (JPEG 
 
 test('A3 · orçamento (servidor) e módulos de logo existentes seguem o mesmo contrato', () => {
   const quote = read('api/quote-pdf.js');
-  assert.match(quote, /import \{ LOGO_BOX, desenharLogoNaCaixa \} from '\.\.\/src\/lib\/pdfLogoBox\.js';/);
-  assert.match(quote, /const companyTextX = logo \? margin \+ LOGO_BOX\.textoX : margin;/);
-  assert.match(quote, /desenharLogoNaCaixa\(page, logo, \{ x: margin, yBase: A4\[1\] - headerH \/ 2 - LOGO_BOX\.height \/ 2 \}\)/);
-  assert.doesNotMatch(quote, /drawLogoFit\(page, logo, margin, A4\[1\] - 100, 128, 68, 1\)/);
+  // Redesign 2026-11: o orçamento usa o mesmo encaixe "contain" do módulo compartilhado, numa caixa
+  // própria do cabeçalho (90–120 × 45–60 pt), e a logo nunca vira fundo/marca-d'água.
+  assert.match(quote, /import \{ encaixarNaCaixa \} from '\.\.\/src\/lib\/pdfLogoBox\.js';/);
+  const caixa = quote.match(/const LOGO_CAIXA = \{ width: (\d+), height: (\d+) \};/);
+  assert.ok(caixa, 'caixa da logo declarada');
+  assert.ok(Number(caixa[1]) >= 90 && Number(caixa[1]) <= 120 && Number(caixa[2]) >= 45 && Number(caixa[2]) <= 60, 'caixa no tamanho pedido');
+  assert.match(quote, /const areaLogo = logo \? desenharContida\(logo, margin, topo - LOGO_CAIXA\.height, LOGO_CAIXA, false\) : null;/);
+  assert.equal((quote.match(/desenharContida\(logo,/g) || []).length, 1, 'a logo é desenhada uma única vez');
+  assert.doesNotMatch(quote, /drawPageWatermark|opacity|drawLogoFit/);
   assert.match(read('src/lib/reciboPdf.js'), /desenharLogoNaCaixa\(pagina, img, \{ x: margem, yBase \}\)/);
   const logoImage = read('src/lib/logoImage.js');
   assert.match(logoImage, /export async function prepararLogoTransparente/);

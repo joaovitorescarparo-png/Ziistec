@@ -70,8 +70,8 @@ async function gerarPdf(ajustes) {
   return [...desenhos];
 }
 
-// Faixa escura do TOTAL: 38pt de altura e 240pt de largura, ancorada na margem direita.
-const faixaTotal = (d) => d.find((x) => x.tipo === 'retangulo' && x.height === 38 && Math.round(x.width) === 240);
+// Destaque do TOTAL (redesign 2026-11): bloco azul-marinho de 36pt × 236pt, ancorado na margem direita.
+const faixaTotal = (d) => d.find((x) => x.tipo === 'retangulo' && x.height === 36 && Math.round(x.width) === 236);
 const texto = (d, valor) => d.find((x) => x.tipo === 'texto' && x.text === valor);
 const visivelAcimaDoTotal = (d, valor) => {
   const faixa = faixaTotal(d);
@@ -108,7 +108,13 @@ test('PDF do orçamento mantém subtotal, desconto e acréscimo visíveis acima 
   });
 
   await t.test('espaço entre o TOTAL e as condições não muda com ajustes', async () => {
+    // Condições só aparecem quando preenchidas (redesign): o teste informa as condições nos dois casos.
     const espaco = (d) => faixaTotal(d).y - texto(d, 'CONDIÇÕES DE PAGAMENTO').y;
-    assert.equal(espaco(await gerarPdf({ discount: 10, surcharge: 5 })), espaco(await gerarPdf({})));
+    const condicoes = { payment_terms: 'Pix na aprovação.' };
+    assert.equal(espaco(await gerarPdf({ discount: 10, surcharge: 5, ...condicoes })), espaco(await gerarPdf(condicoes)));
+  });
+
+  await t.test('sem condições preenchidas, o bloco de condições não aparece', async () => {
+    assert.equal(texto(await gerarPdf({}), 'CONDIÇÕES DE PAGAMENTO'), undefined);
   });
 });

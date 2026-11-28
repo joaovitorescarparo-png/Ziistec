@@ -90,37 +90,33 @@ for (const marker of [
   'zt-branding',
   'ORÇAMENTO',
   'CONDIÇÕES DE PAGAMENTO',
-  'const sigW = 190',
+  'const sigW = 210',
   'company.owner_name',
-  'ZiisTec ·',
+  'Página ${index + 1} de ${pages.length}',
   'const txtRight =',
-  'Tabela com grade visual consistente e números alinhados pela direita.',
-  'qtyRight',
+  'Tabela com grade visual consistente e números alinhados pela direita',
+  'qtyCenter',
   'unitRight',
   'totalRight',
   'SAFE_BOTTOM',
   'shouldBreakPdfBlock(y,rowH,SAFE_BOTTOM,12)',
-  'shouldBreakPdfBlock(y,signatureH,SAFE_BOTTOM)',
-  'ensure(infoCardH+closingGapH+signatureH)',
-  'Card inferior com altura dinâmica e sem cruzar a área de assinatura.',
-  "Marca-d'água ampla e suave por trás do conteúdo.",
-  'drawPageWatermark();',
-  'const wmW = 390',
-  'const wmH = 280',
-  // Onda 1 · A3: a logo do cabeçalho usa a caixa padrão compartilhada (src/lib/pdfLogoBox.js); a marca-d'água segue em drawLogoFit.
-  'desenharLogoNaCaixa(page, logo, { x: margin, yBase: A4[1] - headerH / 2 - LOGO_BOX.height / 2 })',
+  'ensure(signatureH)',
+  'canKeepClosingTogether(restanteH,A4[1]-74,SAFE_BOTTOM)',
+  // Redesign 2026-11: logo só no cabeçalho, em caixa "contain" do módulo compartilhado (src/lib/pdfLogoBox.js).
+  'const LOGO_CAIXA = { width: 112, height: 52 };',
+  'const areaLogo = logo ? desenharContida(logo, margin, topo - LOGO_CAIXA.height, LOGO_CAIXA, false) : null;',
 ]) {
   if (!pdf.includes(marker)) fail(`PDF premium perdeu marcador: ${marker}`);
 }
 if (!/company\.owner_name\s*\|\|\s*['"]Responsável['"]/.test(pdf) && !pdf.includes('Responsável')) fail('PDF perdeu o responsável da assinatura');
 else ok('PDF mantém responsável na área de assinatura');
-if (pdf.includes('const watermarkBandH =')) fail('PDF voltou a limitar a marca-d’água apenas às linhas vazias');
-else ok('PDF usa marca-d’água ampla por trás do conteúdo, desenhada antes dos textos');
+if (/drawPageWatermark|opacity|wmW|watermark/i.test(pdf)) fail('PDF voltou a usar a logo como fundo/marca-d’água');
+else ok('PDF sem marca-d’água: a logo aparece só no cabeçalho, contida na caixa');
 if (pdf.includes('const minVisibleRows =') || pdf.includes('while (fillerRows > 0')) fail('PDF reintroduziu linhas artificiais que antecipam a paginação');
 else ok('PDF one-page-first não inventa linhas para ocupar espaço');
 if (pdf.includes('SAFE_BOTTOM + 205')) fail('PDF reintroduziu reserva fixa excessiva de fechamento');
 else ok('PDF usa altura medida em vez de reserva fixa de 205px');
-if (!pdf.includes('shouldBreakPdfBlock(y,signatureH,SAFE_BOTTOM)')) fail('PDF perdeu a proteção medida das assinaturas contra o rodapé');
+if (!/ensure\(signatureH\)|shouldBreakPdfBlock\(y,signatureH,SAFE_BOTTOM\)/.test(pdf) || !/const signatureH = /.test(pdf)) fail('PDF perdeu a proteção medida das assinaturas contra o rodapé');
 else ok('Assinaturas respeitam zona segura por cálculo de altura');
 if ((pdf.match(/page\.drawLine\(\{ start:/g) || []).length < 2) fail('PDF premium perdeu as linhas de assinatura/estrutura visual');
 else ok('PDF premium mantém áreas de assinatura para responsável e cliente');

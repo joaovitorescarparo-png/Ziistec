@@ -23,8 +23,10 @@ test('F long commercial message is not silently truncated', () => {
 
 test('G warranties are not capped and are paginated with ensure guards', () => {
   assert.doesNotMatch(pdf, /warrantyLines[\s\S]{0,200}slice\(0,8\)/);
-  assert.match(pdf, /for\(const lineText of warrantyLines\)/);
-  assert.match(pdf, /ensure\(15\)/);
+  assert.doesNotMatch(pdf, /garantias[\s\S]{0,200}slice\(0,8\)/);
+  // Redesign: cada garantia é um par (item, prazo); a lista pagina com cabeçalho de continuação.
+  assert.match(pdf, /for\(const garantia of garantias\)/);
+  assert.match(pdf, /if \(y - entradaH < SAFE_BOTTOM\) \{ newPage\(true\); rotulo\('GARANTIA · CONTINUAÇÃO'/);
 });
 
 test('item rows use measured break logic without fixed 205px reserve or filler rows', () => {
